@@ -15,6 +15,7 @@ from ceminidfs.data.vegas import enrich_schedules_with_vegas
 from ceminidfs.models.scoring import fantasy_points_from_stats
 from ceminidfs.models.usage import player_game_stats_from_pbp
 from ceminidfs.pipeline.engine import build_diy_projections_from_frames, load_week_artifacts, normalize_join_key
+from ceminidfs.pipeline.metrics import accuracy_metrics
 
 
 @dataclass
@@ -203,14 +204,14 @@ def backtest_week(
     if merged.empty:
         return empty, pd.DataFrame()
 
-    errors = merged["fd_projection"] - merged["fd_actual"]
+    metrics = accuracy_metrics(merged["fd_projection"], merged["fd_actual"])
     result = WeekBacktestResult(
         season,
         week,
         len(merged),
-        float(errors.abs().mean()),
-        float((errors**2).mean()) ** 0.5,
-        _spearman(merged["fd_projection"], merged["fd_actual"]),
+        metrics["mae"],
+        metrics["rmse"],
+        metrics["spearman"],
     )
     return result, merged[["fd_projection", "fd_actual"]]
 
@@ -247,9 +248,10 @@ def run_backtest(
     if all_errors:
         series = pd.Series(all_errors)
         summary.n_player_weeks = len(series)
-        summary.mae_fd = float(series.abs().mean())
-        summary.rmse_fd = float((series**2).mean()) ** 0.5
-        summary.spearman_fd = _spearman(all_proj, all_actual)
+        overall = accuracy_metrics(all_proj, all_actual)
+        summary.mae_fd = overall["mae"]
+        summary.rmse_fd = overall["rmse"]
+        summary.spearman_fd = overall["spearman"]
     return summary
 
 
@@ -297,15 +299,6 @@ def _teams_in_vegas(vegas: pd.DataFrame) -> set[str]:
     teams = set(vegas.get("home_team", pd.Series(dtype=str)).astype(str))
     teams.update(vegas.get("away_team", pd.Series(dtype=str)).astype(str))
     return {team for team in teams if team and team != "nan"}
-
-
-def _spearman(x: list[float] | pd.Series, y: list[float] | pd.Series) -> float:
-    left = pd.Series(x).rank()
-    right = pd.Series(y).rank()
-    if len(left) < 2:
-        return 0.0
-    value = left.corr(right)
-    return 0.0 if pd.isna(value) else float(value)
 
 
 def _aggregate_passing(pbp: pd.DataFrame, upsert) -> None:

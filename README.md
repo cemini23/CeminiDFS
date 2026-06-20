@@ -52,6 +52,8 @@ fetch → project → normalize → optimize
 | `normalize` | `ceminidfs normalize --in FILE --out FILE --site fanduel` | pydfs importer CSV |
 | `optimize` | `ceminidfs optimize --csv FILE --out FILE` | Lineup CSV |
 | `backtest` | `ceminidfs backtest --season YYYY --start-week N --end-week M` | JSON accuracy report (MAE/RMSE/Spearman) |
+| `benchmark load` | `ceminidfs benchmark load --csv FILE --out snapshot.json` | Parse Stokastic/Labs export to versioned JSON |
+| `benchmark compare` | `ceminidfs benchmark compare --season YYYY --week N --csv FILE` | Benchmark vs actuals (+ DIY side-by-side) |
 
 Run all stages: `ceminidfs run --season 2024 --week 1 --salary FILE --stages all`
 
@@ -60,6 +62,9 @@ Historical accuracy (no salary CSV required):
 ```bash
 ceminidfs fetch --season 2024 --week 1   # populates season PBP cache
 ceminidfs backtest --season 2024 --start-week 5 --end-week 10 --out reports/backtest_2024_w5-10.json
+
+# Compare a manual Stokastic/Labs export against realized points
+ceminidfs benchmark compare --season 2024 --week 5 --csv path/to/stokastic-export.csv
 ```
 
 ## Configuration

@@ -32,6 +32,20 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     write_backtest_report = None  # type: ignore[assignment]
     format_backtest_summary = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.data.benchmark import parse_benchmark_csv, write_benchmark_snapshot
+    from ceminidfs.pipeline.benchmark_compare import (
+        compare_benchmark_week,
+        format_benchmark_compare,
+        write_benchmark_compare_report,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    parse_benchmark_csv = None  # type: ignore[assignment]
+    write_benchmark_snapshot = None  # type: ignore[assignment]
+    compare_benchmark_week = None  # type: ignore[assignment]
+    write_benchmark_compare_report = None  # type: ignore[assignment]
+    format_benchmark_compare = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -113,6 +127,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON report path (default: reports/backtest.json)",
     )
     backtest.set_defaults(handler=_cmd_backtest)
+
+    benchmark = subparsers.add_parser("benchmark", help="Paid projection benchmark tools")
+    benchmark_sub = benchmark.add_subparsers(dest="benchmark_command")
+
+    benchmark_load = benchmark_sub.add_parser("load", help="Parse a Stokastic/Labs CSV into a snapshot JSON")
+    benchmark_load.add_argument("--csv", dest="csv_path", type=Path, required=True)
+    benchmark_load.add_argument("--out", dest="output_path", type=Path, required=True)
+    benchmark_load.add_argument("--season", type=int)
+    benchmark_load.add_argument("--week", type=int)
+    benchmark_load.add_argument("--site", default="fanduel")
+    benchmark_load.add_argument("--source", help="stokastic, fantasylabs, etr, or generic")
+    benchmark_load.set_defaults(handler=_cmd_benchmark_load)
+
+    benchmark_compare = benchmark_sub.add_parser(
+        "compare",
+        help="Compare paid projections vs actuals (and optional DIY model)",
+    )
+    benchmark_compare.add_argument("--season", type=int, required=True)
+    benchmark_compare.add_argument("--week", type=int, required=True)
+    benchmark_compare.add_argument("--csv", dest="csv_path", type=Path, required=True)
+    benchmark_compare.add_argument("--site", default="fanduel")
+    benchmark_compare.add_argument("--source")
+    benchmark_compare.add_argument(
+        "--no-diy",
+        action="store_true",
+        help="Skip DIY model comparison (benchmark vs actuals only)",
+    )
+    benchmark_compare.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=Path("reports/benchmark_compare.json"),
+    )
+    benchmark_compare.set_defaults(handler=_cmd_benchmark_compare)
 
     return parser
 
@@ -196,5 +244,39 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     summary = run_backtest(args.season, args.start_week, args.end_week, config=config)
     report_path = write_backtest_report(summary, args.output_path)
     print(format_backtest_summary(summary))
+    print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_benchmark_load(args: argparse.Namespace) -> int:
+    if parse_benchmark_csv is None or write_benchmark_snapshot is None:
+        raise RuntimeError("Benchmark load unavailable: ceminidfs.data.benchmark import failed")
+    rows = parse_benchmark_csv(
+        args.csv_path,
+        site=args.site,
+        source=args.source,
+        season=args.season,
+        week=args.week,
+    )
+    output = write_benchmark_snapshot(rows, args.output_path)
+    print(f"Loaded {len(rows)} benchmark rows → {output}")
+    return 0
+
+
+def _cmd_benchmark_compare(args: argparse.Namespace) -> int:
+    if compare_benchmark_week is None or write_benchmark_compare_report is None or format_benchmark_compare is None:
+        raise RuntimeError("Benchmark compare unavailable: ceminidfs.pipeline.benchmark_compare import failed")
+    config = runtime_config()
+    result = compare_benchmark_week(
+        args.season,
+        args.week,
+        args.csv_path,
+        site=args.site,
+        source=args.source,
+        include_diy=not args.no_diy,
+        config=config,
+    )
+    report_path = write_benchmark_compare_report(result, args.output_path)
+    print(format_benchmark_compare(result))
     print(f"\nReport: {report_path}")
     return 0

@@ -87,7 +87,7 @@ fetch → project → [sim v2] → normalize → optimize
 | Track | Deliverable |
 |-------|-------------|
 | P4-A | `pipeline/backtest.py` — walk-forward, MAE/RMSE/Spearman | done |
-| P4-B | Paid CSV benchmark loader (Stokastic/Labs manual export) |
+| P4-B | Paid CSV benchmark loader (Stokastic/Labs manual export) | done |
 | P4-C | Calibration report → wiki brief |
 
 ### Phase 5 — v2 distribution (future)
