@@ -25,6 +25,13 @@ try:
 except ImportError:  # pragma: no cover - defensive for partial installs
     write_salary_canonical = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.pipeline.backtest import format_backtest_summary, run_backtest, write_backtest_report
+except ImportError:  # pragma: no cover - defensive for partial installs
+    run_backtest = None  # type: ignore[assignment]
+    write_backtest_report = None  # type: ignore[assignment]
+    format_backtest_summary = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -93,6 +100,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow fetch stage to write stub artifacts when data deps are missing",
     )
     run.set_defaults(handler=_cmd_run)
+
+    backtest = subparsers.add_parser("backtest", help="Walk-forward projection accuracy backtest")
+    backtest.add_argument("--season", type=int, required=True)
+    backtest.add_argument("--start-week", type=int, required=True)
+    backtest.add_argument("--end-week", type=int, required=True)
+    backtest.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=Path("reports/backtest.json"),
+        help="JSON report path (default: reports/backtest.json)",
+    )
+    backtest.set_defaults(handler=_cmd_backtest)
 
     return parser
 
@@ -166,4 +186,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         config=config,
     )
     print(manifest)
+    return 0
+
+
+def _cmd_backtest(args: argparse.Namespace) -> int:
+    if run_backtest is None or write_backtest_report is None or format_backtest_summary is None:
+        raise RuntimeError("Backtest unavailable: ceminidfs.pipeline.backtest import failed")
+    config = runtime_config()
+    summary = run_backtest(args.season, args.start_week, args.end_week, config=config)
+    report_path = write_backtest_report(summary, args.output_path)
+    print(format_backtest_summary(summary))
+    print(f"\nReport: {report_path}")
     return 0

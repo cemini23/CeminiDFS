@@ -16,7 +16,7 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.
 | **1** | Data backbone — nflverse fetch, Vegas, weather, salary ingest | In progress |
 | **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
 | **3** | End-to-end lineup generation on DIY projections | Partial (export layer done) |
-| **4** | Backtest + calibration vs paid benchmarks | Planned |
+| **4** | Backtest + calibration vs paid benchmarks | P4-A complete (walk-forward CLI) |
 
 See [PLAN.md](PLAN.md) for the full roadmap.
 
@@ -51,8 +51,16 @@ fetch → project → normalize → optimize
 | `salary` | `ceminidfs salary --season YYYY --week N --salary FILE --out FILE` | Canonical CSV from salary only (no projections) |
 | `normalize` | `ceminidfs normalize --in FILE --out FILE --site fanduel` | pydfs importer CSV |
 | `optimize` | `ceminidfs optimize --csv FILE --out FILE` | Lineup CSV |
+| `backtest` | `ceminidfs backtest --season YYYY --start-week N --end-week M` | JSON accuracy report (MAE/RMSE/Spearman) |
 
 Run all stages: `ceminidfs run --season 2024 --week 1 --salary FILE --stages all`
+
+Historical accuracy (no salary CSV required):
+
+```bash
+ceminidfs fetch --season 2024 --week 1   # populates season PBP cache
+ceminidfs backtest --season 2024 --start-week 5 --end-week 10 --out reports/backtest_2024_w5-10.json
+```
 
 ## Configuration
 

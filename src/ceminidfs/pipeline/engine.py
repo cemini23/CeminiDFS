@@ -63,23 +63,49 @@ def build_diy_projections(
 ) -> pd.DataFrame:
     """Build scored player projections from cached weekly artifacts."""
 
-    _ = config
     vegas, pbp, weather = load_week_artifacts(season, week)
     if vegas.empty or pbp.empty:
         raise FileNotFoundError(
             f"Missing cached vegas/pbp artifacts for {season} week {week}; run fetch first."
         )
 
-    volume_df = build_week_volume(vegas, pbp, weather, season=season, week=week)
+    roster = _align_roster_to_pbp_ids(salary_rows_to_roster(salary_rows), pbp, season=season, week=week)
+    return build_diy_projections_from_frames(
+        season,
+        week,
+        pbp,
+        vegas,
+        weather,
+        roster,
+        config=config,
+    )
+
+
+def build_diy_projections_from_frames(
+    season: int,
+    week: int,
+    pbp: pd.DataFrame,
+    vegas: pd.DataFrame,
+    weather: pd.DataFrame | None,
+    roster: pd.DataFrame,
+    config: Mapping[str, Any] | None = None,
+) -> pd.DataFrame:
+    """Build scored projections from in-memory weekly frames (backtest-safe)."""
+
+    _ = config
+    historical_pbp = _historical_pbp(pbp, season, week)
+    if vegas.empty or historical_pbp.empty:
+        raise ValueError(f"Missing vegas or historical PBP for {season} week {week}")
+
+    volume_df = build_week_volume(vegas, historical_pbp, weather, season=season, week=week)
     if volume_df.empty:
         raise ValueError(f"No team volume projections built for {season} week {week}")
 
-    roster = _align_roster_to_pbp_ids(salary_rows_to_roster(salary_rows), pbp, season=season, week=week)
-    usage_df = build_week_usage(volume_df, pbp, season=season, week=week, roster=roster)
+    usage_df = build_week_usage(volume_df, historical_pbp, season=season, week=week, roster=roster)
     if usage_df.empty:
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
-    stats_df = build_week_stats(usage_df, pbp, season=season, week=week)
+    stats_df = build_week_stats(usage_df, historical_pbp, season=season, week=week)
     if stats_df.empty:
         raise ValueError(f"No player stat projections built for {season} week {week}")
 
@@ -117,6 +143,17 @@ def merge_projections_into_canonical(
             mapped["dk_projection"] = projection.get("dk_projection", "")
         merged.append(mapped)
     return merged
+
+
+def _historical_pbp(pbp: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
+    if pbp.empty:
+        return pbp
+    frame = pbp.copy()
+    if "season" in frame.columns:
+        frame = frame.loc[pd.to_numeric(frame["season"], errors="coerce").fillna(season) == season]
+    if "week" in frame.columns:
+        frame = frame.loc[pd.to_numeric(frame["week"], errors="coerce") < week]
+    return frame
 
 
 def _read_parquet_if_exists(path: Path) -> pd.DataFrame:
