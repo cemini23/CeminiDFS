@@ -17,6 +17,7 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.
 | **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
 | **3** | End-to-end lineup generation on DIY projections | Complete |
 | **4** | Backtest + calibration vs paid benchmarks | Complete (P4-A/B/C) |
+| **5** | Simulation, ownership, and late-swap v1 | Complete (P5-A/B/C) |
 
 See [PLAN.md](PLAN.md) for the full roadmap.
 
@@ -51,6 +52,7 @@ fetch → project → normalize → optimize
 | `salary` | `ceminidfs salary --season YYYY --week N --salary FILE --out FILE` | Canonical CSV from salary only (no projections) |
 | `normalize` | `ceminidfs normalize --in FILE --out FILE --site fanduel` | pydfs importer CSV |
 | `optimize` | `ceminidfs optimize --csv FILE --out FILE` | Lineup CSV |
+| `late-swap` | `ceminidfs late-swap --lineups FILE --players FILE --lock-team KC --out FILE` | Re-optimized lineups with locked-team players preserved |
 | `backtest` | `ceminidfs backtest --season YYYY --start-week N --end-week M` | JSON accuracy report (MAE/RMSE/Spearman) |
 | `benchmark load` | `ceminidfs benchmark load --csv FILE --out snapshot.json` | Parse Stokastic/Labs export to versioned JSON |
 | `benchmark compare` | `ceminidfs benchmark compare --season YYYY --week N --csv FILE` | Benchmark vs actuals (+ DIY side-by-side) |
@@ -83,6 +85,15 @@ ceminidfs calibrate --season 2024 --start-week 5 --end-week 10 --benchmark-csv p
 - `auto` (default): use cached DIY projections when `fetch` artifacts exist, otherwise fall back to salary-export FPPG.
 - `diy`: require cached `vegas.parquet` and `pbp.parquet`; run `ceminidfs fetch --season YYYY --week N` before `project`.
 - `fppg`: use salary-export FPPG placeholders.
+
+Optional v2 layers in `config/nfl_dfs.yaml` (default off):
+
+```yaml
+simulate:
+  enabled: true   # adds Projection Floor / Projection Ceil to canonical CSV
+ownership:
+  enabled: true   # adds Projected Ownership column
+```
 
 **Secrets:** Never commit `.env`. API keys (`ODDS_API_KEY`, etc.) are optional and loaded only from your local environment.
 

@@ -7,6 +7,8 @@ import pandas as pd
 
 from ceminidfs.data.salary import apply_salary_fppg_placeholder, parse_salary_csv
 from ceminidfs.export.canonical import write_canonical_csv
+from ceminidfs.models.simulate import add_simulation_columns
+from ceminidfs.models.ownership import project_ownership
 from ceminidfs.pipeline.engine import build_diy_projections, merge_projections_into_canonical
 
 
@@ -48,8 +50,28 @@ def project_week(
                 raise
             rows = apply_salary_fppg_placeholder(rows, site or _site_from_rows(rows))
 
+    if _simulation_enabled(cfg):
+        rows = _add_simulation_to_rows(rows, cfg)
+
+    if _ownership_enabled(cfg):
+        rows = project_ownership(rows, site or _site_from_rows(rows))
+
     write_canonical_csv(rows, output_path)
     return output_path
+
+
+def _ownership_enabled(config: Mapping[str, Any]) -> bool:
+    ownership_cfg = config.get("ownership", {})
+    ownership_enabled = (
+        bool(ownership_cfg.get("enabled")) if isinstance(ownership_cfg, Mapping) else False
+    )
+    return ownership_enabled or bool(config.get("project_ownership"))
+
+
+def _simulation_enabled(config: Mapping[str, Any]) -> bool:
+    simulate_cfg = config.get("simulate", {})
+    simulate_enabled = bool(simulate_cfg.get("enabled")) if isinstance(simulate_cfg, Mapping) else False
+    return simulate_enabled or bool(config.get("run_simulation"))
 
 
 def _site_from_rows(rows: list[dict[str, Any]]) -> str:
@@ -84,6 +106,46 @@ def _is_empty_projection(value: Any) -> bool:
         return True
     numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     return bool(pd.isna(numeric) or float(numeric) == 0.0)
+
+
+def _add_simulation_to_rows(
+    rows: list[dict[str, Any]],
+    config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if _is_empty_projection(row.get("fd_projection")):
+            continue
+        candidates.append(
+            {
+                "_row_index": index,
+                "player_id": row.get("fd_id") or row.get("dk_id") or row.get("player_key") or index,
+                "fd_projection": row.get("fd_projection"),
+                "team": row.get("team", ""),
+                "position": row.get("fd_position") or row.get("dk_position") or row.get("position", ""),
+            }
+        )
+
+    merged = [dict(row) for row in rows]
+    if not candidates:
+        return merged
+
+    simulate_cfg = config.get("simulate", {})
+    if not isinstance(simulate_cfg, Mapping):
+        simulate_cfg = {}
+    n_iterations = int(simulate_cfg.get("n_iterations", config.get("simulation_iterations", 5000)))
+    seed = simulate_cfg.get("seed", config.get("simulation_seed"))
+
+    simulated = add_simulation_columns(
+        pd.DataFrame(candidates),
+        n_iterations=n_iterations,
+        seed=int(seed) if seed is not None else None,
+    )
+    for _, row in simulated.iterrows():
+        index = int(row["_row_index"])
+        merged[index]["Projection Floor"] = row["Projection Floor"]
+        merged[index]["Projection Ceil"] = row["Projection Ceil"]
+    return merged
 
 
 def _write_projection_base(stats_df: pd.DataFrame, config: Mapping[str, Any]) -> Path:

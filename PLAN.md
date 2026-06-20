@@ -90,11 +90,13 @@ fetch → project → [sim v2] → normalize → optimize
 | P4-B | Paid CSV benchmark loader (Stokastic/Labs manual export) | done |
 | P4-C | Calibration report → wiki brief | done |
 
-### Phase 5 — v2 distribution (future)
+### Phase 5 — v2 distribution ✅ v1 complete
 
-- Monte Carlo + copula (`models/simulate.py`)
-- Ownership model (`models/ownership.py`)
-- Late swap (`export/late_swap.py`)
+| Track | Deliverable | Status |
+|-------|-------------|--------|
+| P5-A | Monte Carlo + copula-lite (`models/simulate.py`) | done (v1) |
+| P5-B | Ownership model (`models/ownership.py`) | done (v1) |
+| P5-C | Late swap (`export/late_swap.py`) | done (v1) |
 
 ## Canonical CSV schema
 
@@ -157,4 +159,4 @@ CeminiDFS/
 
 **Current workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
 
-**Active:** Phase 3 complete — pipeline now projects, normalizes, optimizes, validates 150 lineups, and records lineup/projection metadata in the manifest.
+**Active:** Phase 5 v1 complete — simulate, ownership, late-swap. Full v1 pipeline: fetch → project → normalize → optimize (+ backtest/calibrate).

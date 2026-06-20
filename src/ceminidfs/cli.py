@@ -59,6 +59,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     write_calibration_json = None  # type: ignore[assignment]
     render_calibration_brief = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.export.late_swap import late_swap_lineups
+except ImportError:  # pragma: no cover - defensive for partial installs
+    late_swap_lineups = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -109,6 +114,20 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--count", type=int, default=150)
     optimize.add_argument("--site", default="fanduel")
     optimize.set_defaults(handler=_cmd_optimize)
+
+    late_swap = subparsers.add_parser("late-swap", help="Late-swap existing lineups after teams lock")
+    late_swap.add_argument("--lineups", dest="lineups_path", type=Path, required=True)
+    late_swap.add_argument("--players", dest="players_path", type=Path, required=True)
+    late_swap.add_argument(
+        "--lock-team",
+        action="append",
+        default=[],
+        help="Locked team abbreviation; repeatable",
+    )
+    late_swap.add_argument("--out", dest="output_path", type=Path)
+    late_swap.add_argument("--site", default="fanduel")
+    late_swap.add_argument("--count", type=int, default=None)
+    late_swap.set_defaults(handler=_cmd_late_swap)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
     run.add_argument("--season", type=int, required=True)
@@ -193,7 +212,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("reports/calibration.json"),
         help="Structured JSON report path (default: reports/calibration.json)",
     )
-    calibrate.add_argument("--benchmark-csv", dest="benchmark_csv", type=Path, help="Optional paid export for one week")
+    calibrate.add_argument(
+        "--benchmark-csv",
+        dest="benchmark_csv",
+        type=Path,
+        help="Optional paid export for one week",
+    )
     calibrate.add_argument(
         "--benchmark-week",
         type=int,
@@ -254,6 +278,24 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
     config = runtime_config(site=args.site, count=args.count)
     output = _run_optimize(args.csv_path, args.output_path, args.count, config)
     print(output)
+    return 0
+
+
+def _cmd_late_swap(args: argparse.Namespace) -> int:
+    if late_swap_lineups is None:
+        raise RuntimeError("Late swap unavailable: ceminidfs.export.late_swap import failed")
+    output_path = args.output_path or args.lineups_path.with_name(
+        f"{args.lineups_path.stem}_late_swap.csv"
+    )
+    late_swap_lineups(
+        args.lineups_path,
+        args.players_path,
+        set(args.lock_team),
+        output_path,
+        site=args.site,
+        count=args.count,
+    )
+    print(output_path)
     return 0
 
 
