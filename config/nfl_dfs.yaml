@@ -18,3 +18,10 @@ volume:
 usage:
   share_weights: [0.5, 0.3, 0.2]
   l3_window: 3
+stats:
+  shrinkage:
+    ypa: 250
+    ypc: 250
+    catch_rate: 80
+    adot: 40
+    td_target: 80

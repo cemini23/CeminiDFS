@@ -65,7 +65,7 @@ fetch → project → [sim v2] → normalize → optimize
 |-------|-------------|--------|
 | P2-A | `models/volume.py` — team plays from ITT + pace prior | done |
 | P2-B | `models/usage.py` — target/carry/snap shares from rolling PBP | done |
-| P2-C | `models/stats.py` — efficiency regressions → counting stats | pending |
+| P2-C | `models/stats.py` — efficiency regressions → counting stats | done |
 | P2-D | `models/scoring.py` — integrate bonuses, emit fd/dk columns | pending |
 | P2-E | `pipeline/project.py` — wire layers → `player_projection_base.parquet` | pending |
 
