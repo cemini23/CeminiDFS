@@ -64,7 +64,7 @@ fetch → project → [sim v2] → normalize → optimize
 | Track | Deliverable | Status |
 |-------|-------------|--------|
 | P2-A | `models/volume.py` — team plays from ITT + pace prior | done |
-| P2-B | `models/usage.py` — target/carry/snap shares from rolling PBP | next |
+| P2-B | `models/usage.py` — target/carry/snap shares from rolling PBP | done |
 | P2-C | `models/stats.py` — efficiency regressions → counting stats | pending |
 | P2-D | `models/scoring.py` — integrate bonuses, emit fd/dk columns | pending |
 | P2-E | `pipeline/project.py` — wire layers → `player_projection_base.parquet` | pending |
@@ -157,4 +157,4 @@ CeminiDFS/
 
 **Current workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
 
-**Active:** Phase 2-A complete — team volume module. Phase 2 projection engine in progress.
+**Active:** Phase 2-B complete — player usage module. Phase 2 projection engine in progress.

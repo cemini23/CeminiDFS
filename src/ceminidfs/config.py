@@ -23,6 +23,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "sack_rate": 0.06,
         "scramble_rate": 0.08,
     },
+    "usage": {
+        "share_weights": [0.5, 0.3, 0.2],
+        "l3_window": 3,
+    },
 }
 
 
