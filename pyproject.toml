@@ -21,6 +21,7 @@ classifiers = [
     "Topic :: Games/Entertainment",
 ]
 dependencies = [
+    "numpy>=1.24",
     "pandas>=2.0",
     "pyyaml>=6.0",
 ]

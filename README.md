@@ -17,7 +17,7 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.
 | **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
 | **3** | End-to-end lineup generation on DIY projections | Complete |
 | **4** | Backtest + calibration vs paid benchmarks | Complete (P4-A/B/C) |
-| **5** | Simulation, ownership, and late-swap v1 | Complete (P5-A/B/C) |
+| **5** | Simulation, ownership, late-swap, copula, sim rerank | Complete (v1 + v2) |
 
 See [PLAN.md](PLAN.md) for the full roadmap.
 
@@ -60,6 +60,13 @@ fetch → project → normalize → optimize
 
 Run all stages: `ceminidfs run --season 2024 --week 1 --salary FILE --stages all`
 
+Simulation rerank generates a larger pydfs candidate pool, scores each lineup against simulated player outcomes, and writes the top final lineups:
+
+```bash
+ceminidfs run --season 2024 --week 1 --salary FILE --stages all --sim-rerank --candidates 2000 --final-count 150
+ceminidfs optimize --csv runs/2024_week_1/normalized_players.csv --out runs/2024_week_1/lineups.csv --sim-rerank
+```
+
 Historical accuracy (no salary CSV required):
 
 ```bash
@@ -90,9 +97,22 @@ Optional v2 layers in `config/nfl_dfs.yaml` (default off):
 
 ```yaml
 simulate:
-  enabled: true   # adds Projection Floor / Projection Ceil to canonical CSV
+  enabled: true
+  method: copula      # or team_shock (v1 default)
+sim_rerank:
+  enabled: true
+  candidates: 2000
+  final_count: 150
 ownership:
-  enabled: true   # adds Projected Ownership column
+  enabled: true
+  calibration_path: artifacts/ownership_calibration.json  # optional
+```
+
+Calibrate ownership from a Stokastic/Labs export:
+
+```bash
+ceminidfs ownership calibrate --labels path/to/export.csv --salary path/to/salary.csv \
+  --season 2024 --week 5 --out artifacts/ownership_calibration.json
 ```
 
 **Secrets:** Never commit `.env`. API keys (`ODDS_API_KEY`, etc.) are optional and loaded only from your local environment.

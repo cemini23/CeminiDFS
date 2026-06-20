@@ -62,9 +62,8 @@ def _lineup_row(players: list[Any], header: list[str]) -> list[str]:
     return row
 
 
-def optimize_lineups(
+def generate_lineups(
     csv_path: str | Path,
-    out_path: str | Path,
     site: str = "fanduel",
     count: int = 150,
     *,
@@ -72,12 +71,11 @@ def optimize_lineups(
     max_exposure: float | None = 0.35,
     stacks: list[str] | None = None,
     max_repeating_players: int | None = 7,
-) -> int:
-    """Optimize lineups from a pydfs CSV and return the number written."""
+) -> list[Any]:
+    """Generate pydfs lineup objects without writing them."""
 
     site_key = normalize_site(site)
     csv_file = Path(csv_path)
-    out_file = Path(out_path)
     if not csv_file.is_file():
         raise FileNotFoundError(f"CSV not found: {csv_file}")
 
@@ -109,16 +107,54 @@ def optimize_lineups(
     lineups = list(optimizer.optimize(n=count, max_exposure=max_exposure or None))
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
+    return lineups
 
+
+def lineup_to_row(lineup: Any, site: str = "fanduel") -> list[str]:
+    """Convert a pydfs lineup object to the CeminiDFS lineup CSV row format."""
+
+    site_key = normalize_site(site)
+    return _lineup_row(lineup.players, LINEUP_HEADERS[site_key])
+
+
+def write_lineup_rows(rows: list[list[str]], out_path: str | Path, site: str = "fanduel") -> int:
+    """Write lineup rows using the standard site header and return row count."""
+
+    site_key = normalize_site(site)
+    out_file = Path(out_path)
     header = LINEUP_HEADERS[site_key]
     out_file.parent.mkdir(parents=True, exist_ok=True)
     with out_file.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for lineup in lineups:
-            writer.writerow(_lineup_row(lineup.players, header))
+        writer.writerows(rows)
+    return len(rows)
 
-    return len(lineups)
+
+def optimize_lineups(
+    csv_path: str | Path,
+    out_path: str | Path,
+    site: str = "fanduel",
+    count: int = 150,
+    *,
+    min_salary: int | None = None,
+    max_exposure: float | None = 0.35,
+    stacks: list[str] | None = None,
+    max_repeating_players: int | None = 7,
+) -> int:
+    """Optimize lineups from a pydfs CSV and return the number written."""
+
+    site_key = normalize_site(site)
+    lineups = generate_lineups(
+        csv_path,
+        site=site_key,
+        count=count,
+        min_salary=min_salary,
+        max_exposure=max_exposure,
+        stacks=stacks,
+        max_repeating_players=max_repeating_players,
+    )
+    return write_lineup_rows([lineup_to_row(lineup, site_key) for lineup in lineups], out_path, site_key)
 
 
 def _relax_tiny_slate_limits(optimizer: Any, site_key: str) -> None:

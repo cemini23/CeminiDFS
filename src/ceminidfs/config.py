@@ -27,6 +27,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "share_weights": [0.5, 0.3, 0.2],
         "l3_window": 3,
     },
+    "sim_rerank": {
+        "enabled": False,
+        "candidates": 2000,
+        "final_count": 150,
+    },
 }
 
 

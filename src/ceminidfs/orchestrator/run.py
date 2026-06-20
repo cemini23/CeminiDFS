@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+import pandas as pd
+
 from ceminidfs.manifest import RunManifest, config_sha256, git_commit
 from ceminidfs.orchestrator.validate import validate_lineups_csv
 
@@ -174,6 +176,22 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
     from ceminidfs.export.optimize import optimize_lineups
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if _sim_rerank_enabled(config):
+        from ceminidfs.export.sim_rerank import optimize_with_sim_rerank
+
+        rerank_cfg = _sim_rerank_config(config)
+        sim_matrix, player_index = _load_or_build_sim_rerank_inputs(input_path, config)
+        optimize_with_sim_rerank(
+            csv_path=input_path,
+            out_path=output_path,
+            sim_matrix=sim_matrix,
+            player_index=player_index,
+            candidates=int(rerank_cfg.get("candidates", config.get("candidates", 2000))),
+            final=int(rerank_cfg.get("final_count", config.get("final_count", count))),
+            site=str(config.get("site", "fanduel")),
+        )
+        return output_path
+
     optimize_lineups(
         csv_path=input_path,
         out_path=output_path,
@@ -181,6 +199,129 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
         count=count,
     )
     return output_path
+
+
+def _sim_rerank_enabled(config: Mapping[str, Any]) -> bool:
+    rerank_cfg = config.get("sim_rerank", {})
+    if isinstance(rerank_cfg, Mapping):
+        return bool(rerank_cfg.get("enabled"))
+    return bool(rerank_cfg)
+
+
+def _sim_rerank_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    rerank_cfg = config.get("sim_rerank", {})
+    return rerank_cfg if isinstance(rerank_cfg, Mapping) else {}
+
+
+def _load_or_build_sim_rerank_inputs(
+    normalized_csv: Path,
+    config: Mapping[str, Any],
+) -> tuple[Any, dict[str, int]]:
+    from ceminidfs.export.sim_rerank import build_player_index
+    from ceminidfs.models.simulate import simulate_fd_points
+
+    saved = _load_saved_sim_matrix(normalized_csv, config)
+    if saved is not None:
+        return saved
+
+    source = _canonical_for_sim(config) or normalized_csv
+    sim_rows = _simulation_rows(pd.read_csv(source))
+    if not sim_rows:
+        raise ValueError(f"no simulation-ready player rows found in {source}")
+
+    rerank_cfg = _sim_rerank_config(config)
+    simulate_cfg = config.get("simulate", {})
+    if not isinstance(simulate_cfg, Mapping):
+        simulate_cfg = {}
+    n_iterations = int(
+        rerank_cfg.get(
+            "n_iterations",
+            simulate_cfg.get("n_iterations", config.get("simulation_iterations", 5000)),
+        )
+    )
+    seed = rerank_cfg.get("seed", simulate_cfg.get("seed", config.get("simulation_seed")))
+    sim_matrix = simulate_fd_points(
+        pd.DataFrame(sim_rows),
+        n_iterations=n_iterations,
+        seed=int(seed) if seed is not None else None,
+    )
+    return sim_matrix, build_player_index(sim_rows)
+
+
+def _load_saved_sim_matrix(
+    normalized_csv: Path,
+    config: Mapping[str, Any],
+) -> tuple[Any, dict[str, int]] | None:
+    from ceminidfs.export.sim_rerank import build_player_index
+
+    work_dir = Path(config.get("work_dir", "."))
+    candidates = [
+        config.get("sim_matrix_path"),
+        work_dir / "simulation.parquet",
+        work_dir / "sim_matrix.parquet",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if not path.is_file():
+            continue
+        frame = pd.read_parquet(path)
+        numeric = frame.select_dtypes(include="number")
+        if numeric.empty:
+            raise ValueError(f"simulation parquet has no numeric matrix columns: {path}")
+        if any(column in frame.columns for column in ("name", "Name", "player_name", "Player Name")):
+            player_index = build_player_index(frame.to_dict("records"))
+        else:
+            player_index = build_player_index(normalized_csv)
+        return numeric.to_numpy(dtype=float), player_index
+    return None
+
+
+def _canonical_for_sim(config: Mapping[str, Any]) -> Path | None:
+    configured = config.get("canonical_path")
+    if configured and Path(configured).is_file():
+        return Path(configured)
+
+    work_dir = Path(config.get("work_dir", "."))
+    matches = sorted(work_dir.glob("canonical_projections_*.csv"))
+    return matches[-1] if matches else None
+
+
+def _simulation_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, raw in frame.fillna("").iterrows():
+        row = raw.to_dict()
+        name = _first_present(row, ("name", "player_name", "Name", "Player Name", "Nickname"))
+        if not name:
+            first = _first_present(row, ("First Name", "first_name"))
+            last = _first_present(row, ("Last Name", "last_name"))
+            name = " ".join(part for part in (first, last) if part).strip()
+        if not name:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "player_id": _first_present(row, ("player_id", "fd_id", "dk_id", "Id", "ID"))
+                or index,
+                "fd_projection": _first_present(
+                    row,
+                    ("fd_projection", "FPPG", "projection", "AvgPointsPerGame"),
+                )
+                or 0.0,
+                "team": _first_present(row, ("team", "Team", "TeamAbbrev")) or "",
+                "position": _first_present(row, ("fd_position", "Position", "dk_position")) or "",
+            }
+        )
+    return rows
+
+
+def _first_present(row: Mapping[str, Any], keys: Iterable[str]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 def _write_fetch_stub(season: int, week: int, config: Mapping[str, Any]) -> Path:

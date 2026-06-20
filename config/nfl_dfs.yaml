@@ -11,7 +11,12 @@ rolling_windows:
 projection_mode: auto
 simulate:
   enabled: false
+  method: team_shock
   n_iterations: 5000
+sim_rerank:
+  enabled: false
+  candidates: 2000
+  final_count: 150
 volume:
   league_sec_per_play: 36.2
   league_total: 44.8
@@ -24,6 +29,7 @@ usage:
   l3_window: 3
 ownership:
   enabled: false
+  calibration_path: null
 stats:
   shrinkage:
     ypa: 250

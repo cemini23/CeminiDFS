@@ -8,7 +8,10 @@ import pandas as pd
 from ceminidfs.data.salary import apply_salary_fppg_placeholder, parse_salary_csv
 from ceminidfs.export.canonical import write_canonical_csv
 from ceminidfs.models.simulate import add_simulation_columns
-from ceminidfs.models.ownership import project_ownership
+from ceminidfs.models.ownership import (
+    load_ownership_calibration,
+    project_ownership_calibrated,
+)
 from ceminidfs.pipeline.engine import build_diy_projections, merge_projections_into_canonical
 
 
@@ -54,7 +57,7 @@ def project_week(
         rows = _add_simulation_to_rows(rows, cfg)
 
     if _ownership_enabled(cfg):
-        rows = project_ownership(rows, site or _site_from_rows(rows))
+        rows = _add_ownership_to_rows(rows, cfg, site or _site_from_rows(rows))
 
     write_canonical_csv(rows, output_path)
     return output_path
@@ -72,6 +75,19 @@ def _simulation_enabled(config: Mapping[str, Any]) -> bool:
     simulate_cfg = config.get("simulate", {})
     simulate_enabled = bool(simulate_cfg.get("enabled")) if isinstance(simulate_cfg, Mapping) else False
     return simulate_enabled or bool(config.get("run_simulation"))
+
+
+def _add_ownership_to_rows(
+    rows: list[dict[str, Any]],
+    config: Mapping[str, Any],
+    site: str,
+) -> list[dict[str, Any]]:
+    ownership_cfg = config.get("ownership", {})
+    calibration_path = (
+        ownership_cfg.get("calibration_path") if isinstance(ownership_cfg, Mapping) else None
+    )
+    calibration = load_ownership_calibration(calibration_path) if calibration_path else None
+    return project_ownership_calibrated(rows, calibration=calibration, site=site)
 
 
 def _site_from_rows(rows: list[dict[str, Any]]) -> str:
@@ -122,6 +138,8 @@ def _add_simulation_to_rows(
                 "player_id": row.get("fd_id") or row.get("dk_id") or row.get("player_key") or index,
                 "fd_projection": row.get("fd_projection"),
                 "team": row.get("team", ""),
+                "opp": row.get("opp") or row.get("opponent") or "",
+                "game": row.get("game", ""),
                 "position": row.get("fd_position") or row.get("dk_position") or row.get("position", ""),
             }
         )
@@ -135,11 +153,13 @@ def _add_simulation_to_rows(
         simulate_cfg = {}
     n_iterations = int(simulate_cfg.get("n_iterations", config.get("simulation_iterations", 5000)))
     seed = simulate_cfg.get("seed", config.get("simulation_seed"))
+    method = str(simulate_cfg.get("method", config.get("simulation_method", "team_shock")))
 
     simulated = add_simulation_columns(
         pd.DataFrame(candidates),
         n_iterations=n_iterations,
         seed=int(seed) if seed is not None else None,
+        method=method,
     )
     for _, row in simulated.iterrows():
         index = int(row["_row_index"])

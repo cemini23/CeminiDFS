@@ -26,6 +26,17 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     write_salary_canonical = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.data.ownership_labels import load_ownership_labels
+    from ceminidfs.data.salary import apply_salary_fppg_placeholder, parse_salary_csv
+    from ceminidfs.models.ownership import fit_ownership_calibration, save_ownership_calibration
+except ImportError:  # pragma: no cover - defensive for partial installs
+    load_ownership_labels = None  # type: ignore[assignment]
+    parse_salary_csv = None  # type: ignore[assignment]
+    apply_salary_fppg_placeholder = None  # type: ignore[assignment]
+    fit_ownership_calibration = None  # type: ignore[assignment]
+    save_ownership_calibration = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.pipeline.backtest import format_backtest_summary, run_backtest, write_backtest_report
 except ImportError:  # pragma: no cover - defensive for partial installs
     run_backtest = None  # type: ignore[assignment]
@@ -113,7 +124,25 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--out", dest="output_path", type=Path, required=True)
     optimize.add_argument("--count", type=int, default=150)
     optimize.add_argument("--site", default="fanduel")
+    optimize.add_argument("--sim-rerank", action="store_true", help="Rerank pydfs candidates by simulation")
+    optimize.add_argument("--candidates", type=int, default=2000, help="Candidate lineups before rerank")
+    optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     optimize.set_defaults(handler=_cmd_optimize)
+
+    ownership = subparsers.add_parser("ownership", help="Ownership projection tools")
+    ownership_sub = ownership.add_subparsers(dest="ownership_command")
+
+    ownership_calibrate = ownership_sub.add_parser(
+        "calibrate",
+        help="Fit ownership calibration from paid labels and salary rows",
+    )
+    ownership_calibrate.add_argument("--labels", type=Path, required=True)
+    ownership_calibrate.add_argument("--salary", type=Path, required=True)
+    ownership_calibrate.add_argument("--season", type=int, required=True)
+    ownership_calibrate.add_argument("--week", type=int, required=True)
+    ownership_calibrate.add_argument("--out", dest="output_path", type=Path, required=True)
+    ownership_calibrate.add_argument("--site")
+    ownership_calibrate.set_defaults(handler=_cmd_ownership_calibrate)
 
     late_swap = subparsers.add_parser("late-swap", help="Late-swap existing lineups after teams lock")
     late_swap.add_argument("--lineups", dest="lineups_path", type=Path, required=True)
@@ -135,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--salary", type=Path, required=True)
     run.add_argument("--site", default="fanduel")
     run.add_argument("--count", type=int, default=150)
+    run.add_argument("--sim-rerank", action="store_true", help="Rerank optimizer candidates by simulation")
+    run.add_argument("--candidates", type=int, default=2000, help="Candidate lineups before rerank")
+    run.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     run.add_argument(
         "--stages",
         default="all",
@@ -275,9 +307,37 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
 def _cmd_optimize(args: argparse.Namespace) -> int:
     if _run_optimize is None:
         raise RuntimeError("Optimize stage unavailable: orchestrator import failed")
-    config = runtime_config(site=args.site, count=args.count)
-    output = _run_optimize(args.csv_path, args.output_path, args.count, config)
+    count = args.final_count if args.sim_rerank else args.count
+    config = runtime_config(
+        site=args.site,
+        count=count,
+        sim_rerank={
+            "enabled": args.sim_rerank,
+            "candidates": args.candidates,
+            "final_count": args.final_count,
+        },
+    )
+    output = _run_optimize(args.csv_path, args.output_path, count, config)
     print(output)
+    return 0
+
+
+def _cmd_ownership_calibrate(args: argparse.Namespace) -> int:
+    if (
+        load_ownership_labels is None
+        or parse_salary_csv is None
+        or apply_salary_fppg_placeholder is None
+        or fit_ownership_calibration is None
+        or save_ownership_calibration is None
+    ):
+        raise RuntimeError("Ownership calibration unavailable: ownership imports failed")
+    rows = parse_salary_csv(args.salary, args.season, args.week, site=args.site)
+    site = args.site or _site_from_salary_rows(rows)
+    rows = apply_salary_fppg_placeholder(rows, site)
+    labels = load_ownership_labels(args.labels)
+    calibration = fit_ownership_calibration(labels, rows, site=site)
+    output = save_ownership_calibration(calibration, args.output_path)
+    print(f"Fitted {calibration.sample_size} ownership labels → {output}")
     return 0
 
 
@@ -302,10 +362,16 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     if run_pipeline is None:
         raise RuntimeError("Run pipeline unavailable: orchestrator import failed")
+    count = args.final_count if args.sim_rerank else args.count
     config = runtime_config(
-        count=args.count,
+        count=count,
         site=args.site,
         allow_stub=args.allow_stub,
+        sim_rerank={
+            "enabled": args.sim_rerank,
+            "candidates": args.candidates,
+            "final_count": args.final_count,
+        },
     )
     manifest = run_pipeline(
         season=args.season,
@@ -386,3 +452,9 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
     print(f"\nBrief: {brief_path}")
     print(f"JSON:  {json_path}")
     return 0
+
+
+def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:
+    if rows and rows[0].get("dk_id") and not rows[0].get("fd_id"):
+        return "draftkings"
+    return "fanduel"
