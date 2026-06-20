@@ -66,6 +66,8 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs run` | Orchestrated multi-stage run with `RunManifest` |
 | `ceminidfs late-swap` | Re-optimize after teams lock |
 | `ceminidfs backtest` | Walk-forward MAE / RMSE / Spearman vs realized PBP points |
+| `ceminidfs backtest-prepare` | Batch-fetch nflverse caches for a season range (offseason setup) |
+| `ceminidfs historical-slate` | Synthetic FanDuel salary CSV from nflverse (no live slate export) |
 | `ceminidfs benchmark load` | Parse Stokastic/Labs export → versioned JSON snapshot |
 | `ceminidfs benchmark compare` | Paid export vs actuals (+ DIY side-by-side) |
 | `ceminidfs calibrate` | Wiki-ready calibration brief (Markdown + JSON) |
@@ -90,10 +92,26 @@ ceminidfs run --season 2024 --week 5 --salary FILE --stages all \
 **Historical accuracy (no salary CSV):**
 
 ```bash
-ceminidfs fetch --season 2024 --week 1
-ceminidfs backtest --season 2024 --start-week 5 --end-week 10 \
-  --out reports/backtest_2024_w5-10.json
+# One-time season cache (offseason — no FanDuel export needed)
+ceminidfs backtest-prepare --season 2024 --start-week 1 --end-week 18
+
+# Walk-forward projection accuracy vs nflverse actuals
+ceminidfs backtest --season 2024 --start-week 5 --end-week 17 \
+  --out reports/backtest_2024_w5-17.json
+
+# Wiki brief with DIY vs rolling-FPPG baseline + per-position MAE
+ceminidfs calibrate --season 2024 --start-week 5 --end-week 17 \
+  --out reports/calibration_2024.md --json-out reports/calibration_2024.json
 ```
+
+**Full pipeline without a live FanDuel slate (synthetic salary from nflverse):**
+
+```bash
+ceminidfs historical-slate --season 2024 --week 10 --out artifacts/slates/2024_w10_fd.csv
+ceminidfs run --season 2024 --week 10 --salary artifacts/slates/2024_w10_fd.csv --stages all
+```
+
+Synthetic slates use walk-forward rolling FPPG for the `FPPG` column and position-tier salary bands — good for optimizer smoke tests and DIY projection runs, not for contest ROI modeling.
 
 **Compare DIY to a Stokastic/Labs export:**
 

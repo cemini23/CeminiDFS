@@ -33,6 +33,14 @@ volume:
 usage:
   share_weights: [0.5, 0.3, 0.2]
   l3_window: 3
+  qb_carry_share: 0.12
+  min_l3_qb_pass_attempts: 10
+  min_last_week_qb_pass_attempts: 18
+  qb_backup_pass_share: 0.05
+  qb_implied_pass_boost: 0.012
+  rb_committee_size: 3
+  rb_carry_priors: [0.35, 0.12, 0.04]
+  rb_target_priors: [0.08, 0.05, 0.03]
 ownership:
   enabled: false
   calibration_path: null

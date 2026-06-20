@@ -12,6 +12,7 @@ import pandas as pd
 
 from ceminidfs.config import load_config
 from ceminidfs.data.benchmark import parse_benchmark_csv
+from ceminidfs.data.historical_slate import walk_forward_fppg
 from ceminidfs.pipeline.backtest import (
     actual_week_fantasy_points,
     load_season_pbp,
@@ -102,14 +103,20 @@ def build_calibration_report(
     pbp = load_season_pbp(season)
 
     diy_frames: list[pd.DataFrame] = []
+    fppg_frames: list[pd.DataFrame] = []
     for week in range(start_week, end_week + 1):
         frame = diy_comparison_rows(season, week, pbp, config=cfg)
         if not frame.empty:
             diy_frames.append(frame)
+        fppg_frame = rolling_fppg_comparison_rows(season, week, pbp)
+        if not fppg_frame.empty:
+            fppg_frames.append(fppg_frame)
 
     models: list[ModelCalibration] = []
     if diy_frames:
         models.append(_calibrate_model("diy", pd.concat(diy_frames, ignore_index=True)))
+    if fppg_frames:
+        models.append(_calibrate_model("rolling_fppg", pd.concat(fppg_frames, ignore_index=True)))
 
     benchmark_source: str | None = None
     benchmark_week_value = benchmark_week
@@ -162,17 +169,73 @@ def diy_comparison_rows(
     if projections.empty or actuals.empty:
         return pd.DataFrame()
 
-    merged = projections.merge(
-        actuals[["player_id", "fd_actual"]],
-        on="player_id",
-        how="inner",
-    )
+    merged = _merge_projection_actuals(projections, actuals)
     if merged.empty:
         return pd.DataFrame()
 
     merged["season"] = season
     merged["week"] = week
     merged["model"] = "diy"
+    return merged[
+        ["season", "week", "model", "player_id", "player_name", "team", "position", "fd_projection", "fd_actual"]
+    ]
+
+
+def _merge_projection_actuals(projections: pd.DataFrame, actuals: pd.DataFrame) -> pd.DataFrame:
+    """Join projections to actuals and prefer non-empty projection positions."""
+
+    merged = projections.merge(
+        actuals[["player_id", "fd_actual", "position"]].rename(columns={"position": "actual_position"}),
+        on="player_id",
+        how="inner",
+    )
+    if merged.empty:
+        return merged
+
+    proj_pos = merged["position"].fillna("").astype(str).str.upper()
+    actual_pos = merged["actual_position"].fillna("").astype(str).str.upper()
+    merged["position"] = proj_pos.where(proj_pos.ne(""), actual_pos)
+    return merged.drop(columns=["actual_position"], errors="ignore")
+
+
+def rolling_fppg_comparison_rows(season: int, week: int, pbp: pd.DataFrame) -> pd.DataFrame:
+    """Return player-week rolling FPPG baseline vs actual rows (walk-forward naive baseline)."""
+
+    vegas = resolve_vegas_for_week(season, week)
+    if vegas.empty:
+        return pd.DataFrame()
+
+    historical = _historical_pbp(pbp, season, week)
+    roster = roster_from_historical_pbp(historical, vegas, season, week)
+    if roster.empty:
+        return pd.DataFrame()
+
+    fppg = walk_forward_fppg(pbp, season, week)
+    actuals = actual_week_fantasy_points(pbp, season, week)
+    if actuals.empty:
+        return pd.DataFrame()
+
+    merged = roster.merge(
+        actuals[["player_id", "fd_actual", "position"]].rename(columns={"position": "actual_position"}),
+        on="player_id",
+        how="inner",
+    )
+    if merged.empty:
+        return pd.DataFrame()
+
+    merged["fd_projection"] = merged["player_id"].map(fppg).fillna(0.0)
+    merged = merged.loc[merged["fd_projection"] > 0]
+    if merged.empty:
+        return pd.DataFrame()
+
+    roster_pos = merged["position"].fillna("").astype(str).str.upper()
+    actual_pos = merged["actual_position"].fillna("").astype(str).str.upper()
+    merged["position"] = roster_pos.where(roster_pos.ne(""), actual_pos)
+    merged = merged.drop(columns=["actual_position"], errors="ignore")
+
+    merged["season"] = season
+    merged["week"] = week
+    merged["model"] = "rolling_fppg"
     return merged[
         ["season", "week", "model", "player_id", "player_name", "team", "position", "fd_projection", "fd_actual"]
     ]
@@ -377,6 +440,11 @@ def _summary_paragraph(report: CalibrationReport) -> str:
         parts.append(
             f"Paid benchmark ({report.benchmark_source}, week {report.benchmark_week}): "
             f"MAE **{bench.mae_fd:.2f}**, Spearman **{bench.spearman_fd:.3f}** on {bench.n_player_weeks} matched players."
+        )
+    baseline = _model(report, "rolling_fppg")
+    if baseline is not None:
+        parts.append(
+            f"Rolling FPPG baseline: MAE **{baseline.mae_fd:.2f}**, Spearman **{baseline.spearman_fd:.3f}**."
         )
     return " ".join(parts)
 

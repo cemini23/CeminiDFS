@@ -19,6 +19,10 @@ LEAGUE_INT_RATE = 0.025
 LEAGUE_TD_PER_ATT = 0.045
 LEAGUE_TD_PER_CARRY = 0.03
 LEAGUE_TD_PER_TARGET = 0.045
+QB_PASS_SHRINKAGE_K = 120.0
+QB_RUSH_SHRINKAGE_K = 180.0
+DEFAULT_PASS_SHRINKAGE_K = 250.0
+DEFAULT_RUSH_SHRINKAGE_K = 250.0
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,8 @@ def player_efficiency_from_pbp(
     pbp: pd.DataFrame,
     player_id: str,
     through_week: int,
+    *,
+    position: str = "",
 ) -> dict[str, float]:
     """Return regressed passing, rushing, and receiving efficiency for one player."""
 
@@ -71,8 +77,11 @@ def player_efficiency_from_pbp(
         return _league_efficiency()
 
     player = str(player_id)
-    pass_eff = _passing_efficiency(historical, player)
-    rush_eff = _rushing_efficiency(historical, player)
+    is_qb = str(position or "").upper() == "QB"
+    pass_k = QB_PASS_SHRINKAGE_K if is_qb else DEFAULT_PASS_SHRINKAGE_K
+    rush_k = QB_RUSH_SHRINKAGE_K if is_qb else DEFAULT_RUSH_SHRINKAGE_K
+    pass_eff = _passing_efficiency(historical, player, shrinkage_k=pass_k)
+    rush_eff = _rushing_efficiency(historical, player, shrinkage_k=rush_k)
     rec_eff = _receiving_efficiency(historical, player)
     return {
         "ypa": pass_eff["ypa"],
@@ -180,6 +189,7 @@ def build_week_stats(
                 historical_pbp,
                 player_id,
                 through_week=week,
+                position=str(usage_row.get("position", "")),
             )
         projection = project_player_stats(
             usage_row.to_dict(),
@@ -192,7 +202,7 @@ def build_week_stats(
     return pd.DataFrame(rows, columns=columns)
 
 
-def _passing_efficiency(pbp: pd.DataFrame, player_id: str) -> dict[str, float]:
+def _passing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float = DEFAULT_PASS_SHRINKAGE_K) -> dict[str, float]:
     passer_col = _first_present(pbp, ("passer_player_id", "passer_id", "qb_player_id"))
     if passer_col is None:
         attempts = pd.DataFrame()
@@ -204,13 +214,13 @@ def _passing_efficiency(pbp: pd.DataFrame, player_id: str) -> dict[str, float]:
     touchdowns = _sum_first_numeric(attempts, ("passing_tds", "pass_touchdown", "touchdown"))
     interceptions = _sum_first_numeric(attempts, ("interceptions", "interception"))
     return {
-        "ypa": regress_rate(_rate(yards, sample), sample, LEAGUE_YPA, 250.0),
-        "td_rate": regress_rate(_rate(touchdowns, sample), sample, LEAGUE_TD_PER_ATT, 250.0),
-        "int_rate": regress_rate(_rate(interceptions, sample), sample, LEAGUE_INT_RATE, 250.0),
+        "ypa": regress_rate(_rate(yards, sample), sample, LEAGUE_YPA, shrinkage_k),
+        "td_rate": regress_rate(_rate(touchdowns, sample), sample, LEAGUE_TD_PER_ATT, shrinkage_k),
+        "int_rate": regress_rate(_rate(interceptions, sample), sample, LEAGUE_INT_RATE, shrinkage_k),
     }
 
 
-def _rushing_efficiency(pbp: pd.DataFrame, player_id: str) -> dict[str, float]:
+def _rushing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float = DEFAULT_RUSH_SHRINKAGE_K) -> dict[str, float]:
     rusher_col = _first_present(pbp, ("rusher_player_id", "rusher_id"))
     if rusher_col is None:
         carries = pd.DataFrame()
@@ -221,12 +231,12 @@ def _rushing_efficiency(pbp: pd.DataFrame, player_id: str) -> dict[str, float]:
     yards = _sum_first_numeric(carries, ("rushing_yards", "rush_yards", "yards_gained"))
     touchdowns = _sum_first_numeric(carries, ("rushing_tds", "rush_touchdown", "touchdown"))
     return {
-        "ypc": regress_rate(_rate(yards, sample), sample, LEAGUE_YPC, 250.0),
+        "ypc": regress_rate(_rate(yards, sample), sample, LEAGUE_YPC, shrinkage_k),
         "td_per_carry": regress_rate(
             _rate(touchdowns, sample),
             sample,
             LEAGUE_TD_PER_CARRY,
-            250.0,
+            shrinkage_k,
         ),
     }
 

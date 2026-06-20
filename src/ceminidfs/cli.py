@@ -37,6 +37,17 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     save_ownership_calibration = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.data.historical_slate import write_historical_fd_slate
+except ImportError:  # pragma: no cover - defensive for partial installs
+    write_historical_fd_slate = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.backtest_prepare import format_prepare_summary, prepare_season_cache
+except ImportError:  # pragma: no cover - defensive for partial installs
+    prepare_season_cache = None  # type: ignore[assignment]
+    format_prepare_summary = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.pipeline.backtest import format_backtest_summary, run_backtest, write_backtest_report
 except ImportError:  # pragma: no cover - defensive for partial installs
     run_backtest = None  # type: ignore[assignment]
@@ -191,6 +202,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON report path (default: reports/backtest.json)",
     )
     backtest.set_defaults(handler=_cmd_backtest)
+
+    backtest_prepare = subparsers.add_parser(
+        "backtest-prepare",
+        help="Fetch nflverse caches for a season range (offseason backtest setup)",
+    )
+    backtest_prepare.add_argument("--season", type=int, required=True)
+    backtest_prepare.add_argument("--start-week", type=int, default=1)
+    backtest_prepare.add_argument("--end-week", type=int, default=18)
+    backtest_prepare.add_argument(
+        "--allow-stub",
+        action="store_true",
+        help="Allow stub artifacts when nflreadpy is unavailable",
+    )
+    backtest_prepare.set_defaults(handler=_cmd_backtest_prepare)
+
+    historical_slate = subparsers.add_parser(
+        "historical-slate",
+        help="Write a synthetic FanDuel salary CSV from nflverse (no live slate export)",
+    )
+    historical_slate.add_argument("--season", type=int, required=True)
+    historical_slate.add_argument("--week", type=int, required=True)
+    historical_slate.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        help="Output CSV path (default: artifacts/slates/{season}_w{week}_fd.csv)",
+    )
+    historical_slate.set_defaults(handler=_cmd_historical_slate)
 
     benchmark = subparsers.add_parser("benchmark", help="Paid projection benchmark tools")
     benchmark_sub = benchmark.add_subparsers(dest="benchmark_command")
@@ -392,6 +431,36 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     report_path = write_backtest_report(summary, args.output_path)
     print(format_backtest_summary(summary))
     print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_backtest_prepare(args: argparse.Namespace) -> int:
+    if prepare_season_cache is None or format_prepare_summary is None:
+        raise RuntimeError("Backtest prepare unavailable: ceminidfs.pipeline.backtest_prepare import failed")
+    config = runtime_config()
+    if args.allow_stub:
+        config = {**config, "allow_stub": True}
+    result = prepare_season_cache(args.season, args.start_week, args.end_week, config=config)
+    print(format_prepare_summary(result))
+    print("\nNext: ceminidfs backtest --season {season} --start-week {start} --end-week {end}".format(
+        season=args.season,
+        start=args.start_week,
+        end=args.end_week,
+    ))
+    return 0
+
+
+def _cmd_historical_slate(args: argparse.Namespace) -> int:
+    if write_historical_fd_slate is None:
+        raise RuntimeError("Historical slate unavailable: ceminidfs.data.historical_slate import failed")
+    config = runtime_config()
+    output = args.output_path or Path("artifacts/slates") / f"{args.season}_w{args.week}_fd.csv"
+    path = write_historical_fd_slate(args.season, args.week, output, config=config)
+    print(f"Wrote synthetic FanDuel slate → {path}")
+    print(
+        "Run full pipeline:\n"
+        f"  ceminidfs run --season {args.season} --week {args.week} --salary {path} --stages all"
+    )
     return 0
 
 

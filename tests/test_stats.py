@@ -13,6 +13,7 @@ from ceminidfs.models.stats import (
     LEAGUE_YPA,
     LEAGUE_YPC,
     LEAGUE_YPT,
+    QB_PASS_SHRINKAGE_K,
     build_week_stats,
     player_efficiency_from_pbp,
     project_player_stats,
@@ -100,6 +101,14 @@ def test_project_wr_receiving_stats():
     assert projection.adot == pytest.approx(11.0)
 
 
+def test_qb_efficiency_uses_lighter_shrinkage():
+    qb_eff = player_efficiency_from_pbp(_synthetic_pbp(), "qb1", through_week=4, position="QB")
+    wr_eff = player_efficiency_from_pbp(_synthetic_pbp(), "wr1", through_week=4, position="WR")
+
+    assert qb_eff["ypa"] > regress_rate(7.5, 24.0, LEAGUE_YPA, 250.0)
+    assert wr_eff["ypt"] == pytest.approx(regress_rate(10.0, 6.0, LEAGUE_YPT, 250.0))
+
+
 def test_build_week_stats_end_to_end():
     stats = build_week_stats(_usage_df(), _synthetic_pbp(), season=2024, week=4)
 
@@ -110,7 +119,7 @@ def test_build_week_stats_end_to_end():
     rb = stats.loc[stats["player_id"] == "rb1"].iloc[0]
     wr = stats.loc[stats["player_id"] == "wr1"].iloc[0]
 
-    expected_qb_ypa = regress_rate(7.5, 24.0, LEAGUE_YPA, 250.0)
+    expected_qb_ypa = regress_rate(7.5, 24.0, LEAGUE_YPA, QB_PASS_SHRINKAGE_K)
     expected_rb_ypc = regress_rate(4.5, 12.0, LEAGUE_YPC, 250.0)
     expected_wr_catch_rate = regress_rate(4 / 6, 6.0, LEAGUE_CATCH_RATE, 80.0)
 

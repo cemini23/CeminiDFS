@@ -6,90 +6,59 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ceminidfs.pipeline import calibration, engine
+from ceminidfs.data import historical_slate
+from ceminidfs.pipeline import backtest, calibration, engine
 
 
-SAMPLE_STOKASTIC_CSV = """\
-Player,Team,Position,Salary,Median,Own%
-Patrick Mahomes,KC,QB,8500,22.8,12.5
-Travis Kelce,KC,TE,7200,14.2,18.0
-"""
+def test_walk_forward_fppg_uses_prior_weeks_only():
+    pbp = _season_pbp_with_week4()
+    fppg = historical_slate.walk_forward_fppg(pbp, season=2024, week=4)
+
+    assert fppg["gsis_mahomes"] > 0
+    assert fppg["gsis_kelce"] > 0
 
 
-def test_build_calibration_report_diy_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_build_historical_slate_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pbp = _season_pbp_with_week4()
+    week_dir = _write_week_cache(tmp_path)
+    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
+    monkeypatch.setattr(backtest, "load_season_pbp", lambda season: pbp)
+
+    frame = historical_slate.build_historical_slate_frame(2024, 4, pbp=pbp)
+
+    assert not frame.empty
+    assert set(frame.columns) == set(historical_slate.FD_HEADERS)
+    assert (frame["Salary"] > 0).all()
+    assert frame["Position"].isin({"QB", "RB", "WR", "TE", "DEF"}).all()
+    dst_rows = frame.loc[frame["Position"] == "DEF"]
+    assert len(dst_rows) == 2
+
+
+def test_write_historical_fd_slate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pbp = _season_pbp_with_week4()
+    week_dir = _write_week_cache(tmp_path)
+    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
+    monkeypatch.setattr(backtest, "load_season_pbp", lambda season: pbp)
+
+    out = tmp_path / "slate.csv"
+    path = historical_slate.write_historical_fd_slate(2024, 4, out, pbp=pbp)
+
+    assert path.is_file()
+    loaded = pd.read_csv(path)
+    assert len(loaded) > 0
+
+
+def test_rolling_fppg_comparison_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     pbp = _season_pbp_with_week4()
     week_dir = _write_week_cache(tmp_path)
     monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
     monkeypatch.setattr(calibration, "load_season_pbp", lambda season: pbp)
 
-    report = calibration.build_calibration_report(2024, start_week=4, end_week=4)
+    frame = calibration.rolling_fppg_comparison_rows(2024, 4, pbp)
 
-    assert report.season == 2024
-    assert len(report.models) == 2
-    diy = next(model for model in report.models if model.model == "diy")
-    assert diy.n_player_weeks > 0
-    assert any(row.position == "QB" for row in diy.by_position)
-    assert any(model.model == "rolling_fppg" for model in report.models)
-
-
-def test_build_calibration_report_with_benchmark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    pbp = _season_pbp_with_week4()
-    week_dir = _write_week_cache(tmp_path)
-    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
-    monkeypatch.setattr(calibration, "load_season_pbp", lambda season: pbp)
-
-    benchmark_csv = tmp_path / "bench.csv"
-    benchmark_csv.write_text(SAMPLE_STOKASTIC_CSV, encoding="utf-8")
-
-    report = calibration.build_calibration_report(
-        2024,
-        start_week=4,
-        end_week=4,
-        benchmark_csv=benchmark_csv,
-        benchmark_week=4,
-    )
-
-    assert len(report.models) == 3
-    assert report.benchmark_source == "stokastic"
-    assert {model.model for model in report.models} == {"diy", "rolling_fppg", "benchmark"}
-
-
-def test_render_calibration_brief_contains_targets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    pbp = _season_pbp_with_week4()
-    week_dir = _write_week_cache(tmp_path)
-    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
-    monkeypatch.setattr(calibration, "load_season_pbp", lambda season: pbp)
-
-    report = calibration.build_calibration_report(2024, start_week=4, end_week=4)
-    brief = calibration.render_calibration_brief(report)
-
-    assert brief.startswith("---")
-    assert "Overall accuracy" in brief
-    assert "Target (good)" in brief
-    assert "Methodology" in brief
-    assert "Calibration actions" in brief
-
-
-def test_write_calibration_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    pbp = _season_pbp_with_week4()
-    week_dir = _write_week_cache(tmp_path)
-    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
-    monkeypatch.setattr(calibration, "load_season_pbp", lambda season: pbp)
-
-    report = calibration.build_calibration_report(2024, start_week=4, end_week=4)
-    brief_path = calibration.write_calibration_brief(report, tmp_path / "brief.md")
-    json_path = calibration.write_calibration_json(report, tmp_path / "brief.json")
-
-    assert brief_path.is_file()
-    assert json_path.is_file()
-    assert "CeminiDFS calibration" in brief_path.read_text(encoding="utf-8")
-
-
-def test_verdict_against_targets():
-    assert calibration._verdict(6.0, 20, calibration.MAE_TARGETS["QB"]) == "very good"
-    assert calibration._verdict(6.2, 20, calibration.MAE_TARGETS["QB"]) == "good"
-    assert calibration._verdict(7.0, 20, calibration.MAE_TARGETS["QB"]) == "needs work"
-    assert calibration._verdict(4.0, 2, calibration.MAE_TARGETS["WR"]) == "insufficient data"
+    assert not frame.empty
+    assert frame["model"].eq("rolling_fppg").all()
+    assert (frame["fd_projection"] > 0).all()
 
 
 def _write_week_cache(tmp_path: Path) -> Path:
@@ -149,6 +118,26 @@ def _kc_game_rows(week: int) -> list[dict[str, object]]:
                 "interceptions": 1 if idx == 9 and week == 2 else 0,
                 "complete_pass": 1 if complete else 0,
                 "air_yards": 10,
+            }
+        )
+    for idx in range(5):
+        rows.append(
+            {
+                "season": 2024,
+                "week": week,
+                "game_id": f"kc_{week}",
+                "posteam": "KC",
+                "wp": 0.5,
+                "qtr": 2,
+                "game_seconds_remaining": 3200 - (idx * 34),
+                "pass": 0,
+                "pass_attempt": 0,
+                "rush": 1,
+                "xpass": 0.45,
+                "rusher_player_id": "gsis_rb",
+                "rusher_player_name": "KC RB",
+                "rushing_yards": 4,
+                "rushing_tds": 1 if idx == 0 else 0,
             }
         )
     return rows

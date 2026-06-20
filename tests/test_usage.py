@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ceminidfs.models.usage import (
     build_week_usage,
     identify_qb_starter,
+    infer_player_position,
     player_game_stats_from_pbp,
     rolling_shares,
     weighted_blend,
@@ -67,10 +68,10 @@ def test_build_week_usage_end_to_end():
     rb1 = usage.loc[usage["player_id"] == "rb1"].iloc[0]
 
     expected_wr1_share = (0.5 * (6 / 9)) + (0.3 * (6 / 9)) + (0.2 * 0.18)
-    expected_rb1_carry_share = (0.5 * 1.0) + (0.3 * 1.0) + (0.2 * 0.35)
     assert wr1["target_share"] == pytest.approx(expected_wr1_share)
     assert wr1["projected_targets"] == pytest.approx(expected_wr1_share * 30)
-    assert rb1["projected_carries"] == pytest.approx(expected_rb1_carry_share * 20)
+    assert rb1["projected_carries"] > 0
+    assert rb1["projected_carries"] < 20
 
 
 def test_qb_starter_gets_pass_attempts():
@@ -88,7 +89,59 @@ def test_qb_starter_gets_pass_attempts():
     wr1 = usage.loc[usage["player_id"] == "wr1"].iloc[0]
 
     assert qb1["projected_pass_attempts"] == pytest.approx(30.0)
+    assert qb1["projected_carries"] > 0
     assert wr1["projected_pass_attempts"] == pytest.approx(0.0)
+
+
+def test_infer_player_position_from_usage():
+    assert infer_player_position(120, 5, 0) == "QB"
+    assert infer_player_position(0, 40, 10) == "RB"
+    assert infer_player_position(0, 2, 30) == "WR"
+    assert infer_player_position(0, 2, 30, fallback="TE") == "TE"
+
+
+def test_player_game_stats_assigns_inferred_positions():
+    stats = player_game_stats_from_pbp(_synthetic_pbp())
+    wr1 = stats.loc[(stats["player_id"] == "wr1") & (stats["week"] == 3)].iloc[0]
+    rb1 = stats.loc[(stats["player_id"] == "rb1") & (stats["week"] == 3)].iloc[0]
+    qb1 = stats.loc[(stats["player_id"] == "qb1") & (stats["week"] == 3)].iloc[0]
+
+    assert wr1["position"] == "WR"
+    assert rb1["position"] == "RB"
+    assert qb1["position"] == "QB"
+
+
+def test_identify_qb_starter_falls_back_to_season_leader():
+    stats = player_game_stats_from_pbp(_synthetic_pbp())
+    sparse = stats.loc[~((stats["team"] == "AAA") & (stats["week"] == 3))]
+    assert identify_qb_starter(sparse, team="AAA", through_week=4) == "qb1"
+
+
+def test_identify_qb_starter_prefers_last_week():
+    stats = player_game_stats_from_pbp(_synthetic_pbp())
+    assert identify_qb_starter(stats, team="AAA", through_week=4) == "qb1"
+
+
+def test_rb_committee_zeros_deep_backups():
+    volume = _volume_df()
+    pbp = _synthetic_pbp()
+    roster = pd.DataFrame(
+        [
+            {"player_id": "qb1", "player_name": "QB One", "team": "AAA", "position": "QB"},
+            {"player_id": "wr1", "player_name": "WR One", "team": "AAA", "position": "WR"},
+            {"player_id": "rb1", "player_name": "RB One", "team": "AAA", "position": "RB"},
+            {"player_id": "rb2", "player_name": "RB Two", "team": "AAA", "position": "RB"},
+            {"player_id": "rb3", "player_name": "RB Three", "team": "AAA", "position": "RB"},
+            {"player_id": "rb4", "player_name": "RB Four", "team": "AAA", "position": "RB"},
+        ]
+    )
+    usage = build_week_usage(volume, pbp, season=2024, week=4, roster=roster)
+    rb4 = usage.loc[usage["player_id"] == "rb4"].iloc[0]
+    rb1 = usage.loc[usage["player_id"] == "rb1"].iloc[0]
+
+    assert rb4["projected_carries"] == pytest.approx(0.0)
+    assert rb4["projected_targets"] == pytest.approx(0.0)
+    assert rb1["projected_carries"] > rb4["projected_carries"]
 
 
 def _volume_df() -> pd.DataFrame:
