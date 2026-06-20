@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Mapping, TypedDict
+from typing import Any, Mapping, TypedDict
+
+import pandas as pd
 
 
 class CountingStats(TypedDict, total=False):
@@ -25,11 +27,24 @@ class CountingStats(TypedDict, total=False):
     dst_blocked_kick: float
 
 
-StatsMapping = Mapping[str, float]
+StatsMapping = Mapping[str, Any]
+
+COUNTING_STAT_KEYS = (
+    "pass_yds",
+    "pass_td",
+    "int",
+    "rush_yds",
+    "rush_td",
+    "rec",
+    "rec_yds",
+    "rec_td",
+    "fumbles_lost",
+)
 
 
 def _stat(stats: StatsMapping, key: str) -> float:
-    return float(stats.get(key, 0.0))
+    value = pd.to_numeric(pd.Series([stats.get(key, 0.0)]), errors="coerce").iloc[0]
+    return 0.0 if pd.isna(value) else float(value)
 
 
 def _yardage_bonuses(stats: StatsMapping) -> float:
@@ -90,4 +105,32 @@ def dk_points(stats: StatsMapping) -> float:
         + _yardage_bonuses(stats)
         + _dst_stub_points(stats)
     )
+
+
+def stats_to_counting_stats(row: Mapping[str, Any]) -> dict[str, float]:
+    """Map a PlayerStatProjection-like row into scoring counting stats."""
+
+    return {key: _stat(row, key) for key in COUNTING_STAT_KEYS}
+
+
+def fantasy_points_from_stats(row: Mapping[str, Any]) -> tuple[float, float]:
+    """Return FanDuel and DraftKings fantasy points from a stat projection row."""
+
+    stats = stats_to_counting_stats(row)
+    return fd_points(stats), dk_points(stats)
+
+
+def add_fantasy_points(stats_df: pd.DataFrame) -> pd.DataFrame:
+    """Return stats with fd_projection and dk_projection columns."""
+
+    scored = stats_df.copy()
+    if scored.empty:
+        scored["fd_projection"] = pd.Series(dtype=float)
+        scored["dk_projection"] = pd.Series(dtype=float)
+        return scored
+
+    points = scored.apply(lambda row: fantasy_points_from_stats(row.to_dict()), axis=1)
+    scored["fd_projection"] = [fd for fd, _ in points]
+    scored["dk_projection"] = [dk for _, dk in points]
+    return scored
 

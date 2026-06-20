@@ -8,6 +8,7 @@ rolling_windows:
   - 3
   - 5
   - 8
+projection_mode: auto
 volume:
   league_sec_per_play: 36.2
   league_total: 44.8

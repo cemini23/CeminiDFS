@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ceminidfs.models.scoring import dk_points, fd_points
+from ceminidfs.models.scoring import dk_points, fantasy_points_from_stats, fd_points
 
 
 def test_fd_points_half_ppr_with_bonuses_and_fumbles():
@@ -57,4 +57,23 @@ def test_dst_stub_event_points():
 
     assert fd_points(stats) == 17.0
     assert dk_points(stats) == 17.0
+
+
+def test_fantasy_points_from_projected_stat_row():
+    row = {
+        "pass_yds": 250,
+        "pass_td": 2,
+        "int": 1,
+        "rush_yds": 20,
+        "rush_td": 0,
+        "rec": 0,
+        "rec_yds": 0,
+        "rec_td": 0,
+        "fumbles_lost": 0,
+    }
+
+    fd, dk = fantasy_points_from_stats(row)
+
+    assert fd == pytest.approx(19.0)
+    assert dk == pytest.approx(19.0)
 

@@ -14,7 +14,7 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.
 |-------|--------|-------|
 | **0** | Package skeleton, scoring, export adapters, CLI, manifest | Complete |
 | **1** | Data backbone — nflverse fetch, Vegas, weather, salary ingest | In progress |
-| **2** | Stat-first projection engine (volume → usage → stats) | Planned |
+| **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
 | **3** | End-to-end lineup generation on DIY projections | Partial (export layer done) |
 | **4** | Backtest + calibration vs paid benchmarks | Planned |
 
@@ -47,7 +47,7 @@ fetch → project → normalize → optimize
 | Stage | Command | Output |
 |-------|---------|--------|
 | `fetch` | `ceminidfs fetch --season YYYY --week N` | Parquet cache (schedules, pbp, injuries, vegas, weather) + fetch manifest |
-| `project` | `ceminidfs project --season YYYY --week N --salary FILE` | Canonical projection CSV (placeholder FPPG) |
+| `project` | `ceminidfs project --season YYYY --week N --salary FILE` | Canonical projection CSV with DIY projections when cache exists; salary FPPG fallback in auto mode |
 | `salary` | `ceminidfs salary --season YYYY --week N --salary FILE --out FILE` | Canonical CSV from salary only (no projections) |
 | `normalize` | `ceminidfs normalize --in FILE --out FILE --site fanduel` | pydfs importer CSV |
 | `optimize` | `ceminidfs optimize --csv FILE --out FILE` | Lineup CSV |
@@ -60,6 +60,12 @@ Run all stages: `ceminidfs run --season 2024 --week 1 --salary FILE --stages all
 |------|---------|---------|
 | `config/nfl_dfs.yaml` | Yes | Seasons, rolling windows, artifact paths |
 | `.env` | No (gitignored) | Optional API keys — copy from `.env.example` |
+
+`projection_mode` in `config/nfl_dfs.yaml` controls projection behavior:
+
+- `auto` (default): use cached DIY projections when `fetch` artifacts exist, otherwise fall back to salary-export FPPG.
+- `diy`: require cached `vegas.parquet` and `pbp.parquet`; run `ceminidfs fetch --season YYYY --week N` before `project`.
+- `fppg`: use salary-export FPPG placeholders.
 
 **Secrets:** Never commit `.env`. API keys (`ODDS_API_KEY`, etc.) are optional and loaded only from your local environment.
 
