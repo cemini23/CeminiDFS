@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ceminidfs"
+version = "0.1.0"
+description = "DIY NFL DFS projection pipeline — FanDuel-primary, nflverse-backed"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Cemini" }]
+keywords = ["dfs", "nfl", "fanduel", "fantasy-football", "projections"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment",
+]
+dependencies = [
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+data = ["nflreadpy>=0.1.0", "pyarrow>=14.0"]
+optimize = ["pydfs-lineup-optimizer>=3.6"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+all = ["ceminidfs[data,optimize,dev]"]
+
+[project.scripts]
+ceminidfs = "ceminidfs.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cemini23/CeminiDFS"
+Documentation = "https://github.com/cemini23/CeminiDFS/blob/main/PLAN.md"
+Source = "https://github.com/cemini23/CeminiDFS"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

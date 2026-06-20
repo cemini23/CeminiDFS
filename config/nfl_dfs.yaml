@@ -1,0 +1,10 @@
+paths:
+  artifacts_dir: artifacts
+  cache_dir: artifacts/cache
+seasons:
+  - 2024
+  - 2025
+rolling_windows:
+  - 3
+  - 5
+  - 8
