@@ -20,6 +20,11 @@ try:
 except ImportError:  # pragma: no cover - defensive for partial installs
     project_week = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.data.salary import write_salary_canonical
+except ImportError:  # pragma: no cover - defensive for partial installs
+    write_salary_canonical = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -49,6 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
     project.add_argument("--week", type=int, required=True)
     project.add_argument("--salary", type=Path, required=True)
     project.set_defaults(handler=_cmd_project)
+
+    salary = subparsers.add_parser("salary", help="Ingest a salary CSV into canonical schema")
+    salary.add_argument("--season", type=int, required=True)
+    salary.add_argument("--week", type=int, required=True)
+    salary.add_argument("--salary", type=Path, required=True)
+    salary.add_argument("--out", dest="output_path", type=Path, required=True)
+    salary.add_argument("--site")
+    salary.set_defaults(handler=_cmd_salary)
 
     normalize = subparsers.add_parser("normalize", help="Normalize a projection CSV for a DFS site")
     normalize.add_argument("--in", dest="input_path", type=Path, required=True)
@@ -101,6 +114,20 @@ def _cmd_project(args: argparse.Namespace) -> int:
         raise RuntimeError("Projection stage unavailable: ceminidfs.pipeline.project import failed")
     config = runtime_config(work_dir=Path("runs") / f"{args.season}_week_{args.week}")
     output = project_week(args.season, args.week, args.salary, config)
+    print(output)
+    return 0
+
+
+def _cmd_salary(args: argparse.Namespace) -> int:
+    if write_salary_canonical is None:
+        raise RuntimeError("Salary ingest unavailable: ceminidfs.data.salary import failed")
+    output = write_salary_canonical(
+        args.salary,
+        args.output_path,
+        args.season,
+        args.week,
+        site=args.site,
+    )
     print(output)
     return 0
 

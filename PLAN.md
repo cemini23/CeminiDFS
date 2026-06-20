@@ -55,7 +55,7 @@ fetch → project → [sim v2] → normalize → optimize
 | P1-B | `data/vegas.py` — schedules spread/total join + `vegas.parquet` | P1-A | done |
 | P1-C | `data/stadiums.py` — roof type + lat/lon | none | done |
 | P1-D | `data/weather.py` — Open-Meteo hourly + `weather.parquet` | P1-C | done |
-| P1-E | Salary ingest — FD/DK CSV parser → canonical schema | none | partial (`project.py`) |
+| P1-E | Salary ingest — FD/DK CSV parser → canonical schema | none | done |
 
 **Exit criteria:** `ceminidfs fetch --season 2024 --week 1` writes week-scoped parquet + fetch manifest.
 

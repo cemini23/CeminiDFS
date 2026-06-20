@@ -47,7 +47,8 @@ fetch → project → normalize → optimize
 | Stage | Command | Output |
 |-------|---------|--------|
 | `fetch` | `ceminidfs fetch --season YYYY --week N` | Parquet cache (schedules, pbp, injuries, vegas, weather) + fetch manifest |
-| `project` | `ceminidfs project --season YYYY --week N --salary FILE` | Canonical projection CSV |
+| `project` | `ceminidfs project --season YYYY --week N --salary FILE` | Canonical projection CSV (placeholder FPPG) |
+| `salary` | `ceminidfs salary --season YYYY --week N --salary FILE --out FILE` | Canonical CSV from salary only (no projections) |
 | `normalize` | `ceminidfs normalize --in FILE --out FILE --site fanduel` | pydfs importer CSV |
 | `optimize` | `ceminidfs optimize --csv FILE --out FILE` | Lineup CSV |
 
