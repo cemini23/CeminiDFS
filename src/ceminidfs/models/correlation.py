@@ -57,7 +57,8 @@ def build_correlation_matrix(df: pd.DataFrame, site: str = "fanduel") -> np.ndar
     if df.empty:
         return np.empty((0, 0), dtype=float)
 
-    assigned = assign_player_roles(df)
+    frame = _ensure_correlation_columns(df)
+    assigned = assign_player_roles(frame)
     n_players = len(assigned)
     matrix = np.eye(n_players, dtype=float)
 
@@ -173,6 +174,20 @@ def _normalize_position(value: Any) -> str:
     if position in {"DST", "D"}:
         return "DEF"
     return position
+
+
+def _ensure_correlation_columns(df: pd.DataFrame) -> pd.DataFrame:
+    frame = df.copy()
+    if "opp" not in frame.columns and "opponent" in frame.columns:
+        frame["opp"] = frame["opponent"]
+    if "game" not in frame.columns:
+        teams = frame.get("team", pd.Series("", index=frame.index)).map(_normalize_token)
+        opps = frame.get("opp", pd.Series("", index=frame.index)).map(_normalize_token)
+        frame["game"] = [
+            f"{min(team, opp)}@{max(team, opp)}" if team and opp else ""
+            for team, opp in zip(teams, opps, strict=True)
+        ]
+    return frame
 
 
 def _normalize_token(value: Any) -> str:

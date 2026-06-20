@@ -106,6 +106,7 @@ def _write_week_cache(tmp_path: Path) -> Path:
             }
         ]
     ).to_parquet(week_dir / "vegas.parquet", index=False)
+    _season_pbp_with_week4().to_parquet(week_dir / "pbp.parquet", index=False)
     return week_dir
 
 

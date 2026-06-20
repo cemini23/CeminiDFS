@@ -335,7 +335,7 @@ def _cmd_ownership_calibrate(args: argparse.Namespace) -> int:
     site = args.site or _site_from_salary_rows(rows)
     rows = apply_salary_fppg_placeholder(rows, site)
     labels = load_ownership_labels(args.labels)
-    calibration = fit_ownership_calibration(labels, rows, site=site)
+    calibration = fit_ownership_calibration(labels, rows, site=site, target_week=args.week)
     output = save_ownership_calibration(calibration, args.output_path)
     print(f"Fitted {calibration.sample_size} ownership labels → {output}")
     return 0

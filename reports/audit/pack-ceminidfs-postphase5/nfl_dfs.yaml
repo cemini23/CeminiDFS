@@ -8,7 +8,7 @@ rolling_windows:
   - 3
   - 5
   - 8
-projection_mode: diy
+projection_mode: auto
 simulate:
   enabled: false
   method: team_shock
@@ -17,12 +17,6 @@ sim_rerank:
   enabled: false
   candidates: 2000
   final_count: 150
-  quantile: 0.85
-  ownership_penalty: 0.15
-defense:
-  alpha: 0.08
-dst:
-  league_sacks_per_game: 2.4
 volume:
   league_sec_per_play: 36.2
   league_total: 44.8

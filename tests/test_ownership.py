@@ -104,6 +104,8 @@ def test_project_week_uses_configured_ownership_calibration(tmp_path: Path):
         salary,
         {
             "work_dir": tmp_path,
+            "allow_fppg_fallback": True,
+            "projection_mode": "auto",
             "ownership": {"enabled": True, "calibration_path": str(calibration_path)},
         },
     )

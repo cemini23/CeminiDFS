@@ -192,15 +192,17 @@ def _normalize_position(value: Any) -> str:
     return position
 
 
-def _cholesky_with_jitter(correlation: np.ndarray) -> np.ndarray:
+def _cholesky_with_jitter(correlation: np.ndarray, *, max_jitter: float = 1e-6) -> np.ndarray:
     identity = np.eye(correlation.shape[0])
     jitter = 0.0
     for _ in range(6):
         try:
             return np.linalg.cholesky(correlation + (identity * jitter))
         except np.linalg.LinAlgError:
-            jitter = 1e-8 if jitter == 0.0 else jitter * 10.0
-    return np.linalg.cholesky(correlation + (identity * jitter))
+            jitter = 1e-8 if jitter == 0.0 else min(jitter * 10.0, max_jitter)
+    raise np.linalg.LinAlgError(
+        f"correlation matrix is not positive definite even with jitter={max_jitter}"
+    )
 
 
 def _normal_cdf(values: np.ndarray) -> np.ndarray:

@@ -36,11 +36,57 @@ def test_build_diy_projections_synthetic(tmp_path: Path, monkeypatch: pytest.Mon
     assert qb["dk_projection"] > 0
 
 
+def test_project_week_diy_with_fetch_shaped_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Week fetch keeps season PBP; DIY projection must not starve on week filter."""
+    from ceminidfs.data import fetch as fetch_module
+    from ceminidfs.pipeline import engine
+
+    cache_root = tmp_path / "cache"
+    week_dir = cache_root / "2024" / "week_4"
+    week_dir.mkdir(parents=True)
+
+    pbp = _synthetic_pbp()
+    pbp.loc[pbp["week"] == 4].to_parquet(week_dir / "pbp.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "game_id": "2024_04_BUF_KC",
+                "home_team": "KC",
+                "away_team": "BUF",
+                "total": 48.0,
+                "spread": -3.0,
+                "home_implied_total": 25.5,
+                "away_implied_total": 22.5,
+            }
+        ]
+    ).to_parquet(week_dir / "vegas.parquet", index=False)
+    pd.DataFrame([{"home_team": "KC"}]).to_parquet(week_dir / "weather.parquet", index=False)
+
+    monkeypatch.setattr(fetch_module, "week_cache_dir", lambda season, week: week_dir)
+    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
+
+    salary = tmp_path / "salary.csv"
+    salary.write_text(SAMPLE_SALARY_CSV, encoding="utf-8")
+
+    with pytest.raises((FileNotFoundError, ValueError)):
+        project_week(2024, 4, salary, {"work_dir": tmp_path, "projection_mode": "diy"})
+
+    pbp.to_parquet(week_dir / "pbp.parquet", index=False)
+    canonical = project_week(2024, 4, salary, {"work_dir": tmp_path, "projection_mode": "diy"})
+    rows = list(csv.DictReader(canonical.open(encoding="utf-8")))
+    assert float(rows[0]["fd_projection"]) > 0
+
+
 def test_project_week_auto_fallback_without_cache(tmp_path: Path):
     salary = tmp_path / "salary.csv"
     salary.write_text(SAMPLE_SALARY_CSV, encoding="utf-8")
 
-    canonical = project_week(2024, 4, salary, {"work_dir": tmp_path})
+    canonical = project_week(
+        2024,
+        4,
+        salary,
+        {"work_dir": tmp_path, "projection_mode": "auto", "allow_fppg_fallback": True},
+    )
     rows = list(csv.DictReader(canonical.open(encoding="utf-8")))
 
     assert rows[0]["fd_projection"] == "22.5"

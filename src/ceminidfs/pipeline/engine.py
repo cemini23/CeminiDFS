@@ -92,7 +92,7 @@ def build_diy_projections_from_frames(
 ) -> pd.DataFrame:
     """Build scored projections from in-memory weekly frames (backtest-safe)."""
 
-    _ = config
+    _ = config  # volume/usage layers read hyperparams from nfl_dfs.yaml in future passes
     historical_pbp = _historical_pbp(pbp, season, week)
     if vegas.empty or historical_pbp.empty:
         raise ValueError(f"Missing vegas or historical PBP for {season} week {week}")
@@ -105,7 +105,7 @@ def build_diy_projections_from_frames(
     if usage_df.empty:
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
-    stats_df = build_week_stats(usage_df, historical_pbp, season=season, week=week)
+    stats_df = build_week_stats(usage_df, historical_pbp, season=season, week=week, config=config)
     if stats_df.empty:
         raise ValueError(f"No player stat projections built for {season} week {week}")
 
@@ -114,6 +114,8 @@ def build_diy_projections_from_frames(
         lambda row: normalize_join_key(row.get("player_name", ""), row.get("team", ""), row.get("position", "")),
         axis=1,
     )
+    scored["opp"] = scored.get("opponent", pd.Series("", index=scored.index)).fillna("").astype(str)
+    scored["game"] = scored.apply(_game_key_from_row, axis=1)
     return scored
 
 
@@ -126,9 +128,13 @@ def merge_projections_into_canonical(
     if stats_df.empty or "join_key" not in stats_df.columns:
         return [dict(row) for row in salary_rows]
 
+    merge_columns = ["fd_projection", "dk_projection"]
+    for column in ("opp", "game", "opponent"):
+        if column in stats_df.columns:
+            merge_columns.append(column)
     stats_by_key = (
         stats_df.drop_duplicates(subset=["join_key"], keep="first")
-        .set_index("join_key")[["fd_projection", "dk_projection"]]
+        .set_index("join_key")[merge_columns]
         .to_dict("index")
     )
 
@@ -141,8 +147,24 @@ def merge_projections_into_canonical(
         if projection:
             mapped["fd_projection"] = projection.get("fd_projection", "")
             mapped["dk_projection"] = projection.get("dk_projection", "")
+            opp = projection.get("opp") or projection.get("opponent")
+            if opp:
+                mapped["opp"] = opp
+                mapped.setdefault("opponent", opp)
+            game = projection.get("game")
+            if game:
+                mapped["game"] = game
         merged.append(mapped)
     return merged
+
+
+def _game_key_from_row(row: pd.Series) -> str:
+    team = str(row.get("team", "") or "").strip().upper()
+    opp = str(row.get("opponent", row.get("opp", "")) or "").strip().upper()
+    if not team or not opp:
+        return ""
+    ordered = sorted((team, opp))
+    return f"{ordered[0]}@{ordered[1]}"
 
 
 def _historical_pbp(pbp: pd.DataFrame, season: int, week: int) -> pd.DataFrame:

@@ -23,7 +23,12 @@ def test_project_emits_canonical_schema(tmp_path: Path):
     salary = tmp_path / "salary.csv"
     salary.write_text(SAMPLE_SALARY_CSV, encoding="utf-8")
 
-    canonical = project_week(2024, 1, salary, {"work_dir": tmp_path})
+    canonical = project_week(
+        2024,
+        1,
+        salary,
+        {"work_dir": tmp_path, "allow_fppg_fallback": True, "projection_mode": "auto"},
+    )
     rows = list(csv.DictReader(canonical.open(encoding="utf-8")))
 
     assert len(rows) == 2
@@ -40,7 +45,12 @@ def test_project_to_normalize_preserves_player_ids(tmp_path: Path):
     salary = tmp_path / "salary.csv"
     salary.write_text(SAMPLE_SALARY_CSV, encoding="utf-8")
 
-    canonical = project_week(2024, 1, salary, {"work_dir": tmp_path})
+    canonical = project_week(
+        2024,
+        1,
+        salary,
+        {"work_dir": tmp_path, "allow_fppg_fallback": True, "projection_mode": "auto"},
+    )
     normalized = tmp_path / "normalized.csv"
     count = normalize_csv(canonical, normalized, site="fanduel")
 

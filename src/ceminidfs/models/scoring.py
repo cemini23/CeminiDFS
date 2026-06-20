@@ -61,7 +61,7 @@ def _yardage_bonuses(stats: StatsMapping) -> float:
 def _dst_stub_points(stats: StatsMapping) -> float:
     """Basic DST event scoring stub; points-allowed tiers can be layered later."""
 
-    return (
+    points = (
         _stat(stats, "dst_sacks") * 1.0
         + _stat(stats, "dst_int") * 2.0
         + _stat(stats, "dst_fumbles_recovered") * 2.0
@@ -69,6 +69,28 @@ def _dst_stub_points(stats: StatsMapping) -> float:
         + _stat(stats, "dst_safety") * 2.0
         + _stat(stats, "dst_blocked_kick") * 2.0
     )
+    if "dst_points_allowed" in stats:
+        points += fd_dst_points_allowed(_stat(stats, "dst_points_allowed"))
+    return points
+
+
+def fd_dst_points_allowed(points_allowed: float) -> float:
+    """FanDuel DST fantasy points from expected opponent points allowed."""
+
+    points = max(0.0, float(points_allowed))
+    if points == 0:
+        return 10.0
+    if points <= 6:
+        return 7.0
+    if points <= 13:
+        return 4.0
+    if points <= 20:
+        return 1.0
+    if points <= 27:
+        return 0.0
+    if points <= 34:
+        return -1.0
+    return -4.0
 
 
 def fd_points(stats: StatsMapping) -> float:

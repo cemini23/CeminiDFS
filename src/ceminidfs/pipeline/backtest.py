@@ -116,6 +116,7 @@ def actual_week_fantasy_points(pbp: pd.DataFrame, season: int, week: int) -> pd.
         return pd.DataFrame()
 
     rows: dict[str, dict[str, Any]] = {}
+    position_by_id = _player_position_map(week_pbp)
 
     def upsert(player_id: str, player_name: str, team: str, position: str, updates: Mapping[str, float]) -> None:
         if not player_id:
@@ -149,7 +150,7 @@ def actual_week_fantasy_points(pbp: pd.DataFrame, season: int, week: int) -> pd.
 
     _aggregate_passing(week_pbp, upsert)
     _aggregate_rushing(week_pbp, upsert)
-    _aggregate_receiving(week_pbp, upsert)
+    _aggregate_receiving(week_pbp, upsert, position_by_id)
 
     if not rows:
         return pd.DataFrame()
@@ -202,6 +203,10 @@ def backtest_week(
         how="inner",
     )
     if merged.empty:
+        return empty, pd.DataFrame()
+
+    min_players = int((config or {}).get("backtest_min_players", 1))
+    if len(merged) < min_players:
         return empty, pd.DataFrame()
 
     metrics = accuracy_metrics(merged["fd_projection"], merged["fd_actual"])
@@ -342,7 +347,11 @@ def _aggregate_rushing(pbp: pd.DataFrame, upsert) -> None:
         )
 
 
-def _aggregate_receiving(pbp: pd.DataFrame, upsert) -> None:
+def _aggregate_receiving(
+    pbp: pd.DataFrame,
+    upsert,
+    position_by_id: Mapping[str, str],
+) -> None:
     id_col = _first_col(pbp, ("receiver_player_id", "receiver_id"))
     name_col = _first_col(pbp, ("receiver_player_name", "receiver"))
     if id_col is None and name_col is None:
@@ -352,17 +361,34 @@ def _aggregate_receiving(pbp: pd.DataFrame, upsert) -> None:
         if _num(row, ("complete_pass",)) < 1:
             continue
         player_id = str(row.get(id_col, "") if id_col else row.get(name_col, ""))
+        position = position_by_id.get(player_id, "WR")
         upsert(
             player_id,
             str(row.get(name_col, "") if name_col else ""),
             str(row.get("posteam", "")),
-            "WR",
+            position,
             {
                 "rec": 1.0,
                 "rec_yds": _num(row, ("receiving_yards", "yards_gained")),
                 "rec_td": _num(row, ("receiving_tds", "pass_touchdown")),
             },
         )
+
+
+def _player_position_map(pbp: pd.DataFrame) -> dict[str, str]:
+    stats = player_game_stats_from_pbp(pbp)
+    if stats.empty or "player_id" not in stats.columns:
+        return {}
+    positions = (
+        stats.sort_values(["week", "game_id"])
+        .groupby("player_id", as_index=False)
+        .agg(position=("position", "last"))
+    )
+    return {
+        str(row["player_id"]): str(row["position"] or "WR").upper()
+        for _, row in positions.iterrows()
+        if row["player_id"]
+    }
 
 
 def _first_col(df: pd.DataFrame, names: tuple[str, ...]) -> str | None:

@@ -12,7 +12,8 @@ from ceminidfs.models.ownership import (
     load_ownership_calibration,
     project_ownership_calibrated,
 )
-from ceminidfs.pipeline.engine import build_diy_projections, merge_projections_into_canonical
+from ceminidfs.models.dst import apply_dst_projections
+from ceminidfs.pipeline.engine import build_diy_projections, load_week_artifacts, merge_projections_into_canonical
 
 
 def project_week(
@@ -32,9 +33,10 @@ def project_week(
 
     site = str(cfg["site"]) if cfg.get("site") else None
     rows = parse_salary_csv(salary_csv, season, week, site=site)
-    mode = str(cfg.get("projection_mode", "auto")).lower()
+    mode = str(cfg.get("projection_mode", "diy")).lower()
     if mode not in {"auto", "diy", "fppg"}:
         raise ValueError("projection_mode must be one of: auto, diy, fppg")
+    allow_fppg_fallback = bool(cfg.get("allow_fppg_fallback"))
 
     if mode == "fppg" or cfg.get("use_salary_fppg") is True:
         rows = apply_salary_fppg_placeholder(rows, site or _site_from_rows(rows))
@@ -42,14 +44,16 @@ def project_week(
         try:
             stats_df = build_diy_projections(season, week, rows, cfg)
             rows = merge_projections_into_canonical(rows, stats_df)
+            vegas, _, _ = load_week_artifacts(season, week)
+            rows = apply_dst_projections(rows, vegas, config=cfg)
             rows = _fill_dst_salary_fppg(rows)
             _write_projection_base(stats_df, cfg)
-            if mode == "auto" and not any(
+            if mode == "auto" and allow_fppg_fallback and not any(
                 row.get("fd_projection") or row.get("dk_projection") for row in rows
             ):
                 rows = apply_salary_fppg_placeholder(rows, site or _site_from_rows(rows))
         except (FileNotFoundError, ValueError):
-            if mode == "diy":
+            if mode == "diy" or not allow_fppg_fallback:
                 raise
             rows = apply_salary_fppg_placeholder(rows, site or _site_from_rows(rows))
 

@@ -1,0 +1,16 @@
+{
+  "built": "2026-06-20T15:40:53Z",
+  "out": "/Users/claudiobarone/Desktop/projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5",
+  "prompt_source": "/Users/claudiobarone/Desktop/projects/CeminiDFS/prompts/ceminidfs_postphase5_super_audit.md",
+  "prompt_chars": 7422,
+  "artifacts": [
+    "nfl_dfs.yaml",
+    "prior_phase0_synthesis.md",
+    "pytest_summary"
+  ],
+  "read_order": [
+    "nfl_dfs.yaml",
+    "prior_phase0_synthesis.md",
+    "pytest_summary"
+  ]
+}

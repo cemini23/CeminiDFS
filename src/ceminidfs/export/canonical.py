@@ -31,6 +31,12 @@ CANONICAL_FIELDS = [
 OPTIONAL_DISPLAY_FIELDS = [
     "name",
     "player_name",
+    "Nickname",
+    "First Name",
+    "Last Name",
+    "nickname",
+    "first_name",
+    "last_name",
 ]
 
 OPTIONAL_PASS_THROUGH_FIELDS = [
@@ -41,6 +47,7 @@ OPTIONAL_PASS_THROUGH_FIELDS = [
     "Min Exposure",
     "Min Deviation",
     "Max Deviation",
+    "projection_source",
 ]
 
 

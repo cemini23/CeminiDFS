@@ -114,8 +114,13 @@ def _mark_locked_team_games_started(players: list[Any], locked_teams: set[str]) 
             player.game_info = GameInfo(None, None, None, game_started=True)
         else:
             game_info.game_started = True
-        # Some pydfs examples use this name; is_game_started reads game_info in 3.6.
         setattr(player, "game_started", True)
+
+    for player in locked_players:
+        if not getattr(player, "game_started", False):
+            team = getattr(player, "team", "?")
+            raise RuntimeError(f"Failed to mark locked player as started: {team}")
+
     return len(locked_players)
 
 

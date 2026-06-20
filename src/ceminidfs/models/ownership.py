@@ -75,10 +75,11 @@ def fit_ownership_calibration(
     *,
     site: str = "fanduel",
     alpha: float = 1.0,
+    target_week: int | None = None,
 ) -> OwnershipCalibration:
     """Fit paid ownership labels against heuristic value features."""
 
-    examples = _matched_training_examples(labels, rows, site)
+    examples = _matched_training_examples(labels, rows, site, target_week=target_week)
     if not examples:
         raise ValueError("no ownership labels matched projection rows")
 
@@ -166,17 +167,25 @@ def _matched_training_examples(
     labels: list[dict[str, Any]],
     rows: list[dict[str, Any]],
     site: str,
+    *,
+    target_week: int | None = None,
 ) -> list[tuple[str, list[float], float]]:
     site_key = _site_key(site)
     label_by_key = {str(label.get("join_key")): label for label in labels if label.get("join_key")}
     projected_rows = [dict(row) for row in rows]
     project_ownership(projected_rows, site=site)
 
+    resolved_week = target_week if target_week is not None else _target_week_from_rows(projected_rows)
+
     examples: list[tuple[str, list[float], float]] = []
     for row in projected_rows:
         label = label_by_key.get(_row_join_key(row, site_key))
         if not label:
             continue
+        if resolved_week is not None:
+            label_week = label.get("week")
+            if label_week is not None and int(label_week) >= resolved_week:
+                continue
         target = _to_float(label.get("ownership"))
         if not math.isfinite(target):
             continue
@@ -231,6 +240,31 @@ def _features(row: dict[str, Any], site_key: str) -> list[float]:
         projection,
         salary / 1000.0 if salary > 0.0 else 0.0,
     ]
+
+
+def _target_week_from_rows(rows: list[dict[str, Any]]) -> int | None:
+    for row in rows:
+        week = row.get("week")
+        if week in (None, ""):
+            week = _week_from_slate_id(row.get("slate_id"))
+        if week in (None, ""):
+            continue
+        try:
+            return int(week)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _week_from_slate_id(value: Any) -> int | None:
+    text = str(value or "").strip().lower()
+    if "_w" not in text:
+        return None
+    suffix = text.rsplit("_w", 1)[-1]
+    try:
+        return int(suffix)
+    except ValueError:
+        return None
 
 
 def _row_join_key(row: dict[str, Any], site_key: str) -> str:

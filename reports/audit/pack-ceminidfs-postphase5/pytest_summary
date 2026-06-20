@@ -1,0 +1,5 @@
+  /Users/claudiobarone/.pyenv/versions/3.12.5/lib/python3.12/site-packages/pydfs_lineup_optimizer/utils.py:156: DeprecationWarning: total_players will be removed in version 3.7, use player_pool.total_players instead
+    warnings.warn(text, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+103 passed, 1 warning in 39.48s

@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from ceminidfs.models.defense import build_defense_ratings, defense_multiplier
+
 
 LEAGUE_YPA = 7.0
 LEAGUE_YPC = 4.3
@@ -56,19 +58,6 @@ def regress_rate(observed: float, sample: float, prior: float, k: float) -> floa
     return ((observed * sample) + (prior * k)) / denominator
 
 
-def defense_multiplier(week: int, side: str, *, alpha: float | None = None) -> float:
-    """Return a defensive adjustment multiplier.
-
-    v1 intentionally returns neutral defense. The week, side, and alpha arguments keep the
-    hook ready for opponent EPA once that layer exists.
-    """
-
-    if side not in {"pass", "rush"}:
-        msg = "side must be 'pass' or 'rush'"
-        raise ValueError(msg)
-    _ = (week, alpha)
-    return 1.0
-
 
 def player_efficiency_from_pbp(
     pbp: pd.DataFrame,
@@ -103,14 +92,16 @@ def project_player_stats(
     efficiency: Mapping[str, Any],
     *,
     week: int,
+    defense_ratings: Mapping[str, Mapping[str, float]] | None = None,
 ) -> PlayerStatProjection:
     """Project counting stats from usage volume and regressed efficiency."""
 
     pass_attempts = _mapping_float(usage_row, "projected_pass_attempts")
     carries = _mapping_float(usage_row, "projected_carries")
     targets = _mapping_float(usage_row, "projected_targets")
-    pass_mult = defense_multiplier(week, "pass")
-    rush_mult = defense_multiplier(week, "rush")
+    opponent = str(usage_row.get("opponent", ""))
+    pass_mult = defense_multiplier(opponent, "pass", defense_ratings)
+    rush_mult = defense_multiplier(opponent, "rush", defense_ratings)
 
     ypa = _mapping_float(efficiency, "ypa", default=LEAGUE_YPA)
     ypc = _mapping_float(efficiency, "ypc", default=LEAGUE_YPC)
@@ -153,6 +144,7 @@ def build_week_stats(
     *,
     season: int,
     week: int,
+    config: Mapping[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Build player counting-stat projections for a target week."""
 
@@ -173,6 +165,12 @@ def build_week_stats(
             pd.to_numeric(historical_pbp["season"], errors="coerce").fillna(season) == season
         ]
 
+    defense_cfg = {}
+    if isinstance(config, Mapping):
+        defense_cfg = config.get("defense", {})
+    alpha = float(defense_cfg.get("alpha", 0.08)) if isinstance(defense_cfg, Mapping) else 0.08
+    defense_ratings = build_defense_ratings(historical_pbp, through_week=week, alpha=alpha)
+
     efficiency_by_player: dict[str, dict[str, float]] = {}
     rows: list[dict[str, Any]] = []
     for _, usage_row in week_usage.iterrows():
@@ -187,6 +185,7 @@ def build_week_stats(
             usage_row.to_dict(),
             efficiency_by_player[player_id],
             week=week,
+            defense_ratings=defense_ratings,
         )
         rows.append(projection.to_dict())
 

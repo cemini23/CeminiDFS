@@ -1,0 +1,10 @@
+{
+  "timestamp": "20260620T1541Z",
+  "pack": "/Users/claudiobarone/Desktop/projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5",
+  "auditors_file": "/Users/claudiobarone/Desktop/projects/CeminiDFS/reports/audit/auditors_ceminidfs_6model.json",
+  "models": [
+    "api-openrouter-fusion",
+    "api-openrouter-grok"
+  ],
+  "errors": []
+}

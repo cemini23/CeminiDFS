@@ -11,7 +11,7 @@ Historical/archive backtests will use a separate endpoint in Phase 4.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import urlencode
@@ -22,6 +22,8 @@ import pandas as pd
 from ceminidfs.data.stadiums import get_stadium, is_weather_exposed
 
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+NFL_SCHEDULE_TIMEZONE = "America/New_York"
 HOURLY_VARIABLES = (
     "temperature_2m",
     "precipitation",
@@ -79,9 +81,9 @@ def fetch_hourly_forecast(
         "temperature_unit": "fahrenheit",
         "wind_speed_unit": "mph",
         "precipitation_unit": "inch",
-        "timezone": "auto",
+        "timezone": NFL_SCHEDULE_TIMEZONE,
     }
-    url = f"{OPEN_METEO_FORECAST_URL}?{urlencode(params)}"
+    url = f"{_open_meteo_url(start)}?{urlencode(params)}"
     open_fn = opener or urlopen
     with open_fn(url, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
@@ -193,8 +195,8 @@ def _schedule_game_weather(row: Mapping[str, Any], *, opener: UrlOpener | None) 
     base.update(
         {
             "temperature_2m_f": snapshot.get("temperature_2m"),
-            "wind_speed_10m_mph": snapshot.get("wind_speed_10m"),
-            "wind_gusts_10m_mph": snapshot.get("wind_gusts_10m"),
+            "wind_speed_10m_mph": None if stadium.roof_type == "semi_open" else snapshot.get("wind_speed_10m"),
+            "wind_gusts_10m_mph": None if stadium.roof_type == "semi_open" else snapshot.get("wind_gusts_10m"),
             "precipitation_in": snapshot.get("precipitation"),
             "rain_in": snapshot.get("rain"),
             "snowfall_in": snapshot.get("snowfall"),
@@ -262,3 +264,11 @@ def _as_date(value: date | datetime | str) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
+
+
+def _open_meteo_url(start: date | datetime | str) -> str:
+    """Use archive API for historical slates; forecast for today and future games."""
+    start_date = date.fromisoformat(_as_date(start))
+    if start_date < datetime.now(timezone.utc).date():
+        return OPEN_METEO_ARCHIVE_URL
+    return OPEN_METEO_FORECAST_URL

@@ -181,6 +181,12 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
 
         rerank_cfg = _sim_rerank_config(config)
         sim_matrix, player_index = _load_or_build_sim_rerank_inputs(input_path, config)
+        ownership_lookup = None
+        ownership_penalty = float(rerank_cfg.get("ownership_penalty", 0.0) or 0.0)
+        if ownership_penalty > 0:
+            from ceminidfs.export.sim_rerank import build_ownership_lookup
+
+            ownership_lookup = build_ownership_lookup(input_path)
         optimize_with_sim_rerank(
             csv_path=input_path,
             out_path=output_path,
@@ -189,6 +195,9 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
             candidates=int(rerank_cfg.get("candidates", config.get("candidates", 2000))),
             final=int(rerank_cfg.get("final_count", config.get("final_count", count))),
             site=str(config.get("site", "fanduel")),
+            quantile=float(rerank_cfg.get("quantile", 0.85)),
+            ownership_lookup=ownership_lookup,
+            ownership_penalty=ownership_penalty,
         )
         return output_path
 
@@ -270,10 +279,13 @@ def _load_saved_sim_matrix(
         numeric = frame.select_dtypes(include="number")
         if numeric.empty:
             raise ValueError(f"simulation parquet has no numeric matrix columns: {path}")
-        if any(column in frame.columns for column in ("name", "Name", "player_name", "Player Name")):
+        name_columns = ("name", "Name", "player_name", "Player Name", "Nickname", "First Name")
+        if any(column in frame.columns for column in name_columns):
             player_index = build_player_index(frame.to_dict("records"))
         else:
-            player_index = build_player_index(normalized_csv)
+            raise ValueError(
+                f"simulation parquet must include a player name column for sim rerank: {path}"
+            )
         return numeric.to_numpy(dtype=float), player_index
     return None
 

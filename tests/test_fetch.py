@@ -154,6 +154,10 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
         if name == "weather":
             assert len(saved) == 0
             continue
+        if name == "pbp":
+            assert set(saved["week"]) == {1, 2}
+            assert datasets["pbp"]["scope"] == "season"
+            continue
         assert set(saved["week"]) == {1}
         source_name = "schedules" if name == "vegas" else name
         assert len(saved) == len(

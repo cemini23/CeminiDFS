@@ -128,7 +128,8 @@ def fetch_week_datasets(
     for kind, fetcher in fetchers.items():
         frame = fetcher(season)
         scope = "season"
-        if week > 0 and _week_column(frame) is not None:
+        # PBP must retain prior weeks for DIY walk-forward projection cutoff.
+        if kind != "pbp" and week > 0 and _week_column(frame) is not None:
             frame = filter_by_week(frame, week)
             scope = "week"
         path = out_dir / f"{kind}.parquet"
