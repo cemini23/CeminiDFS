@@ -4,22 +4,24 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-DIY **NFL DFS projection pipeline** (FanDuel-primary). Builds player projections from nflverse data, Vegas lines, and weather — then exports canonical CSVs, normalizes for pydfs, and generates lineups.
+DIY **NFL DFS projection pipeline** (FanDuel-primary). Builds player projections from nflverse play-by-play, Vegas lines, and weather; exports canonical CSVs; normalizes for [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer); and generates MME lineup pools with optional simulation reranking.
 
-Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.com/cemini23/gambling-wiki/blob/main/wiki/concepts/diy-nfl-dfs-model-architecture.md) (K125).
+Architecture and research: [Gambling wiki — DIY NFL DFS model (K125)](https://github.com/cemini23/gambling-wiki/blob/main/wiki/concepts/diy-nfl-dfs-model-architecture.md).
 
 ## Status
+
+All implementation phases (0–5) are **complete**. The repo is ready for historical backtests and live-slate runs when you supply a FanDuel salary export and cached nflverse data.
 
 | Phase | Scope | State |
 |-------|--------|-------|
 | **0** | Package skeleton, scoring, export adapters, CLI, manifest | Complete |
-| **1** | Data backbone — nflverse fetch, Vegas, weather, salary ingest | In progress |
+| **1** | Data backbone — nflverse fetch, Vegas, weather, salary ingest | Complete |
 | **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
 | **3** | End-to-end lineup generation on DIY projections | Complete |
-| **4** | Backtest + calibration vs paid benchmarks | Complete (P4-A/B/C) |
-| **5** | Simulation, ownership, late-swap, copula, sim rerank | Complete (v1 + v2) |
+| **4** | Backtest + calibration vs paid benchmarks | Complete |
+| **5** | Simulation, ownership, late-swap, copula, sim rerank | Complete |
 
-See [PLAN.md](PLAN.md) for the full roadmap.
+See [PLAN.md](PLAN.md) for the execution history and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping.
 
 ## Quick start
 
@@ -29,7 +31,7 @@ cd CeminiDFS
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,data,optimize]"
 
-# Unit tests (no network)
+# Unit + integration tests (no network; e2e tests need pydfs)
 pytest
 
 # Fetch nflverse data for a week (requires nflreadpy + network)
@@ -39,123 +41,172 @@ ceminidfs fetch --season 2024 --week 1
 ceminidfs run --season 2024 --week 1 --salary path/to/fanduel_salaries.csv --stages all
 ```
 
+Outputs land under `runs/{season}_week_{N}/` (canonical CSV, normalized pydfs CSV, lineups, manifest).
+
 ## Pipeline
 
 ```text
-fetch → project → normalize → optimize
+                         ┌─ backtest / benchmark / calibrate (analytics)
+                         │
+fetch → project ─────────┤ optional: simulate (floor/ceil), ownership
+         │               │
+         ▼               │
+     normalize → optimize ─┴─ optional: sim rerank (2000 → 150)
+         │
+         └── late-swap (post-lock, locked teams preserved)
 ```
 
-| Stage | Command | Output |
-|-------|---------|--------|
-| `fetch` | `ceminidfs fetch --season YYYY --week N` | Parquet cache (schedules, pbp, injuries, vegas, weather) + fetch manifest |
-| `project` | `ceminidfs project --season YYYY --week N --salary FILE` | Canonical projection CSV with DIY projections when cache exists; salary FPPG fallback in auto mode |
-| `salary` | `ceminidfs salary --season YYYY --week N --salary FILE --out FILE` | Canonical CSV from salary only (no projections) |
-| `normalize` | `ceminidfs normalize --in FILE --out FILE --site fanduel` | pydfs importer CSV |
-| `optimize` | `ceminidfs optimize --csv FILE --out FILE` | Lineup CSV |
-| `late-swap` | `ceminidfs late-swap --lineups FILE --players FILE --lock-team KC --out FILE` | Re-optimized lineups with locked-team players preserved |
-| `backtest` | `ceminidfs backtest --season YYYY --start-week N --end-week M` | JSON accuracy report (MAE/RMSE/Spearman) |
-| `benchmark load` | `ceminidfs benchmark load --csv FILE --out snapshot.json` | Parse Stokastic/Labs export to versioned JSON |
-| `benchmark compare` | `ceminidfs benchmark compare --season YYYY --week N --csv FILE` | Benchmark vs actuals (+ DIY side-by-side) |
-| `calibrate` | `ceminidfs calibrate --season YYYY --start-week N --end-week M` | Wiki-ready calibration brief (MD + JSON) |
+| Command | Purpose |
+|---------|---------|
+| `ceminidfs fetch` | Week-scoped parquet cache (schedules, PBP, injuries, Vegas, weather) + manifest |
+| `ceminidfs project` | Canonical projection CSV (DIY or salary FPPG fallback) |
+| `ceminidfs salary` | Salary-only canonical CSV (no projections) |
+| `ceminidfs normalize` | Canonical → pydfs site CSV |
+| `ceminidfs optimize` | pydfs lineup generation |
+| `ceminidfs run` | Orchestrated multi-stage run with `RunManifest` |
+| `ceminidfs late-swap` | Re-optimize after teams lock |
+| `ceminidfs backtest` | Walk-forward MAE / RMSE / Spearman vs realized PBP points |
+| `ceminidfs benchmark load` | Parse Stokastic/Labs export → versioned JSON snapshot |
+| `ceminidfs benchmark compare` | Paid export vs actuals (+ DIY side-by-side) |
+| `ceminidfs calibrate` | Wiki-ready calibration brief (Markdown + JSON) |
+| `ceminidfs ownership calibrate` | Fit ownership calibration from paid export labels |
 
-Run all stages: `ceminidfs run --season 2024 --week 1 --salary FILE --stages all`
+### Common invocations
 
-Simulation rerank generates a larger pydfs candidate pool, scores each lineup against simulated player outcomes, and writes the top final lineups:
+**Full slate (DIY projections, 150 lineups):**
 
 ```bash
-ceminidfs run --season 2024 --week 1 --salary FILE --stages all --sim-rerank --candidates 2000 --final-count 150
-ceminidfs optimize --csv runs/2024_week_1/normalized_players.csv --out runs/2024_week_1/lineups.csv --sim-rerank
+ceminidfs fetch --season 2024 --week 5
+ceminidfs run --season 2024 --week 5 --salary path/to/fanduel.csv --stages all
 ```
 
-Historical accuracy (no salary CSV required):
+**Sim rerank (generate 2000 candidates, keep top 150 by mean sim score):**
 
 ```bash
-ceminidfs fetch --season 2024 --week 1   # populates season PBP cache
-ceminidfs backtest --season 2024 --start-week 5 --end-week 10 --out reports/backtest_2024_w5-10.json
+ceminidfs run --season 2024 --week 5 --salary FILE --stages all \
+  --sim-rerank --candidates 2000 --final-count 150
+```
 
-# Compare a manual Stokastic/Labs export against realized points
+**Historical accuracy (no salary CSV):**
+
+```bash
+ceminidfs fetch --season 2024 --week 1
+ceminidfs backtest --season 2024 --start-week 5 --end-week 10 \
+  --out reports/backtest_2024_w5-10.json
+```
+
+**Compare DIY to a Stokastic/Labs export:**
+
+```bash
 ceminidfs benchmark compare --season 2024 --week 5 --csv path/to/stokastic-export.csv
+ceminidfs calibrate --season 2024 --start-week 5 --end-week 10 \
+  --benchmark-csv path/to/stokastic-export.csv --benchmark-week 10
+```
 
-# Full calibration brief for gambling wiki (optional benchmark snapshot week)
-ceminidfs calibrate --season 2024 --start-week 5 --end-week 10 --benchmark-csv path/to/stokastic-export.csv --benchmark-week 10
+**Late swap after early games lock:**
+
+```bash
+ceminidfs late-swap \
+  --lineups runs/2024_week_5/lineups.csv \
+  --players runs/2024_week_5/normalized_players.csv \
+  --lock-team KC --out runs/2024_week_5/lineups_late_swap.csv
 ```
 
 ## Configuration
 
-| File | Tracked | Purpose |
-|------|---------|---------|
-| `config/nfl_dfs.yaml` | Yes | Seasons, rolling windows, artifact paths |
-| `.env` | No (gitignored) | Optional API keys — copy from `.env.example` |
+Primary config: [`config/nfl_dfs.yaml`](config/nfl_dfs.yaml). Optional secrets: copy [`.env.example`](.env.example) to `.env` (gitignored).
 
-`projection_mode` in `config/nfl_dfs.yaml` controls projection behavior:
+| Key | Default | Description |
+|-----|---------|-------------|
+| `projection_mode` | `auto` | `auto` \| `diy` \| `fppg` — see below |
+| `simulate.enabled` | `false` | Attach `Projection Floor` / `Projection Ceil` to canonical CSV |
+| `simulate.method` | `team_shock` | `team_shock` \| `copula` (role-prior Gaussian copula) |
+| `simulate.n_iterations` | `5000` | Monte Carlo draws per player |
+| `ownership.enabled` | `false` | Attach `Projected Ownership` column |
+| `ownership.calibration_path` | `null` | JSON from `ceminidfs ownership calibrate` |
+| `sim_rerank.enabled` | `false` | Score pydfs candidate pool with sim matrix |
+| `sim_rerank.candidates` | `2000` | pydfs pool size before rerank |
+| `sim_rerank.final_count` | `150` | Lineups written after rerank |
 
-- `auto` (default): use cached DIY projections when `fetch` artifacts exist, otherwise fall back to salary-export FPPG.
-- `diy`: require cached `vegas.parquet` and `pbp.parquet`; run `ceminidfs fetch --season YYYY --week N` before `project`.
-- `fppg`: use salary-export FPPG placeholders.
+**Projection modes**
 
-Optional v2 layers in `config/nfl_dfs.yaml` (default off):
+- `auto` — DIY when fetch cache exists; otherwise salary-export FPPG.
+- `diy` — Require cached Vegas/PBP; fail if missing.
+- `fppg` — Salary FPPG placeholders only (wiring test / no model).
+
+**Enable distribution layers:**
 
 ```yaml
 simulate:
   enabled: true
-  method: copula      # or team_shock (v1 default)
+  method: copula
+ownership:
+  enabled: true
+  calibration_path: artifacts/ownership_calibration.json
 sim_rerank:
   enabled: true
   candidates: 2000
   final_count: 150
-ownership:
-  enabled: true
-  calibration_path: artifacts/ownership_calibration.json  # optional
 ```
 
-Calibrate ownership from a Stokastic/Labs export:
+**Ownership calibration** (optional, uses paid export as label source):
 
 ```bash
-ceminidfs ownership calibrate --labels path/to/export.csv --salary path/to/salary.csv \
-  --season 2024 --week 5 --out artifacts/ownership_calibration.json
+ceminidfs ownership calibrate \
+  --labels path/to/stokastic.csv \
+  --salary path/to/salary.csv \
+  --season 2024 --week 5 \
+  --out artifacts/ownership_calibration.json
 ```
 
-**Secrets:** Never commit `.env`. API keys (`ODDS_API_KEY`, etc.) are optional and loaded only from your local environment.
+Never commit `.env`. `ODDS_API_KEY` and `VISUAL_CROSSING_KEY` are optional.
 
 ## Data sources
 
 | Source | Role | License |
 |--------|------|---------|
 | [nflreadpy](https://github.com/nflverse/nflreadpy) | PBP, schedules, injuries | CC-BY 4.0 |
-| [Open-Meteo](https://open-meteo.com/) | Weather forecast | Free personal use |
+| [Open-Meteo](https://open-meteo.com/) | Kickoff-hour weather | Free personal use |
 | FanDuel / DraftKings | Salary CSV | Manual export only |
 | [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer) | Lineup generation | MIT |
+| Stokastic / FantasyLabs | Benchmark + ownership labels | Paid; manual CSV only |
 
-Stokastic / FantasyLabs exports are **benchmark-only** — not required to run.
+Paid tools are **benchmark-only** — not a runtime dependency.
 
 ## Project layout
 
 ```text
 src/ceminidfs/
-  data/          # fetch, vegas, weather
-  models/        # scoring, implied totals, volume, usage, stats
-  pipeline/      # fetch, project, backtest
-  export/        # canonical CSV, normalize, optimize
-  orchestrator/  # stage DAG + RunManifest
-config/          # nfl_dfs.yaml
-tests/           # unit + integration tests
-artifacts/       # gitignored — parquet, CSV, manifests
+  cli.py              # Command-line entrypoint
+  config.py           # YAML config loader
+  manifest.py         # RunManifest + artifact tracking
+  data/               # fetch, vegas, weather, stadiums, salary, benchmark, ownership_labels
+  models/             # volume, usage, stats, scoring, simulate, correlation, ownership
+  pipeline/           # fetch, project, engine, backtest, calibration, metrics
+  export/             # canonical, normalize, optimize, sim_rerank, late_swap
+  orchestrator/       # stage DAG, validation
+config/nfl_dfs.yaml
+tests/                # unit + integration + e2e (103 tests)
+artifacts/            # gitignored — parquet cache, reports
+runs/                 # gitignored — per-slate outputs + manifests
+reports/              # gitignored — backtest/calibration JSON and briefs
+prompts/              # Opus execution plans + audit prompts
 ```
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,data,optimize]"
 pytest
 ruff check src tests
 ```
 
-CI runs on every push to `main` (pytest + ruff, Python 3.11 and 3.12).
+CI (`.github/workflows/ci.yml`) runs pytest + ruff on Python 3.11 and 3.12 with `[dev,data,optimize]` installed.
 
 ## Related
 
-- [PLAN.md](PLAN.md) — implementation phases
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer mapping
+- [PLAN.md](PLAN.md) — phased implementation record
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — wiki layer → module map
 - [K125 master research plan](https://github.com/cemini23/gambling-wiki/blob/main/wiki/sources/research-diy-dfs-model-master-plan-2026-06-20.md)
 
 ## License

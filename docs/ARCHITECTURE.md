@@ -1,31 +1,151 @@
 # Architecture
 
-Canonical design doc: [Gambling wiki — DIY NFL DFS model architecture](https://github.com/cemini23/gambling-wiki/blob/main/wiki/concepts/diy-nfl-dfs-model-architecture.md)
+Canonical design reference: [Gambling wiki — DIY NFL DFS model architecture (K125)](https://github.com/cemini23/gambling-wiki/blob/main/wiki/concepts/diy-nfl-dfs-model-architecture.md)
 
-## Layer mapping
+Implementation record: [PLAN.md](../PLAN.md)
 
-| Wiki layer | CeminiDFS module | Phase |
+## System overview
+
+CeminiDFS is a **stat-first** NFL DFS pipeline. It ingests nflverse data and manual salary exports, produces site-scored player projections, optionally simulates outcome distributions, and feeds [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer) for FanDuel/DraftKings lineup generation.
+
+```text
+┌─────────────┐     ┌──────────────────────────────────────┐
+│ nflreadpy   │────▶│ fetch → week cache (parquet)         │
+│ Open-Meteo  │     └──────────────────────────────────────┘
+└─────────────┘                    │
+                                   ▼
+┌─────────────┐     ┌──────────────────────────────────────┐
+│ FD/DK       │────▶│ project                              │
+│ salary CSV  │     │  volume → usage → stats → scoring    │
+└─────────────┘     │  optional: simulate, ownership       │
+                    └──────────────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────────────┐
+                    │ normalize → pydfs CSV              │
+                    └──────────────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────────────┐
+                    │ optimize (pydfs)                     │
+                    │  optional: sim_rerank                │
+                    └──────────────────────────────────────┘
+                                   │
+                                   ▼
+                         lineups.csv + RunManifest
+
+Analytics (parallel): backtest · benchmark · calibrate
+Post-lock: late_swap
+```
+
+## Wiki layer → module mapping
+
+| Wiki layer | CeminiDFS module | Notes |
 |------------|------------------|-------|
-| Data + legal | `ceminidfs.data` | 1 |
-| Implied totals | `ceminidfs.models.implied_totals` | 1–2 |
-| Volume / pace | `ceminidfs.models.volume` | 2 |
-| Usage | `ceminidfs.models.usage` | 2 |
-| Stat engine | `ceminidfs.models.stats` | 2 |
-| Scoring | `ceminidfs.models.scoring` | 0 ✅ |
-| Distribution | `ceminidfs.pipeline.simulate` | 5 |
-| Export | `ceminidfs.export` | 0 ✅ |
-| Orchestration | `ceminidfs.orchestrator` | 0 ✅ |
+| Data + legal | `ceminidfs.data.fetch`, `data.salary` | nflreadpy; manual salary only |
+| Vegas / ITT | `data.vegas`, `models.implied_totals` | Historical spreads/totals from schedules |
+| Weather | `data.weather`, `data.stadiums` | Open-Meteo forecast at kickoff |
+| Volume / pace | `models.volume` | Plays, pass rate, allocation |
+| Usage | `models.usage` | Rolling shares, WOPR, QB starter |
+| Stat engine | `models.stats` | Regressed YPA/YPC/YPT → counting stats |
+| Scoring | `models.scoring` | FD half-PPR, DK full-PPR |
+| Correlation | `models.correlation` | Role-prior matrix (W-CORR) |
+| Distribution | `models.simulate` | team_shock or Gaussian copula MC |
+| Ownership | `models.ownership`, `data.ownership_labels` | Heuristic + optional ridge calibration |
+| Export | `export.canonical`, `export.normalize`, `export.optimize` | pydfs handoff |
+| Sim rerank | `export.sim_rerank` | Candidate pool → top-N by sim score |
+| Late swap | `export.late_swap` | Locked-team pydfs rerun |
+| Backtest | `pipeline.backtest`, `pipeline.metrics` | Walk-forward vs PBP actuals |
+| Benchmark | `data.benchmark`, `pipeline.benchmark_compare` | Stokastic/Labs CSV |
+| Calibration | `pipeline.calibration` | Wiki brief + JSON |
+| Orchestration | `orchestrator.run`, `orchestrator.validate` | Stage DAG, manifest, lineup QA |
 
-## v1 paradigm
+## Projection engine (Phase 2)
 
-**Stat-first regression:** volume × usage × efficiency → counting stats → FD/DK scoring.
+Data flow for DIY mode (`projection_mode: diy` or `auto` with cache):
 
-v2 adds Monte Carlo + copula + ownership field simulation.
+```text
+vegas.parquet + pbp.parquet (+ weather.parquet)
+        │
+        ▼
+  build_week_volume()     team plays, pass attempts, rush attempts
+        │
+        ▼
+  build_week_usage()      player targets, carries, pass attempts
+        │
+        ▼
+  build_week_stats()      counting stat projections
+        │
+        ▼
+  add_fantasy_points()    fd_projection, dk_projection
+        │
+        ▼
+  merge → canonical CSV
+```
+
+Historical PBP is cut at `week < target` for walk-forward integrity (backtest and live project).
+
+Join key for salary ↔ model: **name + team + position** (`normalize_join_key` in `pipeline/engine.py`).
+
+## Distribution layer (Phase 5)
+
+| Method | Module | When to use |
+|--------|--------|-------------|
+| `team_shock` | `simulate.simulate_fd_points` | Fast default; shared latent per team |
+| `copula` | `simulate` + `correlation` | Role-prior correlations (QB–WR1, bring-back, etc.) |
+
+Simulation outputs **P20 / P50 / P90** as `Projection Floor` / `Projection Ceil` on the canonical CSV.
+
+**Sim rerank** (`export/sim_rerank.py`): pydfs generates `candidates` lineups; each lineup is scored by mean simulated FD points across players; top `final_count` are written.
+
+## Analytics layer (Phase 4)
+
+| Tool | Input | Output |
+|------|-------|--------|
+| `backtest` | Season PBP cache | JSON MAE/RMSE/Spearman per week |
+| `benchmark compare` | Paid export CSV + PBP | DIY vs benchmark accuracy |
+| `calibrate` | Week range (+ optional benchmark) | Markdown wiki brief + JSON |
+
+No salary CSV required for backtest — roster is inferred from historical usage on teams in the slate.
+
+## Orchestration and artifacts
+
+`ceminidfs run` executes stages in order: `fetch → project → normalize → optimize`.
+
+Each run writes `runs/{season}_week_{N}/manifest.json` (`RunManifest`) with:
+
+- Git commit and config hash
+- Stage completion status
+- Artifact paths (canonical, normalized, lineups)
+- `lineup_count`, `projection_source`, validation summary
+
+Lineup CSVs are validated for row count and empty slots (`orchestrator/validate.py`).
+
+## Configuration surface
+
+See [`config/nfl_dfs.yaml`](../config/nfl_dfs.yaml):
+
+- `projection_mode` — `auto` | `diy` | `fppg`
+- `simulate.*` — Monte Carlo toggles and method
+- `ownership.*` — ownership projection and calibration path
+- `sim_rerank.*` — candidate pool reranking
+- `volume.*`, `usage.*`, `stats.shrinkage.*` — model hyperparameters
+
+## External dependencies
+
+| Package | Extra | Purpose |
+|---------|-------|---------|
+| `nflreadpy` | `[data]` | nflverse fetch |
+| `pyarrow` | `[data]` | Parquet cache |
+| `pydfs-lineup-optimizer` | `[optimize]` | Lineup generation + late swap |
+| `pytest`, `ruff` | `[dev]` | CI |
 
 ## Cross-wiki resources
 
-- Weather APIs: `@osint-wiki` (Open-Meteo, NWS, Visual Crossing)
-- Pipeline DAG: `@ccc-wiki` plan-then-execute orchestration
-- CLV benchmark: `@gambling-wiki` line-shopping-and-clv
-
-See [PLAN.md](../PLAN.md) for execution phases.
+- Correlation priors: `@gambling-wiki/concepts/dfs-correlation-stacking.md`
+- Distribution design: `@gambling-wiki/concepts/dfs-distribution-layer.md`
+- Backtest targets: `@gambling-wiki/concepts/dfs-backtesting-framework.md`
+- Ownership spec: `@gambling-wiki/concepts/dfs-ownership-projection.md`
+- Injury / late swap ops: `@gambling-wiki/concepts/dfs-injury-and-news-workflow.md`
+- Weather: `@osint-wiki/entities/data-sources/open-meteo.md`
+- Orchestration pattern: `@ccc-wiki/concepts/plan-then-execute-topological-orchestration.md`
