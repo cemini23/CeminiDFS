@@ -16,7 +16,7 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.
 | **1** | Data backbone — nflverse fetch, Vegas, weather, salary ingest | In progress |
 | **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
 | **3** | End-to-end lineup generation on DIY projections | Partial (export layer done) |
-| **4** | Backtest + calibration vs paid benchmarks | P4-A complete (walk-forward CLI) |
+| **4** | Backtest + calibration vs paid benchmarks | Complete (P4-A/B/C) |
 
 See [PLAN.md](PLAN.md) for the full roadmap.
 
@@ -54,6 +54,7 @@ fetch → project → normalize → optimize
 | `backtest` | `ceminidfs backtest --season YYYY --start-week N --end-week M` | JSON accuracy report (MAE/RMSE/Spearman) |
 | `benchmark load` | `ceminidfs benchmark load --csv FILE --out snapshot.json` | Parse Stokastic/Labs export to versioned JSON |
 | `benchmark compare` | `ceminidfs benchmark compare --season YYYY --week N --csv FILE` | Benchmark vs actuals (+ DIY side-by-side) |
+| `calibrate` | `ceminidfs calibrate --season YYYY --start-week N --end-week M` | Wiki-ready calibration brief (MD + JSON) |
 
 Run all stages: `ceminidfs run --season 2024 --week 1 --salary FILE --stages all`
 
@@ -65,6 +66,9 @@ ceminidfs backtest --season 2024 --start-week 5 --end-week 10 --out reports/back
 
 # Compare a manual Stokastic/Labs export against realized points
 ceminidfs benchmark compare --season 2024 --week 5 --csv path/to/stokastic-export.csv
+
+# Full calibration brief for gambling wiki (optional benchmark snapshot week)
+ceminidfs calibrate --season 2024 --start-week 5 --end-week 10 --benchmark-csv path/to/stokastic-export.csv --benchmark-week 10
 ```
 
 ## Configuration

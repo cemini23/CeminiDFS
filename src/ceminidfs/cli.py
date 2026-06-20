@@ -46,6 +46,19 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     write_benchmark_compare_report = None  # type: ignore[assignment]
     format_benchmark_compare = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.pipeline.calibration import (
+        build_calibration_report,
+        render_calibration_brief,
+        write_calibration_brief,
+        write_calibration_json,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    build_calibration_report = None  # type: ignore[assignment]
+    write_calibration_brief = None  # type: ignore[assignment]
+    write_calibration_json = None  # type: ignore[assignment]
+    render_calibration_brief = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -161,6 +174,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("reports/benchmark_compare.json"),
     )
     benchmark_compare.set_defaults(handler=_cmd_benchmark_compare)
+
+    calibrate = subparsers.add_parser("calibrate", help="Generate calibration wiki brief from backtest results")
+    calibrate.add_argument("--season", type=int, required=True)
+    calibrate.add_argument("--start-week", type=int, required=True)
+    calibrate.add_argument("--end-week", type=int, required=True)
+    calibrate.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=Path("reports/calibration_brief.md"),
+        help="Markdown wiki brief path (default: reports/calibration_brief.md)",
+    )
+    calibrate.add_argument(
+        "--json-out",
+        dest="json_output_path",
+        type=Path,
+        default=Path("reports/calibration.json"),
+        help="Structured JSON report path (default: reports/calibration.json)",
+    )
+    calibrate.add_argument("--benchmark-csv", dest="benchmark_csv", type=Path, help="Optional paid export for one week")
+    calibrate.add_argument(
+        "--benchmark-week",
+        type=int,
+        help="Week for benchmark CSV (default: end-week)",
+    )
+    calibrate.set_defaults(handler=_cmd_calibrate)
 
     return parser
 
@@ -279,4 +318,29 @@ def _cmd_benchmark_compare(args: argparse.Namespace) -> int:
     report_path = write_benchmark_compare_report(result, args.output_path)
     print(format_benchmark_compare(result))
     print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_calibrate(args: argparse.Namespace) -> int:
+    if (
+        build_calibration_report is None
+        or write_calibration_brief is None
+        or write_calibration_json is None
+        or render_calibration_brief is None
+    ):
+        raise RuntimeError("Calibrate unavailable: ceminidfs.pipeline.calibration import failed")
+    config = runtime_config()
+    report = build_calibration_report(
+        args.season,
+        args.start_week,
+        args.end_week,
+        benchmark_csv=args.benchmark_csv,
+        benchmark_week=args.benchmark_week,
+        config=config,
+    )
+    brief_path = write_calibration_brief(report, args.output_path)
+    json_path = write_calibration_json(report, args.json_output_path)
+    print(render_calibration_brief(report))
+    print(f"\nBrief: {brief_path}")
+    print(f"JSON:  {json_path}")
     return 0

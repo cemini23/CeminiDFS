@@ -20,12 +20,13 @@ def accuracy_metrics(projections: list[float] | pd.Series, actuals: list[float] 
     left = pd.Series(projections, dtype=float)
     right = pd.Series(actuals, dtype=float)
     if left.empty or right.empty:
-        return {"mae": 0.0, "rmse": 0.0, "spearman": 0.0, "n": 0.0}
+        return {"mae": 0.0, "rmse": 0.0, "spearman": 0.0, "bias": 0.0, "n": 0.0}
 
     errors = left - right
     return {
         "mae": float(errors.abs().mean()),
         "rmse": float((errors**2).mean()) ** 0.5,
         "spearman": spearman_correlation(left, right),
+        "bias": float(errors.mean()),
         "n": float(len(errors)),
     }
