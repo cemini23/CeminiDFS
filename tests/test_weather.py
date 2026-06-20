@@ -58,7 +58,7 @@ def test_build_week_weather_skips_open_meteo_for_dome():
     result = weather.build_week_weather_from_schedules(schedules, opener=fail_opener)
 
     assert len(result) == 1
-    assert result.loc[0, "weather_exposed"] == False
+    assert not result.loc[0, "weather_exposed"]
     assert pd.isna(result.loc[0, "wind_speed_10m_mph"])
 
 
@@ -94,7 +94,7 @@ def test_build_week_weather_fetches_open_meteo_for_open_air_game():
     )
 
     assert len(result) == 1
-    assert result.loc[0, "weather_exposed"] == True
+    assert result.loc[0, "weather_exposed"]
     assert result.loc[0, "temperature_2m_f"] == 68.0
     assert result.loc[0, "wind_speed_10m_mph"] == 11.0
     assert result.loc[0, "stadium_name"] == "GEHA Field at Arrowhead Stadium"
