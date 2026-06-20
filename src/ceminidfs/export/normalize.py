@@ -146,6 +146,13 @@ def _game(row: dict[str, str]) -> str:
     return f"{team}@{opp}" if team and opp else ""
 
 
+def _site_position(pos: str, site_key: str) -> str:
+    normalized = pos.upper()
+    if normalized in {"DEF", "DST", "D"}:
+        return "D" if site_key == "fanduel" else "DST"
+    return normalized
+
+
 def _with_pass_through(row: dict[str, str], out_row: dict[str, str]) -> dict[str, str]:
     for field in PASS_THROUGH_FIELDS:
         value = pick(row, (field.lower(), field))
@@ -173,7 +180,7 @@ def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fandu
 
         for row in reader:
             name = _full_name(row)
-            pos = pick(row, keys["position"]).upper()
+            pos = _site_position(pick(row, keys["position"]), site_key)
             salary = _clean_money(pick(row, keys["salary"]))
             projection = pick(row, keys["projection"]) or "0"
             team = pick(row, TEAM_KEYS) or "UNK"

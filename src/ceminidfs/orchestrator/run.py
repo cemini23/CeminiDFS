@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ceminidfs.manifest import RunManifest, config_sha256, git_commit
+from ceminidfs.orchestrator.validate import validate_lineups_csv
 
 try:
     from ceminidfs.pipeline.project import project_week
@@ -78,13 +79,28 @@ def run_pipeline(
             manifest.write(manifest_path)
 
         if "optimize" in selected_stages:
+            expected_count = int(cfg.get("count", 150))
             lineups_csv = _run_optimize(
                 normalized_csv,
                 lineups_csv,
-                int(cfg.get("count", 150)),
+                expected_count,
                 stage_config,
             )
+            validation = validate_lineups_csv(
+                lineups_csv,
+                site=str(cfg.get("site", "fanduel")),
+                expected_count=expected_count,
+            )
             manifest.record_artifact("lineups_csv", lineups_csv)
+            projection_mode = str(cfg.get("projection_mode", "auto")).lower()
+            manifest.input_artifacts.update(
+                {
+                    "lineup_count": validation["lineup_count"],
+                    "lineup_validation": validation,
+                    "projection_mode": projection_mode,
+                    "projection_source": _projection_source(projection_mode, work_dir),
+                }
+            )
             manifest.record_stage("optimize", "complete")
             manifest.write(manifest_path)
 
@@ -115,6 +131,16 @@ def _parse_stages(stages: str | Iterable[str]) -> list[str]:
         optimize_idx = selected.index("optimize")
         selected.insert(optimize_idx, "normalize")
     return selected
+
+
+def _projection_source(projection_mode: str, work_dir: Path) -> str:
+    if projection_mode == "diy":
+        return "diy"
+    if projection_mode == "fppg":
+        return "fppg"
+    if (work_dir / "player_projection_base.parquet").is_file():
+        return "diy"
+    return "fppg"
 
 
 def _run_fetch(season: int, week: int, config: Mapping[str, Any]) -> Path:

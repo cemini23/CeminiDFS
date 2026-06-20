@@ -84,6 +84,10 @@ def optimize_lineups(
     Site, Sport, get_optimizer, TeamStack = _load_pydfs()
     optimizer = get_optimizer(_site_enum(site_key, Site), Sport.FOOTBALL)
     optimizer.load_players_from_csv(str(csv_file))
+    _relax_tiny_slate_limits(optimizer, site_key)
+
+    if _is_tiny_slate(optimizer) and max_repeating_players == 7:
+        max_repeating_players = None
 
     if max_repeating_players is not None:
         optimizer.set_max_repeating_players(max_repeating_players)
@@ -99,6 +103,9 @@ def optimize_lineups(
         pos, n = parts[0], int(parts[1])
         optimizer.add_stack(TeamStack(n, for_positions=[pos.upper()]))
 
+    if _is_tiny_slate(optimizer) and max_exposure == 0.35:
+        max_exposure = None
+
     lineups = list(optimizer.optimize(n=count, max_exposure=max_exposure or None))
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
@@ -112,6 +119,18 @@ def optimize_lineups(
             writer.writerow(_lineup_row(lineup.players, header))
 
     return len(lineups)
+
+
+def _relax_tiny_slate_limits(optimizer: Any, site_key: str) -> None:
+    if site_key != "fanduel" or not _is_tiny_slate(optimizer):
+        return
+    lineup_size = len(LINEUP_HEADERS[site_key])
+    optimizer.settings.max_from_one_team = lineup_size
+    optimizer.settings.min_teams = len(optimizer.player_pool.available_teams)
+
+
+def _is_tiny_slate(optimizer: Any) -> bool:
+    return len(getattr(optimizer.player_pool, "available_teams", []) or []) <= 2
 
 
 def main() -> int:

@@ -37,6 +37,7 @@ def project_week(
         try:
             stats_df = build_diy_projections(season, week, rows, cfg)
             rows = merge_projections_into_canonical(rows, stats_df)
+            rows = _fill_dst_salary_fppg(rows)
             _write_projection_base(stats_df, cfg)
             if mode == "auto" and not any(
                 row.get("fd_projection") or row.get("dk_projection") for row in rows
@@ -55,6 +56,34 @@ def _site_from_rows(rows: list[dict[str, Any]]) -> str:
     if rows and rows[0].get("dk_id") and not rows[0].get("fd_id"):
         return "draftkings"
     return "fanduel"
+
+
+def _fill_dst_salary_fppg(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    filled: list[dict[str, Any]] = []
+    for row in rows:
+        mapped = dict(row)
+        salary_fppg = row.get("salary_fppg", "")
+        if _is_empty_projection(mapped.get("fd_projection")) and _position_is_dst(
+            mapped.get("fd_position")
+        ):
+            mapped["fd_projection"] = salary_fppg
+        if _is_empty_projection(mapped.get("dk_projection")) and _position_is_dst(
+            mapped.get("dk_position")
+        ):
+            mapped["dk_projection"] = salary_fppg
+        filled.append(mapped)
+    return filled
+
+
+def _position_is_dst(value: Any) -> bool:
+    return str(value or "").strip().upper() in {"DEF", "DST"}
+
+
+def _is_empty_projection(value: Any) -> bool:
+    if value in (None, ""):
+        return True
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return bool(pd.isna(numeric) or float(numeric) == 0.0)
 
 
 def _write_projection_base(stats_df: pd.DataFrame, config: Mapping[str, Any]) -> Path:

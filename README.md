@@ -15,7 +15,7 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model](https://github.
 | **0** | Package skeleton, scoring, export adapters, CLI, manifest | Complete |
 | **1** | Data backbone — nflverse fetch, Vegas, weather, salary ingest | In progress |
 | **2** | Stat-first projection engine (volume → usage → stats → scoring) | Complete |
-| **3** | End-to-end lineup generation on DIY projections | Partial (export layer done) |
+| **3** | End-to-end lineup generation on DIY projections | Complete |
 | **4** | Backtest + calibration vs paid benchmarks | Complete (P4-A/B/C) |
 
 See [PLAN.md](PLAN.md) for the full roadmap.

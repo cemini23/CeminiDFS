@@ -71,16 +71,16 @@ fetch → project → [sim v2] → normalize → optimize
 
 **Exit criteria:** Canonical CSV with `fd_projection` per player for a historical week. ✅ met
 
-### Phase 3 — Integration + optimize (Week 3) — partial
+### Phase 3 — Integration + optimize (Week 3) ✅ complete
 
 | Track | Deliverable | Status |
 |-------|-------------|--------|
 | P3-A | `export/canonical.py` — schema from integration spec | done |
 | P3-B | `export/normalize.py` — `--site fanduel\|draftkings` | done |
 | P3-C | `export/optimize.py` — pydfs wrapper | done |
-| P3-D | End-to-end `ceminidfs run --week N` on manual salary slate | needs Phase 2 projections |
+| P3-D | End-to-end `ceminidfs run --week N` on manual salary slate | done |
 
-**Exit criteria:** 150 FD lineups from DIY projections on a real slate CSV.
+**Exit criteria:** 150 FD lineups from DIY projections on a real slate CSV. ✅ met
 
 ### Phase 4 — Backtest + calibration (Week 4)
 
@@ -157,4 +157,4 @@ CeminiDFS/
 
 **Current workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
 
-**Active:** Phase 2 complete — project now wires cached volume → usage → stats → scoring.
+**Active:** Phase 3 complete — pipeline now projects, normalizes, optimizes, validates 150 lineups, and records lineup/projection metadata in the manifest.
