@@ -18,6 +18,16 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
+def runtime_config(**overrides: Any) -> Dict[str, Any]:
+    """Load nfl_dfs.yaml defaults and apply CLI/runtime overrides."""
+
+    cfg = load_config()
+    for key, value in overrides.items():
+        if value is not None:
+            cfg[key] = value
+    return cfg
+
+
 def load_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
     config = deepcopy(DEFAULT_CONFIG)

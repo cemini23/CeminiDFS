@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
+
+from ceminidfs.config import PROJECT_ROOT
 
 
 @dataclass
@@ -30,3 +34,36 @@ class RunManifest:
 
     def record_stage(self, name: str, status: str) -> None:
         self.stage_status[name] = status
+
+    def record_artifact(self, name: str, path: Union[str, Path]) -> None:
+        artifacts = self.input_artifacts.setdefault("artifacts", {})
+        artifacts[name] = str(path)
+
+
+def git_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=PROJECT_ROOT,
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def config_sha256(config: Mapping[str, Any]) -> str:
+    payload = json.dumps(_jsonable(config), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value

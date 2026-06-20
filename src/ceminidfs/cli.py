@@ -4,10 +4,12 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
+from ceminidfs.config import runtime_config
+
 try:
     from ceminidfs.orchestrator.run import run_pipeline
     from ceminidfs.orchestrator.run import _run_fetch, _run_normalize, _run_optimize
-except Exception:  # pragma: no cover - defensive for partial installs
+except ImportError:  # pragma: no cover - defensive for partial installs
     run_pipeline = None  # type: ignore[assignment]
     _run_fetch = None  # type: ignore[assignment]
     _run_normalize = None  # type: ignore[assignment]
@@ -15,7 +17,7 @@ except Exception:  # pragma: no cover - defensive for partial installs
 
 try:
     from ceminidfs.pipeline.project import project_week
-except Exception:  # pragma: no cover - defensive for partial installs
+except ImportError:  # pragma: no cover - defensive for partial installs
     project_week = None  # type: ignore[assignment]
 
 
@@ -35,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = subparsers.add_parser("fetch", help="Fetch source data for a season or week")
     fetch.add_argument("--season", type=int, required=True)
     fetch.add_argument("--week", type=int)
+    fetch.add_argument(
+        "--allow-stub",
+        action="store_true",
+        help="Write a stub artifact when nflreadpy is unavailable",
+    )
     fetch.set_defaults(handler=_cmd_fetch)
 
     project = subparsers.add_parser("project", help="Create canonical placeholder projections")
@@ -53,13 +60,25 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--csv", dest="csv_path", type=Path, required=True)
     optimize.add_argument("--out", dest="output_path", type=Path, required=True)
     optimize.add_argument("--count", type=int, default=150)
+    optimize.add_argument("--site", default="fanduel")
     optimize.set_defaults(handler=_cmd_optimize)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
     run.add_argument("--season", type=int, required=True)
     run.add_argument("--week", type=int, required=True)
     run.add_argument("--salary", type=Path, required=True)
-    run.add_argument("--stages", default="all", help="all or comma-separated: fetch,project,normalize,optimize")
+    run.add_argument("--site", default="fanduel")
+    run.add_argument("--count", type=int, default=150)
+    run.add_argument(
+        "--stages",
+        default="all",
+        help="all or comma-separated: fetch,project,normalize,optimize",
+    )
+    run.add_argument(
+        "--allow-stub",
+        action="store_true",
+        help="Allow fetch stage to write stub artifacts when data deps are missing",
+    )
     run.set_defaults(handler=_cmd_run)
 
     return parser
@@ -69,7 +88,11 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
     if _run_fetch is None:
         raise RuntimeError("Fetch stage unavailable: orchestrator import failed")
     week = args.week if args.week is not None else 0
-    artifact = _run_fetch(args.season, week, {"work_dir": Path("runs") / f"{args.season}_fetch"})
+    config = runtime_config(
+        work_dir=Path("runs") / f"{args.season}_fetch",
+        allow_stub=args.allow_stub,
+    )
+    artifact = _run_fetch(args.season, week, config)
     print(artifact)
     return 0
 
@@ -77,7 +100,8 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
 def _cmd_project(args: argparse.Namespace) -> int:
     if project_week is None:
         raise RuntimeError("Projection stage unavailable: ceminidfs.pipeline.project import failed")
-    output = project_week(args.season, args.week, args.salary, {})
+    config = runtime_config(work_dir=Path("runs") / f"{args.season}_week_{args.week}")
+    output = project_week(args.season, args.week, args.salary, config)
     print(output)
     return 0
 
@@ -85,7 +109,8 @@ def _cmd_project(args: argparse.Namespace) -> int:
 def _cmd_normalize(args: argparse.Namespace) -> int:
     if _run_normalize is None:
         raise RuntimeError("Normalize stage unavailable: orchestrator import failed")
-    output = _run_normalize(args.input_path, args.output_path, site=args.site, config={})
+    config = runtime_config(site=args.site)
+    output = _run_normalize(args.input_path, args.output_path, site=args.site, config=config)
     print(output)
     return 0
 
@@ -93,7 +118,8 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
 def _cmd_optimize(args: argparse.Namespace) -> int:
     if _run_optimize is None:
         raise RuntimeError("Optimize stage unavailable: orchestrator import failed")
-    output = _run_optimize(args.csv_path, args.output_path, args.count, {})
+    config = runtime_config(site=args.site, count=args.count)
+    output = _run_optimize(args.csv_path, args.output_path, args.count, config)
     print(output)
     return 0
 
@@ -101,12 +127,17 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     if run_pipeline is None:
         raise RuntimeError("Run pipeline unavailable: orchestrator import failed")
+    config = runtime_config(
+        count=args.count,
+        site=args.site,
+        allow_stub=args.allow_stub,
+    )
     manifest = run_pipeline(
         season=args.season,
         week=args.week,
         salary_path=args.salary,
         stages=args.stages,
-        config={"count": 150},
+        config=config,
     )
     print(manifest)
     return 0

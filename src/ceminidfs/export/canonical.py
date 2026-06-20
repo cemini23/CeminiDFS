@@ -28,6 +28,11 @@ CANONICAL_FIELDS = [
     "injury_status",
 ]
 
+OPTIONAL_DISPLAY_FIELDS = [
+    "name",
+    "player_name",
+]
+
 OPTIONAL_PASS_THROUGH_FIELDS = [
     "Projected Ownership",
     "Projection Floor",
@@ -49,10 +54,9 @@ def write_canonical_csv(
 
     rows = list(players)
     fieldnames = list(CANONICAL_FIELDS)
-    if include_optional:
-        for field in OPTIONAL_PASS_THROUGH_FIELDS:
-            if any(field in row for row in rows):
-                fieldnames.append(field)
+    for field in (*OPTIONAL_DISPLAY_FIELDS, *OPTIONAL_PASS_THROUGH_FIELDS):
+        if include_optional and any(field in row for row in rows):
+            fieldnames.append(field)
 
     path = Path(out_path)
     path.parent.mkdir(parents=True, exist_ok=True)

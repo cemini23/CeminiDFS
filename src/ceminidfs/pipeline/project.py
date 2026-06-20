@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 from typing import Any, Mapping
 
+from ceminidfs.export.canonical import write_canonical_csv
+
 
 def project_week(
     season: int,
@@ -21,31 +23,12 @@ def project_week(
         cfg.get("canonical_path")
         or Path(cfg.get("work_dir", ".")) / f"canonical_projections_{season}_w{week}.csv"
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with salary_csv.open("r", newline="", encoding="utf-8-sig") as src:
         reader = csv.DictReader(src)
         rows = [_canonical_row(row, season, week) for row in reader]
 
-    fieldnames = [
-        "season",
-        "week",
-        "player_id",
-        "name",
-        "player_name",
-        "team",
-        "opponent",
-        "position",
-        "salary",
-        "projection",
-        "baseline_fppg",
-        "source",
-    ]
-    with output_path.open("w", newline="", encoding="utf-8") as dst:
-        writer = csv.DictWriter(dst, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
+    write_canonical_csv(rows, output_path)
     return output_path
 
 
@@ -53,19 +36,33 @@ def _canonical_row(row: Mapping[str, str], season: int, week: int) -> dict[str, 
     salary = _first(row, "Salary", "salary", "SALARY")
     fppg = _as_float(_first(row, "FPPG", "AvgPointsPerGame", "avg_points_per_game"), default=0.0)
     player_name = _first(row, "Nickname", "Name", "Player", "player_name")
+    team = _first(row, "Team", "TEAM", "team")
+    opponent = _first(row, "Opponent", "OPP", "opponent")
+    position = _first(row, "Position", "POS", "position")
+    fd_id = _first(row, "Id", "ID", "PlayerID", "player_id", "fd_id")
+    injury = _first(row, "Injury Indicator", "Injury", "injury_status", "status")
+    game = _first(row, "Game", "game")
+    if not game and team and opponent:
+        game = f"{team}@{opponent}"
+
+    player_key = fd_id or player_name
     return {
-        "season": season,
-        "week": week,
-        "player_id": _first(row, "Id", "ID", "PlayerID", "player_id"),
+        "slate_id": f"{season}_w{week}",
+        "player_key": player_key,
         "name": player_name,
         "player_name": player_name,
-        "team": _first(row, "Team", "TEAM", "team"),
-        "opponent": _first(row, "Opponent", "OPP", "opponent"),
-        "position": _first(row, "Position", "POS", "position"),
-        "salary": _as_int(salary),
-        "projection": fppg,
-        "baseline_fppg": fppg,
-        "source": "salary_fppg_placeholder",
+        "fd_id": fd_id,
+        "fd_position": position,
+        "fd_salary": _as_int(salary),
+        "fd_projection": fppg,
+        "dk_id": "",
+        "dk_position": "",
+        "dk_salary": "",
+        "dk_projection": "",
+        "team": team,
+        "opp": opponent,
+        "game": game,
+        "injury_status": injury,
     }
 
 

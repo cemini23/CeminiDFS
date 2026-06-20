@@ -32,30 +32,32 @@ fetch → project → [sim v2] → normalize → optimize
 
 ## Execution phases
 
-### Phase 0 — Bootstrap (this session) ✅ target
+### Phase 0 — Bootstrap ✅ complete
 
 - [x] Public repo `cemini23/CeminiDFS`
 - [x] `pyproject.toml` + package layout
 - [x] `PLAN.md`, `README.md`, `config/nfl_dfs.yaml`
 - [x] Core: `scoring`, `implied_totals`, `manifest`, `config`
 - [x] Port: `normalize` + `optimize` from gambling-wiki scripts
-- [x] CLI: `ceminidfs run --stage fetch|project|normalize|optimize|all`
-- [x] Unit tests for scoring + ITT formulas
-- [ ] Push initial commit to GitHub
+- [x] CLI: `ceminidfs run --stages fetch|project|normalize|optimize|all`
+- [x] Unit + integration tests (scoring, ITT, pipeline DAG)
+- [x] P0 audit fixes: canonical schema, fail-loud orchestration, RunManifest wiring
+- [x] GitHub CI (pytest + ruff)
+- [x] Push to GitHub
 
-### Phase 1 — Data backbone (Week 1)
+### Phase 1 — Data backbone (Week 1) 🔄 in progress
 
 **Parallel tracks:**
 
-| Track | Deliverable | Dependency |
-|-------|-------------|------------|
-| P1-A | `data/fetch.py` — nflreadpy wrapper, parquet cache | none |
-| P1-B | `data/vegas.py` — schedules spread/total join | P1-A |
-| P1-C | `data/stadiums.py` — roof type + lat/lon | none |
-| P1-D | `data/weather.py` — Open-Meteo hourly | P1-C |
-| P1-E | Salary ingest — FD/DK CSV parser → canonical schema | none |
+| Track | Deliverable | Dependency | Status |
+|-------|-------------|------------|--------|
+| P1-A | `pipeline/fetch.py` + week-scoped parquet + fetch manifest | none | **active** |
+| P1-B | `data/vegas.py` — schedules spread/total join | P1-A | pending |
+| P1-C | `data/stadiums.py` — roof type + lat/lon | none | pending |
+| P1-D | `data/weather.py` — Open-Meteo hourly | P1-C | pending |
+| P1-E | Salary ingest — FD/DK CSV parser → canonical schema | none | partial (`project.py`) |
 
-**Exit criteria:** `ceminidfs fetch --season 2024 --week 1` writes parquet + manifest.
+**Exit criteria:** `ceminidfs fetch --season 2024 --week 1` writes week-scoped parquet + fetch manifest.
 
 ### Phase 2 — Projection engine v1 (Week 2–3)
 
@@ -69,14 +71,14 @@ fetch → project → [sim v2] → normalize → optimize
 
 **Exit criteria:** Canonical CSV with `fd_projection` per player for a historical week.
 
-### Phase 3 — Integration + optimize (Week 3)
+### Phase 3 — Integration + optimize (Week 3) — partial
 
-| Track | Deliverable |
-|-------|-------------|
-| P3-A | `export/canonical_csv.py` — schema from integration spec |
-| P3-B | `export/normalize.py` — `--site fanduel\|draftkings` |
-| P3-C | `export/optimize.py` — generalize pydfs wrapper |
-| P3-D | End-to-end `ceminidfs run --week N` on manual salary slate |
+| Track | Deliverable | Status |
+|-------|-------------|--------|
+| P3-A | `export/canonical.py` — schema from integration spec | done |
+| P3-B | `export/normalize.py` — `--site fanduel\|draftkings` | done |
+| P3-C | `export/optimize.py` — pydfs wrapper | done |
+| P3-D | End-to-end `ceminidfs run --week N` on manual salary slate | needs Phase 2 projections |
 
 **Exit criteria:** 150 FD lineups from DIY projections on a real slate CSV.
 
@@ -153,4 +155,6 @@ CeminiDFS/
 
 ## Session handoff
 
-After Phase 0 push: open **`/Users/claudiobarone/Desktop/projects/CeminiDFS`** as workspace root. Continue Phase 1 from `PLAN.md` checklist.
+**Current workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
+
+**Active:** Phase 1-A — week-scoped fetch + fetch manifest. Next: P1-B vegas join, P1-C stadiums.

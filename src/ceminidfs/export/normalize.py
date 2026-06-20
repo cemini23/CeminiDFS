@@ -57,7 +57,7 @@ SITE_ALIASES = {
 
 SITE_KEYS = {
     "fanduel": {
-        "id": ("fd_id", "id", "player id", "fanduel id"),
+        "id": ("fd_id", "id", "player id", "player_id", "fanduel id"),
         "position": ("fd_position", "fd pos", "fd roster position", *POS_KEYS),
         "salary": ("fd_salary", "fd salary", "fanduel salary", "salary", "sal"),
         "projection": (
@@ -72,7 +72,7 @@ SITE_KEYS = {
         ),
     },
     "draftkings": {
-        "id": ("dk_id", "id", "player id", "draftkings id"),
+        "id": ("dk_id", "id", "player id", "player_id", "draftkings id"),
         "position": ("dk_position", "dk pos", "dk roster position", *POS_KEYS),
         "salary": ("dk_salary", "dk salary", "draftkings salary", "salary", "sal"),
         "projection": (
