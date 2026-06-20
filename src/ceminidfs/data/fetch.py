@@ -114,6 +114,7 @@ def fetch_week_datasets(
     config: Mapping[str, Any] | None = None,
 ) -> dict:
     """Fetch schedules/pbp/injuries, write week-scoped parquet copies."""
+    cfg = dict(config or {})
     out_dir = week_cache_dir(season, week)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -135,6 +136,7 @@ def fetch_week_datasets(
         datasets[kind] = {"path": str(path), "rows": int(len(frame)), "scope": scope}
         if kind == "schedules":
             from ceminidfs.data.vegas import enrich_schedules_with_vegas
+            from ceminidfs.data.weather import build_week_weather_from_schedules
 
             vegas = enrich_schedules_with_vegas(frame)
             vegas_path = out_dir / "vegas.parquet"
@@ -142,6 +144,15 @@ def fetch_week_datasets(
             datasets["vegas"] = {
                 "path": str(vegas_path),
                 "rows": int(len(vegas)),
+                "scope": scope,
+            }
+
+            weather = build_week_weather_from_schedules(frame, config=cfg)
+            weather_path = out_dir / "weather.parquet"
+            weather.to_parquet(weather_path, index=False)
+            datasets["weather"] = {
+                "path": str(weather_path),
+                "rows": int(len(weather)),
                 "scope": scope,
             }
     return datasets

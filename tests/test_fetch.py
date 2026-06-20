@@ -143,6 +143,7 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
     expected_files = {
         "schedules": week_dir / "schedules.parquet",
         "vegas": week_dir / "vegas.parquet",
+        "weather": week_dir / "weather.parquet",
         "pbp": week_dir / "pbp.parquet",
         "injuries": week_dir / "injuries.parquet",
     }
@@ -150,6 +151,9 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
     for name, path in expected_files.items():
         assert path.exists(), f"expected {path} to be written"
         saved = pd.read_parquet(path)
+        if name == "weather":
+            assert len(saved) == 0
+            continue
         assert set(saved["week"]) == {1}
         source_name = "schedules" if name == "vegas" else name
         assert len(saved) == len(
@@ -159,4 +163,4 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
             )
         )
 
-    assert set(datasets) == {"schedules", "vegas", "pbp", "injuries"}
+    assert set(datasets) == {"schedules", "vegas", "weather", "pbp", "injuries"}
