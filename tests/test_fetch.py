@@ -142,6 +142,7 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
 
     expected_files = {
         "schedules": week_dir / "schedules.parquet",
+        "vegas": week_dir / "vegas.parquet",
         "pbp": week_dir / "pbp.parquet",
         "injuries": week_dir / "injuries.parquet",
     }
@@ -150,6 +151,12 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
         assert path.exists(), f"expected {path} to be written"
         saved = pd.read_parquet(path)
         assert set(saved["week"]) == {1}
-        assert len(saved) == len(fetch_module.filter_by_week({"schedules": schedules, "pbp": pbp, "injuries": injuries}[name], 1))
+        source_name = "schedules" if name == "vegas" else name
+        assert len(saved) == len(
+            fetch_module.filter_by_week(
+                {"schedules": schedules, "pbp": pbp, "injuries": injuries}[source_name],
+                1,
+            )
+        )
 
-    assert set(datasets) == {"schedules", "pbp", "injuries"}
+    assert set(datasets) == {"schedules", "vegas", "pbp", "injuries"}

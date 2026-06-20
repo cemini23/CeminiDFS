@@ -133,6 +133,17 @@ def fetch_week_datasets(
         path = out_dir / f"{kind}.parquet"
         frame.to_parquet(path, index=False)
         datasets[kind] = {"path": str(path), "rows": int(len(frame)), "scope": scope}
+        if kind == "schedules":
+            from ceminidfs.data.vegas import enrich_schedules_with_vegas
+
+            vegas = enrich_schedules_with_vegas(frame)
+            vegas_path = out_dir / "vegas.parquet"
+            vegas.to_parquet(vegas_path, index=False)
+            datasets["vegas"] = {
+                "path": str(vegas_path),
+                "rows": int(len(vegas)),
+                "scope": scope,
+            }
     return datasets
 
 

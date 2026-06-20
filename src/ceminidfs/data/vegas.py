@@ -1,5 +1,12 @@
+"""Vegas enrichment for week-scoped schedules.
+
+Spread values use the home team's perspective: home -3 means the home team is
+favored by 3 points, so its implied total is `(total - spread) / 2`.
+"""
+
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 import pandas as pd
@@ -53,6 +60,36 @@ def add_implied_team_totals(schedules: pd.DataFrame) -> pd.DataFrame:
             ["home_implied_total", "away_implied_total"]
         ]
     )
+
+
+def enrich_schedules_with_vegas(schedules: pd.DataFrame) -> pd.DataFrame:
+    implied = schedules.apply(implied_team_totals_from_schedule_row, axis=1)
+    implied_df = pd.DataFrame(implied.tolist(), index=schedules.index)
+
+    enriched = add_implied_team_totals(schedules)
+    enriched["spread"] = implied_df["spread"]
+    enriched["total"] = implied_df["total"]
+    return enriched
+
+
+def load_week_schedules(season: int, week: int) -> pd.DataFrame:
+    from ceminidfs.data.fetch import week_cache_dir
+
+    return pd.read_parquet(week_cache_dir(season, week) / "schedules.parquet")
+
+
+def build_week_vegas(season: int, week: int) -> pd.DataFrame:
+    schedules = load_week_schedules(season, week)
+    return enrich_schedules_with_vegas(schedules)
+
+
+def write_week_vegas(season: int, week: int, out_path: Path | None = None) -> Path:
+    from ceminidfs.data.fetch import week_cache_dir
+
+    path = Path(out_path) if out_path is not None else week_cache_dir(season, week) / "vegas.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    build_week_vegas(season, week).to_parquet(path, index=False)
+    return path
 
 
 def _first_numeric(row: Mapping[str, Any], columns: Tuple[str, ...]) -> Optional[float]:

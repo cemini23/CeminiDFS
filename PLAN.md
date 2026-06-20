@@ -51,9 +51,9 @@ fetch → project → [sim v2] → normalize → optimize
 
 | Track | Deliverable | Dependency | Status |
 |-------|-------------|------------|--------|
-| P1-A | `pipeline/fetch.py` + week-scoped parquet + fetch manifest | none | **active** |
-| P1-B | `data/vegas.py` — schedules spread/total join | P1-A | pending |
-| P1-C | `data/stadiums.py` — roof type + lat/lon | none | pending |
+| P1-A | `pipeline/fetch.py` + week-scoped parquet + fetch manifest | none | done |
+| P1-B | `data/vegas.py` — schedules spread/total join + `vegas.parquet` | P1-A | done |
+| P1-C | `data/stadiums.py` — roof type + lat/lon | none | done |
 | P1-D | `data/weather.py` — Open-Meteo hourly | P1-C | pending |
 | P1-E | Salary ingest — FD/DK CSV parser → canonical schema | none | partial (`project.py`) |
 
@@ -157,4 +157,4 @@ CeminiDFS/
 
 **Current workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
 
-**Active:** Phase 1-A — week-scoped fetch + fetch manifest. Next: P1-B vegas join, P1-C stadiums.
+**Active:** Phase 1-D — Open-Meteo weather join (requires stadiums ✅). Next: P1-E salary parser.
