@@ -59,15 +59,15 @@ fetch → project → [sim v2] → normalize → optimize
 
 **Exit criteria:** `ceminidfs fetch --season 2024 --week 1` writes week-scoped parquet + fetch manifest.
 
-### Phase 2 — Projection engine v1 (Week 2–3)
+### Phase 2 — Projection engine v1 (Week 2–3) 🔄 in progress
 
-| Track | Deliverable |
-|-------|-------------|
-| P2-A | `models/volume.py` — team plays from ITT + pace prior |
-| P2-B | `models/usage.py` — target/carry/snap shares from rolling PBP |
-| P2-C | `models/stats.py` — efficiency regressions → counting stats |
-| P2-D | `models/scoring.py` — integrate bonuses, emit fd/dk columns |
-| P2-E | `pipeline/project.py` — wire layers → `player_projection_base.parquet` |
+| Track | Deliverable | Status |
+|-------|-------------|--------|
+| P2-A | `models/volume.py` — team plays from ITT + pace prior | done |
+| P2-B | `models/usage.py` — target/carry/snap shares from rolling PBP | next |
+| P2-C | `models/stats.py` — efficiency regressions → counting stats | pending |
+| P2-D | `models/scoring.py` — integrate bonuses, emit fd/dk columns | pending |
+| P2-E | `pipeline/project.py` — wire layers → `player_projection_base.parquet` | pending |
 
 **Exit criteria:** Canonical CSV with `fd_projection` per player for a historical week.
 
@@ -157,4 +157,4 @@ CeminiDFS/
 
 **Current workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
 
-**Active:** Phase 1-E — salary parser. Phase 1 data backbone nearly complete.
+**Active:** Phase 2-A complete — team volume module. Phase 2 projection engine in progress.
