@@ -34,9 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ceminidfs", description="CeminiDFS command line tools")
     subparsers = parser.add_subparsers(dest="command")
 
-    fetch = subparsers.add_parser("fetch", help="Fetch source data for a season or week")
+    fetch = subparsers.add_parser("fetch", help="Fetch week-scoped source data")
     fetch.add_argument("--season", type=int, required=True)
-    fetch.add_argument("--week", type=int)
+    fetch.add_argument("--week", type=int, required=True)
     fetch.add_argument(
         "--allow-stub",
         action="store_true",
@@ -87,12 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
 def _cmd_fetch(args: argparse.Namespace) -> int:
     if _run_fetch is None:
         raise RuntimeError("Fetch stage unavailable: orchestrator import failed")
-    week = args.week if args.week is not None else 0
     config = runtime_config(
-        work_dir=Path("runs") / f"{args.season}_fetch",
+        work_dir=Path("runs") / f"{args.season}_week_{args.week}",
         allow_stub=args.allow_stub,
     )
-    artifact = _run_fetch(args.season, week, config)
+    artifact = _run_fetch(args.season, args.week, config)
     print(artifact)
     return 0
 

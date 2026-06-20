@@ -121,36 +121,19 @@ def _run_fetch(season: int, week: int, config: Mapping[str, Any]) -> Path:
     allow_stub = bool(config.get("allow_stub", False))
 
     try:
-        from ceminidfs.pipeline.fetch import fetch_week  # type: ignore
+        from ceminidfs.pipeline.fetch import fetch_week
 
-        result = fetch_week(season=season, week=week, config=config)
-        if result:
-            return Path(result)
-    except ImportError:
-        pass
-    except Exception:
-        if not allow_stub:
-            raise
-        return _write_fetch_stub(season, week, config)
-
-    try:
-        from ceminidfs.data.fetch import fetch_injuries, fetch_pbp, fetch_schedules
-
-        summaries = {}
-        for name, fetcher in (
-            ("schedules", fetch_schedules),
-            ("pbp", fetch_pbp),
-            ("injuries", fetch_injuries),
-        ):
-            frame = fetcher(season)
-            summaries[name] = {"rows": len(frame)}
-        return _write_fetch_summary(season, week, summaries, config)
+        return Path(fetch_week(season=season, week=week, config=config))
     except ImportError as exc:
         if allow_stub:
             return _write_fetch_stub(season, week, config)
         raise RuntimeError(
             "Fetch stage requires nflreadpy. Install with: pip install ceminidfs[data]"
         ) from exc
+    except Exception:
+        if not allow_stub:
+            raise
+        return _write_fetch_stub(season, week, config)
 
 
 def _run_normalize(input_path: Path, output_path: Path, site: str, config: Mapping[str, Any]) -> Path:
@@ -183,29 +166,6 @@ def _write_fetch_stub(season: int, week: int, config: Mapping[str, Any]) -> Path
                 "week": week,
                 "status": "stub",
                 "message": "Fetch stage placeholder until data connectors are implemented.",
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-def _write_fetch_summary(
-    season: int,
-    week: int,
-    summaries: Mapping[str, Mapping[str, int]],
-    config: Mapping[str, Any],
-) -> Path:
-    path = Path(config.get("work_dir", ".")) / "fetch_summary.json"
-    path.write_text(
-        json.dumps(
-            {
-                "season": season,
-                "week": week,
-                "status": "complete",
-                "datasets": summaries,
             },
             indent=2,
         )
