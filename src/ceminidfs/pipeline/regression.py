@@ -26,6 +26,11 @@ from ceminidfs.pipeline.lineup_backtest import (
     run_lineup_backtest,
     write_lineup_backtest_report,
 )
+from ceminidfs.pipeline.regression_gates import (
+    RegressionGates,
+    check_regression_gates,
+    format_gate_failures,
+)
 
 
 @dataclass
@@ -56,6 +61,8 @@ def run_weekly_regression(
     benchmark_dir: str | Path | None = None,
     benchmark_csv: str | Path | None = None,
     benchmark_week: int | None = None,
+    fail_on_regression: bool = False,
+    gates: RegressionGates | None = None,
 ) -> RegressionResult:
     """Run the full pre-season validation stack for a week range."""
 
@@ -90,6 +97,13 @@ def run_weekly_regression(
     result.calibration_brief = str(brief_path)
     result.calibration_json = str(json_path)
     print(render_calibration_brief(calibration))
+
+    gate_cfg = gates or RegressionGates.from_config(cfg)
+    failures = check_regression_gates(calibration, gate_cfg)
+    if failures:
+        print("\n" + format_gate_failures(failures))
+        if fail_on_regression:
+            raise SystemExit(1)
 
     if not skip_lineup:
         lineup_summary = run_lineup_backtest(season, start_week, end_week, config=cfg)

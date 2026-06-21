@@ -8,6 +8,7 @@ import pandas as pd
 from ceminidfs.data.fetch import week_cache_dir
 from ceminidfs.models.scoring import add_fantasy_points
 from ceminidfs.models.stats import build_week_stats
+from ceminidfs.models.dst import build_week_dst_projections
 from ceminidfs.models.usage import build_week_usage, player_game_stats_from_pbp
 from ceminidfs.models.volume import build_week_volume
 
@@ -40,6 +41,7 @@ def salary_rows_to_roster(rows: list[dict]) -> pd.DataFrame:
                 "player_name": str(row.get("player_name") or row.get("name") or ""),
                 "team": str(row.get("team") or ""),
                 "position": str(position or "").upper(),
+                "injury_status": str(row.get("injury_status") or row.get("Injury Indicator") or ""),
             }
         )
     return pd.DataFrame(roster_rows, columns=["player_id", "player_name", "team", "position"])
@@ -121,6 +123,15 @@ def build_diy_projections_from_frames(
         raise ValueError(f"No player stat projections built for {season} week {week}")
 
     scored = add_fantasy_points(stats_df)
+    dst_df = build_week_dst_projections(
+        vegas,
+        volume_df,
+        season=season,
+        week=week,
+        config=config,
+    )
+    if not dst_df.empty:
+        scored = pd.concat([scored, dst_df], ignore_index=True, sort=False)
     scored["join_key"] = scored.apply(
         lambda row: normalize_join_key(
             row.get("player_name", ""), row.get("team", ""), row.get("position", "")

@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from ceminidfs.data.availability import filter_available_roster, resolve_unavailable_player_ids
 from ceminidfs.data.rosters import apply_position_lookup, position_lookup_for_week
 from ceminidfs.models.usage_settings import UsageSettings
 from ceminidfs.models.volume import DEFAULT_SACK_RATE, DEFAULT_SCRAMBLE_RATE
@@ -366,12 +367,18 @@ def identify_qb_starter(
         if not last_week.empty:
             recent_leader = last_week.groupby("player_id", as_index=False)["pass_attempts"].sum()
             recent_leader = recent_leader.sort_values("pass_attempts", ascending=False)
-            if (
-                not recent_leader.empty
-                and float(recent_leader.iloc[0]["pass_attempts"])
-                >= cfg.min_last_week_qb_pass_attempts
-            ):
-                return str(recent_leader.iloc[0]["player_id"])
+            if not recent_leader.empty:
+                leader_id = str(recent_leader.iloc[0]["player_id"])
+                leader_attempts = float(recent_leader.iloc[0]["pass_attempts"])
+                team_attempts = float(last_week["pass_attempts"].sum())
+                attempt_share = leader_attempts / team_attempts if team_attempts > 0 else 0.0
+                if leader_attempts >= cfg.min_last_week_qb_pass_attempts:
+                    return leader_id
+                if (
+                    leader_attempts >= cfg.min_backup_start_qb_pass_attempts
+                    and attempt_share >= 0.65
+                ):
+                    return leader_id
 
     two_week = _filter_qbs(
         team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - 2]
@@ -579,6 +586,10 @@ def build_week_usage(
     ]
     stats = assign_inferred_positions(stats, season=season, week=week)
 
+    excluded_ids = resolve_unavailable_player_ids(season, week, roster=roster, config=config)
+    if roster is not None and not roster.empty:
+        roster = filter_available_roster(roster, excluded_ids)
+
     roster_by_team = _normalize_roster(roster)
     rows: list[dict[str, Any]] = []
     for _, volume_row in week_volume.iterrows():
@@ -586,6 +597,12 @@ def build_week_usage(
         team_roster = roster_by_team.get(team)
         shares = rolling_shares(stats, team=team, through_week=week, settings=settings)
         share_records = _projection_pool(team, shares, roster_by_team)
+        if excluded_ids:
+            share_records = [
+                player
+                for player in share_records
+                if str(player.get("player_id", "")) not in excluded_ids
+            ]
         starter_id = identify_qb_starter(
             stats,
             team=team,

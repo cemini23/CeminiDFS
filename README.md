@@ -109,6 +109,9 @@ ceminidfs calibrate --season 2024 --start-week 5 --end-week 17 \
 # Full offseason regression (backtest + calibrate + lineup backtest in one shot)
 ceminidfs regression --season 2024 --start-week 5 --end-week 17 --output-dir reports
 
+# Fail when DIY accuracy regresses beyond nfl_dfs.yaml gates
+ceminidfs regression --season 2024 --start-week 5 --end-week 17 --fail-on-regression
+
 # Lineup-level validation (requires pydfs-lineup-optimizer)
 ceminidfs lineup-backtest --season 2024 --start-week 5 --end-week 17
 ```
@@ -153,6 +156,9 @@ Primary config: [`config/nfl_dfs.yaml`](config/nfl_dfs.yaml). Optional secrets: 
 | `simulate.enabled` | `false` | Attach `Projection Floor` / `Projection Ceil` to canonical CSV |
 | `simulate.method` | `team_shock` | `team_shock` \| `copula` (role-prior Gaussian copula) |
 | `simulate.n_iterations` | `5000` | Monte Carlo draws per player |
+| `regression.max_overall_mae` | `4.85` | DIY walk-forward MAE gate for `ceminidfs regression --fail-on-regression` |
+| `regression.max_qb_mae` | `6.75` | Per-position QB MAE gate |
+| `usage.min_backup_start_qb_pass_attempts` | `12` | Detect backup-start weeks from prior-week pass share |
 | `ownership.enabled` | `false` | Attach `Projected Ownership` column |
 | `ownership.calibration_path` | `null` | JSON from `ceminidfs ownership calibrate` |
 | `sim_rerank.enabled` | `false` | Score pydfs candidate pool with sim matrix |

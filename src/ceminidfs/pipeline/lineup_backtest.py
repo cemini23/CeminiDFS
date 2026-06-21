@@ -211,8 +211,11 @@ def _name_map(frame: pd.DataFrame, value_col: str) -> dict[str, float]:
     for _, row in frame.iterrows():
         name = _normalize_name(row.get("player_name", ""))
         value = float(pd.to_numeric(row.get(value_col, 0.0), errors="coerce") or 0.0)
+        player_id = str(row.get("player_id", "") or "").strip().lower()
         if name:
             mapping[name] = value
+        if player_id:
+            mapping[player_id] = value
     return mapping
 
 
@@ -224,5 +227,9 @@ def _score_lineup(lineup: Any, name_to_points: Mapping[str, float]) -> float:
     total = 0.0
     for player in lineup.players:
         key = _normalize_name(getattr(player, "full_name", ""))
-        total += float(name_to_points.get(key, 0.0))
+        player_id = str(getattr(player, "id", "") or "").strip().lower()
+        if key in name_to_points:
+            total += float(name_to_points[key])
+        elif player_id in name_to_points:
+            total += float(name_to_points[player_id])
     return total

@@ -13,6 +13,7 @@ from ceminidfs.config import load_config
 from ceminidfs.data.fetch import _cache_dir, fetch_schedules, filter_by_week
 from ceminidfs.data.rosters import enrich_roster_positions
 from ceminidfs.data.vegas import enrich_schedules_with_vegas
+from ceminidfs.models.dst import actual_dst_fantasy_points
 from ceminidfs.models.scoring import fantasy_points_from_stats
 from ceminidfs.models.usage import player_game_stats_from_pbp
 from ceminidfs.pipeline.engine import (
@@ -201,6 +202,10 @@ def actual_week_fantasy_points(pbp: pd.DataFrame, season: int, week: int) -> pd.
         lambda row: normalize_join_key(row["player_name"], row["team"], row["position"]),
         axis=1,
     )
+
+    dst_actuals = actual_dst_fantasy_points(pbp, season, week, vegas=resolve_vegas_for_week(season, week))
+    if not dst_actuals.empty:
+        actuals = pd.concat([actuals, dst_actuals], ignore_index=True, sort=False)
     return actuals
 
 

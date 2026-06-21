@@ -356,6 +356,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     regression.add_argument("--benchmark-csv", type=Path, help="Single paid export for calibration")
     regression.add_argument("--benchmark-week", type=int)
+    regression.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="Exit non-zero when regression gate thresholds are exceeded",
+    )
+    regression.add_argument("--max-mae", type=float, help="Override regression.max_overall_mae gate")
+    regression.add_argument("--max-qb-mae", type=float, help="Override regression.max_qb_mae gate")
     regression.set_defaults(handler=_cmd_regression)
 
     calibrate = subparsers.add_parser(
@@ -677,6 +684,20 @@ def _cmd_regression(args: argparse.Namespace) -> int:
     if run_weekly_regression is None or format_regression_result is None:
         raise RuntimeError("Regression unavailable: ceminidfs.pipeline.regression import failed")
     config = runtime_config()
+    gates = None
+    if args.max_mae is not None or args.max_qb_mae is not None:
+        from ceminidfs.pipeline.regression_gates import RegressionGates
+
+        base = RegressionGates.from_config(config)
+        gates = RegressionGates(
+            max_overall_mae=args.max_mae if args.max_mae is not None else base.max_overall_mae,
+            max_qb_mae=args.max_qb_mae if args.max_qb_mae is not None else base.max_qb_mae,
+            max_rb_mae=base.max_rb_mae,
+            max_wr_mae=base.max_wr_mae,
+            max_te_mae=base.max_te_mae,
+            max_dst_mae=base.max_dst_mae,
+            min_overall_spearman=base.min_overall_spearman,
+        )
     result = run_weekly_regression(
         args.season,
         args.start_week,
@@ -688,6 +709,8 @@ def _cmd_regression(args: argparse.Namespace) -> int:
         benchmark_dir=args.benchmark_dir,
         benchmark_csv=args.benchmark_csv,
         benchmark_week=args.benchmark_week,
+        fail_on_regression=args.fail_on_regression,
+        gates=gates,
     )
     print("\n" + format_regression_result(result))
     return 0

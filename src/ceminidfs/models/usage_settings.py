@@ -13,6 +13,7 @@ class UsageSettings:
     qb_carry_share: float
     min_l3_qb_pass_attempts: int
     min_last_week_qb_pass_attempts: int
+    min_backup_start_qb_pass_attempts: int
     min_two_week_qb_pass_attempts: int
     qb_backup_pass_share: float
     qb_implied_pass_boost: float
@@ -32,9 +33,10 @@ class UsageSettings:
             qb_carry_share=float(usage.get("qb_carry_share", 0.12)),
             min_l3_qb_pass_attempts=int(usage.get("min_l3_qb_pass_attempts", 10)),
             min_last_week_qb_pass_attempts=int(usage.get("min_last_week_qb_pass_attempts", 18)),
+            min_backup_start_qb_pass_attempts=int(usage.get("min_backup_start_qb_pass_attempts", 12)),
             min_two_week_qb_pass_attempts=int(usage.get("min_two_week_qb_pass_attempts", 25)),
             qb_backup_pass_share=float(usage.get("qb_backup_pass_share", 0.05)),
-            qb_implied_pass_boost=float(usage.get("qb_implied_pass_boost", 0.012)),
+            qb_implied_pass_boost=float(usage.get("qb_implied_pass_boost", 0.014)),
             qb_implied_pass_baseline=float(usage.get("qb_implied_pass_baseline", 22.0)),
             rb_committee_size=int(usage.get("rb_committee_size", 3)),
             rb_carry_priors=_tuple_floats(usage.get("rb_carry_priors"), (0.35, 0.12, 0.04)),

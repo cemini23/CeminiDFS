@@ -36,15 +36,20 @@ usage:
   qb_carry_share: 0.12
   min_l3_qb_pass_attempts: 10
   min_last_week_qb_pass_attempts: 18
+  min_backup_start_qb_pass_attempts: 12
   min_two_week_qb_pass_attempts: 25
   qb_backup_pass_share: 0.05
-  qb_implied_pass_boost: 0.012
+  qb_implied_pass_boost: 0.014
   qb_implied_pass_baseline: 22.0
   min_backup_qb_season_attempts: 15
   min_backup_qb_l3_attempts: 5
   rb_committee_size: 3
   rb_carry_priors: [0.35, 0.12, 0.04]
   rb_target_priors: [0.08, 0.05, 0.03]
+regression:
+  max_overall_mae: 4.85
+  max_qb_mae: 6.75
+  max_rb_mae: 5.45
 ownership:
   enabled: false
   calibration_path: null

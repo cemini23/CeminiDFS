@@ -31,6 +31,7 @@ MAE_TARGETS: dict[str, dict[str, float]] = {
     "RB": {"good": 5.3, "very_good": 5.0},
     "WR": {"good": 5.0, "very_good": 4.85},
     "TE": {"good": 3.9, "very_good": 3.75},
+    "DST": {"good": 4.5, "very_good": 4.2},
 }
 
 
