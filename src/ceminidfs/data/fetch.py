@@ -21,6 +21,8 @@ def fetch_schedules(season: int) -> pd.DataFrame:
 
 
 def fetch_pbp(season: int) -> pd.DataFrame:
+    """Load season PBP from nflverse cache (unfiltered — see ``data.pbp_filters`` at use time)."""
+
     return _fetch_cached("pbp", season, ("load_pbp", "import_pbp_data"))
 
 
@@ -170,10 +172,7 @@ def write_fetch_manifest(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = dict(config or load_config())
-    run_id = (
-        f"fetch_{season}_week_{week}_"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-    )
+    run_id = f"fetch_{season}_week_{week}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     manifest = RunManifest(
         run_id=run_id,
         git_commit=git_commit(),

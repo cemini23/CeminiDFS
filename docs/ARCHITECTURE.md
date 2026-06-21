@@ -85,6 +85,8 @@ vegas.parquet + pbp.parquet (+ weather.parquet)
 
 Historical PBP is cut at `week < target` for walk-forward integrity (backtest and live project).
 
+EPA-based defense ratings apply `epa_eligible_plays()` (`data/pbp_filters.py`) before aggregating team pass/rush EPA — see [epa-cleanroom-audit.md](epa-cleanroom-audit.md).
+
 Join key for salary ↔ model: **name + team + position** (`normalize_join_key` in `pipeline/engine.py`).
 
 ## Distribution layer (Phase 5)
@@ -139,6 +141,18 @@ See [`config/nfl_dfs.yaml`](../config/nfl_dfs.yaml):
 | `pyarrow` | `[data]` | Parquet cache |
 | `pydfs-lineup-optimizer` | `[optimize]` | Lineup generation + late swap |
 | `pytest`, `ruff` | `[dev]` | CI |
+
+### Data fetch posture
+
+CeminiDFS uses **one canonical ingest path**: [nflreadpy](https://github.com/nflverse/nflreadpy) → nflverse parquet cache (`data/fetch.py`). We do **not** ship Yahoo JSON scrapers or alternate league API clients.
+
+MIT-licensed repos evaluated for contrast only (not integrated):
+
+- [nflverse/nfl_data_py](https://github.com/nflverse/nfl_data_py) — same data lineage as nflreadpy
+- [bbenbenek/nfl-fantasy-football](https://github.com/bbenbenek/nfl-fantasy-football) — Yahoo API wrapper; duplicates fetch stage
+- [hvpkod/NFL-Data](https://github.com/hvpkod/NFL-Data) — static CSV backtest parameters
+
+Unlicensed repos (null `license` on GitHub) are **reference-only** for clean-room audits — e.g. playmaking EPA edge cases documented in [epa-cleanroom-audit.md](epa-cleanroom-audit.md) without R code merge.
 
 ## Cross-wiki resources
 

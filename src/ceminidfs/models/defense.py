@@ -6,6 +6,8 @@ from typing import Mapping
 
 import pandas as pd
 
+from ceminidfs.data.pbp_filters import epa_eligible_plays
+
 DEFENSE_MULTIPLIER_CLAMP = (0.85, 1.15)
 DEFAULT_DEFENSE_ALPHA = 0.08
 
@@ -60,7 +62,8 @@ def _historical_pbp(pbp: pd.DataFrame, through_week: int) -> pd.DataFrame:
     if pbp.empty or "week" not in pbp.columns:
         return pd.DataFrame()
     weeks = pd.to_numeric(pbp["week"], errors="coerce")
-    return pbp.loc[weeks < through_week].copy()
+    historical = pbp.loc[weeks < through_week].copy()
+    return epa_eligible_plays(historical)
 
 
 def _team_rates(pbp: pd.DataFrame, side: str) -> dict[str, float]:
@@ -76,7 +79,11 @@ def _team_rates(pbp: pd.DataFrame, side: str) -> dict[str, float]:
     values = _play_values(frame, side)
     frame["_value"] = values
     grouped = frame.groupby(defense_col)["_value"].mean()
-    return {str(team).strip().upper(): float(rate) for team, rate in grouped.items() if str(team).strip()}
+    return {
+        str(team).strip().upper(): float(rate)
+        for team, rate in grouped.items()
+        if str(team).strip()
+    }
 
 
 def _league_rate(pbp: pd.DataFrame, side: str) -> float:
