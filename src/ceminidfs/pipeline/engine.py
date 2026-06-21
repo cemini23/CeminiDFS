@@ -30,7 +30,9 @@ def salary_rows_to_roster(rows: list[dict]) -> pd.DataFrame:
 
     roster_rows: list[dict[str, Any]] = []
     for row in rows:
-        player_id = row.get("fd_id") or row.get("dk_id") or row.get("player_key") or row.get("name", "")
+        player_id = (
+            row.get("fd_id") or row.get("dk_id") or row.get("player_key") or row.get("name", "")
+        )
         position = row.get("fd_position") or row.get("dk_position") or row.get("position", "")
         roster_rows.append(
             {
@@ -69,7 +71,9 @@ def build_diy_projections(
             f"Missing cached vegas/pbp artifacts for {season} week {week}; run fetch first."
         )
 
-    roster = _align_roster_to_pbp_ids(salary_rows_to_roster(salary_rows), pbp, season=season, week=week)
+    roster = _align_roster_to_pbp_ids(
+        salary_rows_to_roster(salary_rows), pbp, season=season, week=week
+    )
     return build_diy_projections_from_frames(
         season,
         week,
@@ -92,7 +96,7 @@ def build_diy_projections_from_frames(
 ) -> pd.DataFrame:
     """Build scored projections from in-memory weekly frames (backtest-safe)."""
 
-    _ = config  # volume/usage layers read hyperparams from nfl_dfs.yaml in future passes
+    _ = config  # stats layer reads shrinkage from config; usage reads usage.* keys
     historical_pbp = _historical_pbp(pbp, season, week)
     if vegas.empty or historical_pbp.empty:
         raise ValueError(f"Missing vegas or historical PBP for {season} week {week}")
@@ -101,7 +105,14 @@ def build_diy_projections_from_frames(
     if volume_df.empty:
         raise ValueError(f"No team volume projections built for {season} week {week}")
 
-    usage_df = build_week_usage(volume_df, historical_pbp, season=season, week=week, roster=roster)
+    usage_df = build_week_usage(
+        volume_df,
+        historical_pbp,
+        season=season,
+        week=week,
+        roster=roster,
+        config=config,
+    )
     if usage_df.empty:
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
@@ -111,7 +122,9 @@ def build_diy_projections_from_frames(
 
     scored = add_fantasy_points(stats_df)
     scored["join_key"] = scored.apply(
-        lambda row: normalize_join_key(row.get("player_name", ""), row.get("team", ""), row.get("position", "")),
+        lambda row: normalize_join_key(
+            row.get("player_name", ""), row.get("team", ""), row.get("position", "")
+        ),
         axis=1,
     )
     scored["opp"] = scored.get("opponent", pd.Series("", index=scored.index)).fillna("").astype(str)
@@ -142,7 +155,9 @@ def merge_projections_into_canonical(
     for row in salary_rows:
         mapped = dict(row)
         position = row.get("fd_position") or row.get("dk_position") or row.get("position", "")
-        key = normalize_join_key(row.get("player_name") or row.get("name", ""), row.get("team", ""), position)
+        key = normalize_join_key(
+            row.get("player_name") or row.get("name", ""), row.get("team", ""), position
+        )
         projection = stats_by_key.get(key)
         if projection:
             mapped["fd_projection"] = projection.get("fd_projection", "")
@@ -198,7 +213,9 @@ def _align_roster_to_pbp_ids(
     if historical.empty:
         return roster
     if "season" in historical.columns:
-        historical = historical.loc[pd.to_numeric(historical["season"], errors="coerce").fillna(season) == season]
+        historical = historical.loc[
+            pd.to_numeric(historical["season"], errors="coerce").fillna(season) == season
+        ]
     if "week" in historical.columns:
         historical = historical.loc[pd.to_numeric(historical["week"], errors="coerce") < week]
     if historical.empty:
@@ -219,8 +236,12 @@ def _align_roster_to_pbp_ids(
     aligned = roster.copy()
     aligned["player_id"] = aligned.apply(
         lambda row: id_by_exact_key.get(
-            normalize_join_key(row.get("player_name", ""), row.get("team", ""), row.get("position", "")),
-            id_by_name_team.get(_name_team_key(row.get("player_name", ""), row.get("team", "")), row["player_id"]),
+            normalize_join_key(
+                row.get("player_name", ""), row.get("team", ""), row.get("position", "")
+            ),
+            id_by_name_team.get(
+                _name_team_key(row.get("player_name", ""), row.get("team", "")), row["player_id"]
+            ),
         ),
         axis=1,
     )

@@ -71,6 +71,9 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs benchmark load` | Parse Stokastic/Labs export → versioned JSON snapshot |
 | `ceminidfs benchmark compare` | Paid export vs actuals (+ DIY side-by-side) |
 | `ceminidfs calibrate` | Wiki-ready calibration brief (Markdown + JSON) |
+| `ceminidfs regression` | One command: optional prepare + backtest + calibrate + lineup backtest |
+| `ceminidfs lineup-backtest` | Synthetic slate → pydfs optimize → score vs actuals |
+| `ceminidfs benchmark replay` | Replay every paid CSV in a folder across weeks |
 | `ceminidfs ownership calibrate` | Fit ownership calibration from paid export labels |
 
 ### Common invocations
@@ -102,6 +105,12 @@ ceminidfs backtest --season 2024 --start-week 5 --end-week 17 \
 # Wiki brief with DIY vs rolling-FPPG baseline + per-position MAE
 ceminidfs calibrate --season 2024 --start-week 5 --end-week 17 \
   --out reports/calibration_2024.md --json-out reports/calibration_2024.json
+
+# Full offseason regression (backtest + calibrate + lineup backtest in one shot)
+ceminidfs regression --season 2024 --start-week 5 --end-week 17 --output-dir reports
+
+# Lineup-level validation (requires pydfs-lineup-optimizer)
+ceminidfs lineup-backtest --season 2024 --start-week 5 --end-week 17
 ```
 
 **Full pipeline without a live FanDuel slate (synthetic salary from nflverse):**
@@ -119,6 +128,10 @@ Synthetic slates use walk-forward rolling FPPG for the `FPPG` column and positio
 ceminidfs benchmark compare --season 2024 --week 5 --csv path/to/stokastic-export.csv
 ceminidfs calibrate --season 2024 --start-week 5 --end-week 10 \
   --benchmark-csv path/to/stokastic-export.csv --benchmark-week 10
+
+# Replay a folder of weekly Stokastic/Labs exports (names like *w5*.csv)
+ceminidfs benchmark replay --season 2024 --start-week 5 --end-week 10 \
+  --dir path/to/benchmark_exports/
 ```
 
 **Late swap after early games lock:**

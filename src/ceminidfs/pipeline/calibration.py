@@ -17,6 +17,7 @@ from ceminidfs.pipeline.backtest import (
     actual_week_fantasy_points,
     load_season_pbp,
     resolve_vegas_for_week,
+    resolve_weather_for_week,
     roster_from_historical_pbp,
     _historical_pbp,
 )
@@ -161,7 +162,7 @@ def diy_comparison_rows(
         week,
         pbp,
         vegas,
-        None,
+        resolve_weather_for_week(season, week, config=config),
         roster,
         config=config,
     )
@@ -177,7 +178,17 @@ def diy_comparison_rows(
     merged["week"] = week
     merged["model"] = "diy"
     return merged[
-        ["season", "week", "model", "player_id", "player_name", "team", "position", "fd_projection", "fd_actual"]
+        [
+            "season",
+            "week",
+            "model",
+            "player_id",
+            "player_name",
+            "team",
+            "position",
+            "fd_projection",
+            "fd_actual",
+        ]
     ]
 
 
@@ -185,7 +196,9 @@ def _merge_projection_actuals(projections: pd.DataFrame, actuals: pd.DataFrame) 
     """Join projections to actuals and prefer non-empty projection positions."""
 
     merged = projections.merge(
-        actuals[["player_id", "fd_actual", "position"]].rename(columns={"position": "actual_position"}),
+        actuals[["player_id", "fd_actual", "position"]].rename(
+            columns={"position": "actual_position"}
+        ),
         on="player_id",
         how="inner",
     )
@@ -216,7 +229,9 @@ def rolling_fppg_comparison_rows(season: int, week: int, pbp: pd.DataFrame) -> p
         return pd.DataFrame()
 
     merged = roster.merge(
-        actuals[["player_id", "fd_actual", "position"]].rename(columns={"position": "actual_position"}),
+        actuals[["player_id", "fd_actual", "position"]].rename(
+            columns={"position": "actual_position"}
+        ),
         on="player_id",
         how="inner",
     )
@@ -237,7 +252,17 @@ def rolling_fppg_comparison_rows(season: int, week: int, pbp: pd.DataFrame) -> p
     merged["week"] = week
     merged["model"] = "rolling_fppg"
     return merged[
-        ["season", "week", "model", "player_id", "player_name", "team", "position", "fd_projection", "fd_actual"]
+        [
+            "season",
+            "week",
+            "model",
+            "player_id",
+            "player_name",
+            "team",
+            "position",
+            "fd_projection",
+            "fd_actual",
+        ]
     ]
 
 
@@ -275,7 +300,17 @@ def benchmark_comparison_rows(
     merged["fd_projection"] = merged["projection"]
     merged["player_name"] = merged["player_name"].fillna("")
     return merged[
-        ["season", "week", "model", "player_id", "player_name", "team", "position", "fd_projection", "fd_actual"]
+        [
+            "season",
+            "week",
+            "model",
+            "player_id",
+            "player_name",
+            "team",
+            "position",
+            "fd_projection",
+            "fd_actual",
+        ]
     ]
 
 
@@ -497,7 +532,9 @@ def _benchmark_section(report: CalibrationReport) -> str:
 def _calibration_actions(report: CalibrationReport) -> list[str]:
     diy = _model(report, "diy")
     if diy is None:
-        return ["- Re-run `ceminidfs fetch` and widen the week window once season PBP cache is populated."]
+        return [
+            "- Re-run `ceminidfs fetch` and widen the week window once season PBP cache is populated."
+        ]
 
     actions: list[str] = []
     for row in diy.by_position:

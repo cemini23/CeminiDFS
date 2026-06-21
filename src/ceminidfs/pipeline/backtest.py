@@ -11,10 +11,15 @@ import pandas as pd
 
 from ceminidfs.config import load_config
 from ceminidfs.data.fetch import _cache_dir, fetch_schedules, filter_by_week
+from ceminidfs.data.rosters import enrich_roster_positions
 from ceminidfs.data.vegas import enrich_schedules_with_vegas
 from ceminidfs.models.scoring import fantasy_points_from_stats
 from ceminidfs.models.usage import player_game_stats_from_pbp
-from ceminidfs.pipeline.engine import build_diy_projections_from_frames, load_week_artifacts, normalize_join_key
+from ceminidfs.pipeline.engine import (
+    build_diy_projections_from_frames,
+    load_week_artifacts,
+    normalize_join_key,
+)
 from ceminidfs.pipeline.metrics import accuracy_metrics
 
 
@@ -71,6 +76,35 @@ def resolve_vegas_for_week(season: int, week: int) -> pd.DataFrame:
     return enrich_schedules_with_vegas(week_schedules)
 
 
+def resolve_weather_for_week(
+    season: int,
+    week: int,
+    config: Mapping[str, Any] | None = None,
+) -> pd.DataFrame | None:
+    """Load cached week weather or build from schedules (Open-Meteo archive for past slates)."""
+
+    _, _, weather = load_week_artifacts(season, week)
+    if weather is not None and not weather.empty:
+        return weather
+
+    cfg = dict(config or load_config())
+    if cfg.get("skip_weather"):
+        return None
+
+    from ceminidfs.data.weather import build_week_weather_from_schedules
+
+    try:
+        from ceminidfs.data.vegas import load_week_schedules
+
+        schedules = load_week_schedules(season, week)
+    except (FileNotFoundError, OSError):
+        schedules = filter_by_week(fetch_schedules(season), week)
+
+    if schedules.empty:
+        return None
+    return build_week_weather_from_schedules(schedules, config=cfg)
+
+
 def roster_from_historical_pbp(
     historical_pbp: pd.DataFrame,
     vegas: pd.DataFrame,
@@ -100,7 +134,7 @@ def roster_from_historical_pbp(
         .reindex(columns=["player_id", "player_name", "team", "position"])
     )
     roster["position"] = roster["position"].fillna("").astype(str).str.upper()
-    return roster
+    return enrich_roster_positions(roster, season, week)
 
 
 def actual_week_fantasy_points(pbp: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
@@ -111,14 +145,18 @@ def actual_week_fantasy_points(pbp: pd.DataFrame, season: int, week: int) -> pd.
 
     week_pbp = pbp.loc[pd.to_numeric(pbp["week"], errors="coerce") == week].copy()
     if "season" in week_pbp.columns:
-        week_pbp = week_pbp.loc[pd.to_numeric(week_pbp["season"], errors="coerce").fillna(season) == season]
+        week_pbp = week_pbp.loc[
+            pd.to_numeric(week_pbp["season"], errors="coerce").fillna(season) == season
+        ]
     if week_pbp.empty:
         return pd.DataFrame()
 
     rows: dict[str, dict[str, Any]] = {}
     position_by_id = _player_position_map(week_pbp)
 
-    def upsert(player_id: str, player_name: str, team: str, position: str, updates: Mapping[str, float]) -> None:
+    def upsert(
+        player_id: str, player_name: str, team: str, position: str, updates: Mapping[str, float]
+    ) -> None:
         if not player_id:
             return
         record = rows.setdefault(
@@ -184,14 +222,17 @@ def backtest_week(
     if roster.empty:
         return empty, pd.DataFrame()
 
+    cfg = dict(config or load_config())
+    weather = resolve_weather_for_week(season, week, config=cfg)
+
     projections = build_diy_projections_from_frames(
         season,
         week,
         pbp,
         vegas,
-        None,
+        weather,
         roster,
-        config=config,
+        config=cfg,
     )
     actuals = actual_week_fantasy_points(pbp, season, week)
     if projections.empty or actuals.empty:

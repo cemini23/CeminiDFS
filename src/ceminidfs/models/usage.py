@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from ceminidfs.data.rosters import apply_position_lookup, position_lookup_for_week
+from ceminidfs.models.usage_settings import UsageSettings
 from ceminidfs.models.volume import DEFAULT_SACK_RATE, DEFAULT_SCRAMBLE_RATE
 
 
@@ -76,29 +78,68 @@ def infer_player_position(
     return "WR"
 
 
-def assign_inferred_positions(stats: pd.DataFrame) -> pd.DataFrame:
+def refine_skill_position(
+    pass_attempts: float,
+    carries: float,
+    targets: float,
+    air_yards: float,
+    *,
+    fallback: str = "",
+    roster_position: str = "",
+) -> str:
+    """Infer position and split pass-catchers into TE vs WR when possible."""
+
+    roster_pos = str(roster_position or fallback or "").strip().upper()
+    pos = infer_player_position(pass_attempts, carries, targets, fallback=roster_pos)
+    if pos != "WR" or targets < 4:
+        return pos
+    if roster_pos == "TE":
+        return "TE"
+    adot = float(air_yards) / max(float(targets), 1.0)
+    carry_ratio = float(carries) / max(float(targets) + float(carries), 1.0)
+    if targets >= 5 and adot < 8.0 and carry_ratio < 0.12:
+        return "TE"
+    return pos
+
+
+def assign_inferred_positions(
+    stats: pd.DataFrame,
+    *,
+    season: int | None = None,
+    week: int | None = None,
+) -> pd.DataFrame:
     """Attach inferred positions to player-game usage rows."""
 
     if stats.empty or "player_id" not in stats.columns:
         return stats
 
-    totals = stats.groupby("player_id", as_index=False).agg(
+    enriched = stats.copy()
+    if season is not None and week is not None:
+        lookup = position_lookup_for_week(season, week)
+        enriched = apply_position_lookup(enriched, lookup)
+
+    totals = enriched.groupby("player_id", as_index=False).agg(
         pass_attempts=("pass_attempts", "sum"),
         carries=("carries", "sum"),
         targets=("targets", "sum"),
+        air_yards=("air_yards", "sum"),
         position=("position", "last"),
     )
+    roster_lookup = (
+        position_lookup_for_week(season, week) if season is not None and week is not None else {}
+    )
     totals["inferred"] = totals.apply(
-        lambda row: infer_player_position(
+        lambda row: refine_skill_position(
             float(row["pass_attempts"]),
             float(row["carries"]),
             float(row["targets"]),
+            float(row.get("air_yards", 0.0) or 0.0),
             fallback=str(row.get("position", "") or ""),
+            roster_position=roster_lookup.get(str(row["player_id"]), ""),
         ),
         axis=1,
     )
     mapping = totals.set_index("player_id")["inferred"]
-    enriched = stats.copy()
     enriched["position"] = enriched["player_id"].map(mapping).fillna(enriched.get("position", ""))
     return enriched
 
@@ -217,12 +258,9 @@ def player_game_stats_from_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
 
     stats = pd.concat(events, ignore_index=True)
     group_cols = ["season", "week", "team", "game_id", "player_id", "player_name"]
-    result = (
-        stats.groupby(group_cols, dropna=False, as_index=False)[
-            ["targets", "air_yards", "carries", "pass_attempts"]
-        ]
-        .sum()
-    )
+    result = stats.groupby(group_cols, dropna=False, as_index=False)[
+        ["targets", "air_yards", "carries", "pass_attempts"]
+    ].sum()
     result["position"] = ""
     result = result.reindex(columns=columns)
     return assign_inferred_positions(result)
@@ -233,8 +271,16 @@ def rolling_shares(
     team: str,
     through_week: int,
     windows: tuple[int, ...] = (3,),
+    *,
+    settings: UsageSettings | None = None,
 ) -> pd.DataFrame:
     """Return per-player recent and season usage shares for one team."""
+
+    cfg = settings or UsageSettings.from_config({})
+    window = windows[0] if windows else cfg.l3_window
+    if len(windows) == 0:
+        windows = (cfg.l3_window,)
+        window = cfg.l3_window
 
     columns = [
         "player_id",
@@ -257,7 +303,7 @@ def rolling_shares(
     if team_stats.empty:
         return pd.DataFrame(columns=columns)
 
-    window = windows[0] if windows else 3
+    window = windows[0] if windows else cfg.l3_window
     recent_stats = team_stats.loc[
         pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - window
     ].copy()
@@ -284,40 +330,73 @@ def rolling_shares(
     )
 
 
-def identify_qb_starter(stats: pd.DataFrame, team: str, through_week: int) -> str | None:
+def identify_qb_starter(
+    stats: pd.DataFrame,
+    team: str,
+    through_week: int,
+    *,
+    settings: UsageSettings | None = None,
+    roster_team: pd.DataFrame | None = None,
+) -> str | None:
     """Return the team's likely starting QB by recent or season pass attempts."""
 
+    cfg = settings or UsageSettings.from_config({})
     required = {"team", "week", "player_id", "pass_attempts"}
     if stats.empty or not required.issubset(stats.columns):
         return None
 
     team_stats = stats.loc[
-        (stats["team"] == team)
-        & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
+        (stats["team"] == team) & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
     ].copy()
     if team_stats.empty:
         return None
 
+    qb_ids = _roster_qb_ids(roster_team)
+
+    def _filter_qbs(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame.empty or not qb_ids:
+            return frame
+        return frame.loc[frame["player_id"].astype(str).isin(qb_ids)]
+
     prior_week = through_week - 1
     if prior_week >= 1:
-        last_week = team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") == prior_week]
+        last_week = _filter_qbs(
+            team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") == prior_week]
+        )
         if not last_week.empty:
             recent_leader = last_week.groupby("player_id", as_index=False)["pass_attempts"].sum()
             recent_leader = recent_leader.sort_values("pass_attempts", ascending=False)
             if (
                 not recent_leader.empty
-                and float(recent_leader.iloc[0]["pass_attempts"]) >= MIN_LAST_WEEK_QB_PASS_ATTEMPTS
+                and float(recent_leader.iloc[0]["pass_attempts"])
+                >= cfg.min_last_week_qb_pass_attempts
             ):
                 return str(recent_leader.iloc[0]["player_id"])
 
-    recent = team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - 3]
+    two_week = _filter_qbs(
+        team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - 2]
+    )
+    if not two_week.empty:
+        combined = two_week.groupby("player_id", as_index=False)["pass_attempts"].sum()
+        combined = combined.sort_values("pass_attempts", ascending=False)
+        if (
+            not combined.empty
+            and float(combined.iloc[0]["pass_attempts"]) >= cfg.min_two_week_qb_pass_attempts
+        ):
+            return str(combined.iloc[0]["player_id"])
+
+    recent = _filter_qbs(
+        team_stats.loc[
+            pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - cfg.l3_window
+        ]
+    )
     if not recent.empty:
         l3 = recent.groupby("player_id", as_index=False)["pass_attempts"].sum()
         l3 = l3.sort_values("pass_attempts", ascending=False)
-        if not l3.empty and float(l3.iloc[0]["pass_attempts"]) >= MIN_L3_QB_PASS_ATTEMPTS:
+        if not l3.empty and float(l3.iloc[0]["pass_attempts"]) >= cfg.min_l3_qb_pass_attempts:
             return str(l3.iloc[0]["player_id"])
 
-    season = team_stats.groupby("player_id", as_index=False)["pass_attempts"].sum()
+    season = _filter_qbs(team_stats).groupby("player_id", as_index=False)["pass_attempts"].sum()
     season = season.sort_values("pass_attempts", ascending=False)
     if season.empty or float(season.iloc[0]["pass_attempts"]) <= 0:
         return None
@@ -329,19 +408,28 @@ def _identify_qb_backup(
     team: str,
     through_week: int,
     starter_id: str | None,
+    *,
+    settings: UsageSettings | None = None,
+    roster_team: pd.DataFrame | None = None,
 ) -> str | None:
     """Return the team's secondary QB by season pass attempts when distinct from starter."""
 
+    cfg = settings or UsageSettings.from_config({})
     required = {"team", "week", "player_id", "pass_attempts"}
     if stats.empty or not required.issubset(stats.columns):
         return None
 
     team_stats = stats.loc[
-        (stats["team"] == team)
-        & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
+        (stats["team"] == team) & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
     ].copy()
     if team_stats.empty:
         return None
+
+    qb_ids = _roster_qb_ids(roster_team)
+    if qb_ids:
+        team_stats = team_stats.loc[team_stats["player_id"].astype(str).isin(qb_ids)]
+        if team_stats.empty:
+            return None
 
     season = team_stats.groupby("player_id", as_index=False)["pass_attempts"].sum()
     season = season.sort_values("pass_attempts", ascending=False)
@@ -351,14 +439,19 @@ def _identify_qb_backup(
     backup = str(season.iloc[1]["player_id"])
     if starter_id and backup == starter_id:
         return None
-    if float(season.iloc[1]["pass_attempts"]) < MIN_BACKUP_QB_SEASON_ATTEMPTS:
+    if float(season.iloc[1]["pass_attempts"]) < cfg.min_backup_qb_season_attempts:
         return None
 
-    recent = team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - 3]
+    recent = team_stats.loc[
+        pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - cfg.l3_window
+    ]
     if not recent.empty:
         l3 = recent.groupby("player_id", as_index=False)["pass_attempts"].sum()
         backup_row = l3.loc[l3["player_id"] == backup]
-        if backup_row.empty or float(backup_row.iloc[0]["pass_attempts"]) < MIN_BACKUP_QB_L3_ATTEMPTS:
+        if (
+            backup_row.empty
+            or float(backup_row.iloc[0]["pass_attempts"]) < cfg.min_backup_qb_l3_attempts
+        ):
             return None
     return backup
 
@@ -368,16 +461,23 @@ def project_player_usage(
     player_shares: Mapping[str, Any],
     *,
     position: str,
+    settings: UsageSettings | None = None,
 ) -> PlayerUsageProjection:
     """Project a player's usage from team volume and blended shares."""
 
+    cfg = settings or UsageSettings.from_config({})
     pos = str(position or player_shares.get("position", "") or "").upper()
     if player_shares.get("is_qb_starter") and pos != "QB":
         pos = "QB"
-    carry_share = float(player_shares["carry_share_override"]) if "carry_share_override" in player_shares else weighted_blend(
-        _mapping_float(player_shares, "l3_carry_share", "carry_share"),
-        _mapping_float(player_shares, "season_carry_share", "carry_share"),
-        LEAGUE_CARRY_SHARE.get(pos, 0.0),
+    carry_share = (
+        float(player_shares["carry_share_override"])
+        if "carry_share_override" in player_shares
+        else weighted_blend(
+            _mapping_float(player_shares, "l3_carry_share", "carry_share"),
+            _mapping_float(player_shares, "season_carry_share", "carry_share"),
+            LEAGUE_CARRY_SHARE.get(pos, 0.0),
+            weights=cfg.share_weights,
+        )
     )
     if "target_share_override" in player_shares:
         target_share = float(player_shares["target_share_override"])
@@ -387,27 +487,36 @@ def project_player_usage(
             _mapping_float(player_shares, "l3_target_share", "target_share"),
             _mapping_float(player_shares, "season_target_share", "target_share"),
             LEAGUE_TARGET_SHARE.get(pos, 0.0),
+            weights=cfg.share_weights,
         )
         air_yards_share = weighted_blend(
             _mapping_float(player_shares, "l3_air_yards_share", "air_yards_share"),
             _mapping_float(player_shares, "season_air_yards_share", "air_yards_share"),
             LEAGUE_TARGET_SHARE.get(pos, 0.0),
+            weights=cfg.share_weights,
         )
     pass_attempts = float(volume_row.get("pass_attempts", 0.0) or 0.0)
     rush_attempts = float(volume_row.get("rush_attempts", 0.0) or 0.0)
-    rush_pool = float(volume_row.get("rb_rush_attempts", rush_attempts) if pos == "RB" else rush_attempts)
+    rush_pool = float(
+        volume_row.get("rb_rush_attempts", rush_attempts) if pos == "RB" else rush_attempts
+    )
     projected_pass_attempts = 0.0
     projected_carries = carry_share * rush_pool
     if pos == "QB" and player_shares.get("is_qb_starter"):
         implied = float(volume_row.get("implied_total", 0.0) or 0.0)
-        volume_scale = 1.0 + QB_IMPLIED_PASS_BOOST * max(0.0, implied - QB_IMPLIED_PASS_BASELINE)
+        volume_scale = 1.0 + cfg.qb_implied_pass_boost * max(
+            0.0, implied - cfg.qb_implied_pass_baseline
+        )
         projected_pass_attempts = pass_attempts * volume_scale
         qb_carry_share = weighted_blend(
             _mapping_float(player_shares, "l3_carry_share", "carry_share"),
             _mapping_float(player_shares, "season_carry_share", "carry_share"),
-            LEAGUE_QB_CARRY_SHARE,
+            cfg.qb_carry_share,
+            weights=cfg.share_weights,
         )
-        dropback_est = projected_pass_attempts / max(1.0 - DEFAULT_SACK_RATE - DEFAULT_SCRAMBLE_RATE, 0.5)
+        dropback_est = projected_pass_attempts / max(
+            1.0 - DEFAULT_SACK_RATE - DEFAULT_SCRAMBLE_RATE, 0.5
+        )
         scramble_carries = dropback_est * DEFAULT_SCRAMBLE_RATE
         designed_rush = float(player_shares.get("qb_rush_per_game", 0.0) or 0.0)
         projected_carries = max(
@@ -417,7 +526,7 @@ def project_player_usage(
             designed_rush,
         )
     elif pos == "QB" and player_shares.get("is_qb_backup"):
-        projected_pass_attempts = pass_attempts * QB_BACKUP_PASS_SHARE
+        projected_pass_attempts = pass_attempts * cfg.qb_backup_pass_share
 
     return PlayerUsageProjection(
         season=int(volume_row.get("season", 0) or 0),
@@ -446,9 +555,11 @@ def build_week_usage(
     season: int,
     week: int,
     roster: pd.DataFrame | None = None,
+    config: Mapping[str, Any] | None = None,
 ) -> pd.DataFrame:
     """Build player usage projections for all teams in a weekly volume frame."""
 
+    settings = UsageSettings.from_config(config)
     columns = list(PlayerUsageProjection.__dataclass_fields__)
     if volume_df.empty:
         return pd.DataFrame(columns=columns)
@@ -463,19 +574,36 @@ def build_week_usage(
     stats = player_game_stats_from_pbp(pbp)
     if "season" in stats.columns:
         stats = stats.loc[pd.to_numeric(stats["season"], errors="coerce").fillna(season) == season]
-    stats = stats.loc[pd.to_numeric(stats.get("week", pd.Series(dtype=float)), errors="coerce") < week]
+    stats = stats.loc[
+        pd.to_numeric(stats.get("week", pd.Series(dtype=float)), errors="coerce") < week
+    ]
+    stats = assign_inferred_positions(stats, season=season, week=week)
 
     roster_by_team = _normalize_roster(roster)
     rows: list[dict[str, Any]] = []
     for _, volume_row in week_volume.iterrows():
         team = str(volume_row["team"])
-        shares = rolling_shares(stats, team=team, through_week=week)
+        team_roster = roster_by_team.get(team)
+        shares = rolling_shares(stats, team=team, through_week=week, settings=settings)
         share_records = _projection_pool(team, shares, roster_by_team)
-        starter_id = identify_qb_starter(stats, team=team, through_week=week)
-        backup_id = _identify_qb_backup(stats, team=team, through_week=week, starter_id=starter_id)
+        starter_id = identify_qb_starter(
+            stats,
+            team=team,
+            through_week=week,
+            settings=settings,
+            roster_team=team_roster,
+        )
+        backup_id = _identify_qb_backup(
+            stats,
+            team=team,
+            through_week=week,
+            starter_id=starter_id,
+            settings=settings,
+            roster_team=team_roster,
+        )
         volume_dict = volume_row.to_dict()
         volume_dict["rb_rush_attempts"] = _rb_rush_pool(volume_dict)
-        _assign_rb_committee_shares(share_records)
+        _assign_rb_committee_shares(share_records, settings=settings)
         _enrich_qb_player_context(share_records, stats, team=team, through_week=week)
 
         for player in share_records:
@@ -486,6 +614,7 @@ def build_week_usage(
                 volume_dict,
                 player,
                 position=str(player.get("position", "")),
+                settings=settings,
             )
             rows.append(projection.to_dict())
 
@@ -562,7 +691,9 @@ def _projection_pool(
     roster_by_team: dict[str, pd.DataFrame],
 ) -> list[dict[str, Any]]:
     if team in roster_by_team:
-        pool = roster_by_team[team].merge(shares, on=["player_id", "team"], how="left", suffixes=("", "_hist"))
+        pool = roster_by_team[team].merge(
+            shares, on=["player_id", "team"], how="left", suffixes=("", "_hist")
+        )
         if "player_name_hist" in pool.columns:
             pool["player_name"] = pool["player_name"].fillna(pool["player_name_hist"])
         if "position_hist" in pool.columns:
@@ -589,7 +720,9 @@ def _projection_pool(
     pool["position"] = pool["position"].fillna("").astype(str).str.upper()
     empty = pool["position"].eq("")
     if empty.any() and "position_hist" in pool.columns:
-        pool.loc[empty, "position"] = pool.loc[empty, "position_hist"].fillna("").astype(str).str.upper()
+        pool.loc[empty, "position"] = (
+            pool.loc[empty, "position_hist"].fillna("").astype(str).str.upper()
+        )
 
     return pool.fillna({col: 0.0 for col in share_cols}).to_dict("records")
 
@@ -607,8 +740,7 @@ def _enrich_qb_player_context(
         return
 
     team_stats = stats.loc[
-        (stats["team"] == team)
-        & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
+        (stats["team"] == team) & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
     ].copy()
     if team_stats.empty:
         return
@@ -636,9 +768,14 @@ def _rb_rush_pool(volume_row: Mapping[str, Any]) -> float:
     return max(rush_attempts - qb_scrambles, rush_attempts * 0.70)
 
 
-def _assign_rb_committee_shares(share_records: list[dict[str, Any]]) -> None:
+def _assign_rb_committee_shares(
+    share_records: list[dict[str, Any]],
+    *,
+    settings: UsageSettings | None = None,
+) -> None:
     """Normalize top-N RB carry/target shares so backups do not inflate the team pool."""
 
+    cfg = settings or UsageSettings.from_config({})
     rbs = [player for player in share_records if str(player.get("position", "")).upper() == "RB"]
     if not rbs:
         return
@@ -652,24 +789,27 @@ def _assign_rb_committee_shares(share_records: list[dict[str, Any]]) -> None:
         ),
         reverse=True,
     )
-    committee = ranked[:LEAGUE_RB_COMMITTEE_SIZE]
+    committee = ranked[: cfg.rb_committee_size]
     for rank, player in enumerate(committee):
-        carry_prior = LEAGUE_RB_CARRY_PRIORS[min(rank, len(LEAGUE_RB_CARRY_PRIORS) - 1)]
-        target_prior = LEAGUE_RB_TARGET_PRIORS[min(rank, len(LEAGUE_RB_TARGET_PRIORS) - 1)]
+        carry_prior = cfg.rb_carry_priors[min(rank, len(cfg.rb_carry_priors) - 1)]
+        target_prior = cfg.rb_target_priors[min(rank, len(cfg.rb_target_priors) - 1)]
         player["carry_share_override"] = weighted_blend(
             _mapping_float(player, "l3_carry_share", "carry_share"),
             _mapping_float(player, "season_carry_share", "carry_share"),
             carry_prior,
+            weights=cfg.share_weights,
         )
         player["target_share_override"] = weighted_blend(
             _mapping_float(player, "l3_target_share", "target_share"),
             _mapping_float(player, "season_target_share", "target_share"),
             target_prior,
+            weights=cfg.share_weights,
         )
         player["air_yards_share_override"] = weighted_blend(
             _mapping_float(player, "l3_air_yards_share", "air_yards_share"),
             _mapping_float(player, "season_air_yards_share", "air_yards_share"),
             target_prior,
+            weights=cfg.share_weights,
         )
 
     committee_ids = {player.get("player_id") for player in committee}
@@ -688,7 +828,18 @@ def _assign_rb_committee_shares(share_records: list[dict[str, Any]]) -> None:
     if target_total > 1.0:
         for player in committee:
             player["target_share_override"] = float(player["target_share_override"]) / target_total
-            player["air_yards_share_override"] = float(player.get("air_yards_share_override", 0.0)) / target_total
+            player["air_yards_share_override"] = (
+                float(player.get("air_yards_share_override", 0.0)) / target_total
+            )
+
+
+def _roster_qb_ids(roster_team: pd.DataFrame | None) -> set[str]:
+    if roster_team is None or roster_team.empty or "position" not in roster_team.columns:
+        return set()
+    qbs = roster_team.loc[roster_team["position"].astype(str).str.upper().eq("QB")]
+    if "player_id" not in qbs.columns:
+        return set()
+    return {str(value) for value in qbs["player_id"].astype(str) if value}
 
 
 def _normalize_roster(roster: pd.DataFrame | None) -> dict[str, pd.DataFrame]:

@@ -48,7 +48,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     format_prepare_summary = None  # type: ignore[assignment]
 
 try:
-    from ceminidfs.pipeline.backtest import format_backtest_summary, run_backtest, write_backtest_report
+    from ceminidfs.pipeline.backtest import (
+        format_backtest_summary,
+        run_backtest,
+        write_backtest_report,
+    )
 except ImportError:  # pragma: no cover - defensive for partial installs
     run_backtest = None  # type: ignore[assignment]
     write_backtest_report = None  # type: ignore[assignment]
@@ -80,6 +84,34 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     write_calibration_brief = None  # type: ignore[assignment]
     write_calibration_json = None  # type: ignore[assignment]
     render_calibration_brief = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.lineup_backtest import (
+        format_lineup_backtest_summary,
+        run_lineup_backtest,
+        write_lineup_backtest_report,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    run_lineup_backtest = None  # type: ignore[assignment]
+    write_lineup_backtest_report = None  # type: ignore[assignment]
+    format_lineup_backtest_summary = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.benchmark_replay import (
+        format_benchmark_replay,
+        replay_benchmark_directory,
+        write_benchmark_replay_report,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    replay_benchmark_directory = None  # type: ignore[assignment]
+    write_benchmark_replay_report = None  # type: ignore[assignment]
+    format_benchmark_replay = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.regression import format_regression_result, run_weekly_regression
+except ImportError:  # pragma: no cover - defensive for partial installs
+    run_weekly_regression = None  # type: ignore[assignment]
+    format_regression_result = None  # type: ignore[assignment]
 
 try:
     from ceminidfs.export.late_swap import late_swap_lineups
@@ -135,8 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--out", dest="output_path", type=Path, required=True)
     optimize.add_argument("--count", type=int, default=150)
     optimize.add_argument("--site", default="fanduel")
-    optimize.add_argument("--sim-rerank", action="store_true", help="Rerank pydfs candidates by simulation")
-    optimize.add_argument("--candidates", type=int, default=2000, help="Candidate lineups before rerank")
+    optimize.add_argument(
+        "--sim-rerank", action="store_true", help="Rerank pydfs candidates by simulation"
+    )
+    optimize.add_argument(
+        "--candidates", type=int, default=2000, help="Candidate lineups before rerank"
+    )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     optimize.set_defaults(handler=_cmd_optimize)
 
@@ -155,7 +191,9 @@ def build_parser() -> argparse.ArgumentParser:
     ownership_calibrate.add_argument("--site")
     ownership_calibrate.set_defaults(handler=_cmd_ownership_calibrate)
 
-    late_swap = subparsers.add_parser("late-swap", help="Late-swap existing lineups after teams lock")
+    late_swap = subparsers.add_parser(
+        "late-swap", help="Late-swap existing lineups after teams lock"
+    )
     late_swap.add_argument("--lineups", dest="lineups_path", type=Path, required=True)
     late_swap.add_argument("--players", dest="players_path", type=Path, required=True)
     late_swap.add_argument(
@@ -175,7 +213,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--salary", type=Path, required=True)
     run.add_argument("--site", default="fanduel")
     run.add_argument("--count", type=int, default=150)
-    run.add_argument("--sim-rerank", action="store_true", help="Rerank optimizer candidates by simulation")
+    run.add_argument(
+        "--sim-rerank", action="store_true", help="Rerank optimizer candidates by simulation"
+    )
     run.add_argument("--candidates", type=int, default=2000, help="Candidate lineups before rerank")
     run.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     run.add_argument(
@@ -234,7 +274,9 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark = subparsers.add_parser("benchmark", help="Paid projection benchmark tools")
     benchmark_sub = benchmark.add_subparsers(dest="benchmark_command")
 
-    benchmark_load = benchmark_sub.add_parser("load", help="Parse a Stokastic/Labs CSV into a snapshot JSON")
+    benchmark_load = benchmark_sub.add_parser(
+        "load", help="Parse a Stokastic/Labs CSV into a snapshot JSON"
+    )
     benchmark_load.add_argument("--csv", dest="csv_path", type=Path, required=True)
     benchmark_load.add_argument("--out", dest="output_path", type=Path, required=True)
     benchmark_load.add_argument("--season", type=int)
@@ -265,7 +307,60 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark_compare.set_defaults(handler=_cmd_benchmark_compare)
 
-    calibrate = subparsers.add_parser("calibrate", help="Generate calibration wiki brief from backtest results")
+    benchmark_replay = benchmark_sub.add_parser(
+        "replay",
+        help="Compare every discoverable paid CSV in a folder across weeks",
+    )
+    benchmark_replay.add_argument("--season", type=int, required=True)
+    benchmark_replay.add_argument("--start-week", type=int, required=True)
+    benchmark_replay.add_argument("--end-week", type=int, required=True)
+    benchmark_replay.add_argument("--dir", dest="benchmark_dir", type=Path, required=True)
+    benchmark_replay.add_argument("--site", default="fanduel")
+    benchmark_replay.add_argument("--source")
+    benchmark_replay.add_argument("--no-diy", action="store_true", help="Skip DIY side-by-side")
+    benchmark_replay.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=Path("reports/benchmark_replay.json"),
+    )
+    benchmark_replay.set_defaults(handler=_cmd_benchmark_replay)
+
+    lineup_backtest = subparsers.add_parser(
+        "lineup-backtest",
+        help="Walk-forward synthetic slate → optimize → score vs actuals",
+    )
+    lineup_backtest.add_argument("--season", type=int, required=True)
+    lineup_backtest.add_argument("--start-week", type=int, required=True)
+    lineup_backtest.add_argument("--end-week", type=int, required=True)
+    lineup_backtest.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=Path("reports/lineup_backtest.json"),
+    )
+    lineup_backtest.set_defaults(handler=_cmd_lineup_backtest)
+
+    regression = subparsers.add_parser(
+        "regression",
+        help="Prepare (optional) + backtest + calibrate + lineup backtest in one run",
+    )
+    regression.add_argument("--season", type=int, required=True)
+    regression.add_argument("--start-week", type=int, required=True)
+    regression.add_argument("--end-week", type=int, required=True)
+    regression.add_argument("--prepare", action="store_true", help="Fetch nflverse caches first")
+    regression.add_argument("--skip-lineup", action="store_true", help="Skip lineup-level backtest")
+    regression.add_argument("--output-dir", type=Path, default=Path("reports"))
+    regression.add_argument(
+        "--benchmark-dir", type=Path, help="Folder of paid CSV exports to replay"
+    )
+    regression.add_argument("--benchmark-csv", type=Path, help="Single paid export for calibration")
+    regression.add_argument("--benchmark-week", type=int)
+    regression.set_defaults(handler=_cmd_regression)
+
+    calibrate = subparsers.add_parser(
+        "calibrate", help="Generate calibration wiki brief from backtest results"
+    )
     calibrate.add_argument("--season", type=int, required=True)
     calibrate.add_argument("--start-week", type=int, required=True)
     calibrate.add_argument("--end-week", type=int, required=True)
@@ -436,23 +531,29 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
 
 def _cmd_backtest_prepare(args: argparse.Namespace) -> int:
     if prepare_season_cache is None or format_prepare_summary is None:
-        raise RuntimeError("Backtest prepare unavailable: ceminidfs.pipeline.backtest_prepare import failed")
+        raise RuntimeError(
+            "Backtest prepare unavailable: ceminidfs.pipeline.backtest_prepare import failed"
+        )
     config = runtime_config()
     if args.allow_stub:
         config = {**config, "allow_stub": True}
     result = prepare_season_cache(args.season, args.start_week, args.end_week, config=config)
     print(format_prepare_summary(result))
-    print("\nNext: ceminidfs backtest --season {season} --start-week {start} --end-week {end}".format(
-        season=args.season,
-        start=args.start_week,
-        end=args.end_week,
-    ))
+    print(
+        "\nNext: ceminidfs backtest --season {season} --start-week {start} --end-week {end}".format(
+            season=args.season,
+            start=args.start_week,
+            end=args.end_week,
+        )
+    )
     return 0
 
 
 def _cmd_historical_slate(args: argparse.Namespace) -> int:
     if write_historical_fd_slate is None:
-        raise RuntimeError("Historical slate unavailable: ceminidfs.data.historical_slate import failed")
+        raise RuntimeError(
+            "Historical slate unavailable: ceminidfs.data.historical_slate import failed"
+        )
     config = runtime_config()
     output = args.output_path or Path("artifacts/slates") / f"{args.season}_w{args.week}_fd.csv"
     path = write_historical_fd_slate(args.season, args.week, output, config=config)
@@ -480,8 +581,14 @@ def _cmd_benchmark_load(args: argparse.Namespace) -> int:
 
 
 def _cmd_benchmark_compare(args: argparse.Namespace) -> int:
-    if compare_benchmark_week is None or write_benchmark_compare_report is None or format_benchmark_compare is None:
-        raise RuntimeError("Benchmark compare unavailable: ceminidfs.pipeline.benchmark_compare import failed")
+    if (
+        compare_benchmark_week is None
+        or write_benchmark_compare_report is None
+        or format_benchmark_compare is None
+    ):
+        raise RuntimeError(
+            "Benchmark compare unavailable: ceminidfs.pipeline.benchmark_compare import failed"
+        )
     config = runtime_config()
     result = compare_benchmark_week(
         args.season,
@@ -520,6 +627,69 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
     print(render_calibration_brief(report))
     print(f"\nBrief: {brief_path}")
     print(f"JSON:  {json_path}")
+    return 0
+
+
+def _cmd_lineup_backtest(args: argparse.Namespace) -> int:
+    if (
+        run_lineup_backtest is None
+        or write_lineup_backtest_report is None
+        or format_lineup_backtest_summary is None
+    ):
+        raise RuntimeError(
+            "Lineup backtest unavailable: ceminidfs.pipeline.lineup_backtest import failed"
+        )
+    config = runtime_config()
+    summary = run_lineup_backtest(args.season, args.start_week, args.end_week, config=config)
+    report_path = write_lineup_backtest_report(summary, args.output_path)
+    print(format_lineup_backtest_summary(summary))
+    print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_benchmark_replay(args: argparse.Namespace) -> int:
+    if (
+        replay_benchmark_directory is None
+        or write_benchmark_replay_report is None
+        or format_benchmark_replay is None
+    ):
+        raise RuntimeError(
+            "Benchmark replay unavailable: ceminidfs.pipeline.benchmark_replay import failed"
+        )
+    config = runtime_config()
+    summary = replay_benchmark_directory(
+        args.season,
+        args.start_week,
+        args.end_week,
+        args.benchmark_dir,
+        site=args.site,
+        source=args.source,
+        include_diy=not args.no_diy,
+        config=config,
+    )
+    report_path = write_benchmark_replay_report(summary, args.output_path)
+    print(format_benchmark_replay(summary))
+    print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_regression(args: argparse.Namespace) -> int:
+    if run_weekly_regression is None or format_regression_result is None:
+        raise RuntimeError("Regression unavailable: ceminidfs.pipeline.regression import failed")
+    config = runtime_config()
+    result = run_weekly_regression(
+        args.season,
+        args.start_week,
+        args.end_week,
+        config=config,
+        output_dir=args.output_dir,
+        prepare=args.prepare,
+        skip_lineup=args.skip_lineup,
+        benchmark_dir=args.benchmark_dir,
+        benchmark_csv=args.benchmark_csv,
+        benchmark_week=args.benchmark_week,
+    )
+    print("\n" + format_regression_result(result))
     return 0
 
 
