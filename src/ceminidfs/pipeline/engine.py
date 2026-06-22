@@ -125,7 +125,7 @@ def build_diy_projections_from_frames(
     if usage_df.empty:
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
-    if coherence_settings.enabled:
+    if coherence_settings.enabled and coherence_settings.red_zone_playcall.enabled:
         rz_by_team = build_team_red_zone_run_tendency(
             historical_pbp,
             week,
@@ -137,7 +137,7 @@ def build_diy_projections_from_frames(
     if stats_df.empty:
         raise ValueError(f"No player stat projections built for {season} week {week}")
 
-    if coherence_settings.enabled:
+    if coherence_settings.enabled and coherence_settings.pass_protection.enabled:
         stress_by_team = build_team_pass_protection_stress(
             historical_pbp,
             week,

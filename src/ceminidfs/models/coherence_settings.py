@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 @dataclass(frozen=True)
 class PassProtectionSettings:
+    enabled: bool
     stress_threshold: float
     max_penalty: float
     qb_yds_penalty: float
@@ -16,6 +17,7 @@ class PassProtectionSettings:
 
 @dataclass(frozen=True)
 class RedZonePlaycallSettings:
+    enabled: bool
     run_tendency_threshold: float
     rb_carry_boost: float
     te_target_boost: float
@@ -43,14 +45,16 @@ class CoherenceRiskSettings:
         red_zone_playcall = dict(coherence.get("red_zone_playcall") or {})
         sim_variance = dict(coherence.get("sim_variance") or {})
         return cls(
-            enabled=bool(coherence.get("enabled", False)),
+            enabled=bool(coherence.get("enabled", True)),
             pass_protection=PassProtectionSettings(
+                enabled=bool(pass_protection.get("enabled", True)),
                 stress_threshold=float(pass_protection.get("stress_threshold", 1.12)),
                 max_penalty=float(pass_protection.get("max_penalty", 0.10)),
                 qb_yds_penalty=float(pass_protection.get("qb_yds_penalty", 0.35)),
                 recv_yds_penalty=float(pass_protection.get("recv_yds_penalty", 0.25)),
             ),
             red_zone_playcall=RedZonePlaycallSettings(
+                enabled=bool(red_zone_playcall.get("enabled", True)),
                 run_tendency_threshold=float(red_zone_playcall.get("run_tendency_threshold", 1.08)),
                 rb_carry_boost=float(red_zone_playcall.get("rb_carry_boost", 0.06)),
                 te_target_boost=float(red_zone_playcall.get("te_target_boost", 0.08)),

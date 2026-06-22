@@ -91,12 +91,12 @@ Join key for salary ↔ model: **name + team + position** (`normalize_join_key` 
 
 ## Coherence-Risk Layer (K126)
 
-K126 adds an optional coherence-risk layer between usage and stats, then again before scoring:
+K126 is **on by default** (`coherence_risk.enabled: true`). It sits between usage and stats, then again before scoring:
 
 - `models.coherence_risk` derives walk-forward team stress/tendency indices from nflverse PBP only
-- red-zone playcall adjustments tilt `build_week_usage()` outputs before `build_week_stats()`
-- pass-protection penalties trim QB/WR/TE yardage projections after the stats layer
-- `models.simulate` can widen player CVs when high-risk coherence flags are present
+- red-zone playcall adjustments tilt `build_week_usage()` outputs before `build_week_stats()` (`red_zone_playcall.enabled`)
+- pass-protection penalties trim QB/WR/TE yardage projections after the stats layer (`pass_protection.enabled`)
+- `models.simulate` widens player CVs when high-risk coherence flags are present
 
 See [coherence-risk-audit.md](coherence-risk-audit.md) for the full 10-signal gap table and clean-room posture.
 

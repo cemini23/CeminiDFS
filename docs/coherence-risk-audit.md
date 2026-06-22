@@ -34,6 +34,8 @@ K126 adds a clean-room coherence-risk layer to CeminiDFS without importing Claru
 - Metric: `(sacks + qb_hits) / dropbacks`, normalized by league walk-forward average
 - Projection effect: penalize QB `pass_yds` and WR/TE `rec_yds` when the stress index clears threshold
 
+**Production default:** `coherence_risk.enabled: true` in `config/nfl_dfs.yaml`. Both prototypes are on; pass-protection penalties were lightened after the initial backtest showed a small top-50 MAE regression at heavier settings.
+
 ### Red-zone run tendency
 
 - Unit of analysis: offensive `posteam`

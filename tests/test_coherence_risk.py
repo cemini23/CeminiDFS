@@ -140,12 +140,14 @@ def _enabled_config() -> dict[str, object]:
         "coherence_risk": {
             "enabled": True,
             "pass_protection": {
+                "enabled": True,
                 "stress_threshold": 1.12,
                 "max_penalty": 0.10,
                 "qb_yds_penalty": 0.35,
                 "recv_yds_penalty": 0.25,
             },
             "red_zone_playcall": {
+                "enabled": True,
                 "run_tendency_threshold": 1.08,
                 "rb_carry_boost": 0.06,
                 "te_target_boost": 0.08,

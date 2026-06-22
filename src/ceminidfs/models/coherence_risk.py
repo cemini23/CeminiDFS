@@ -228,10 +228,14 @@ def apply_coherence_risk(
     if not settings.enabled:
         return usage_df.copy(), stats_df.copy()
 
-    rz_by_team = build_team_red_zone_run_tendency(pbp, through_week, settings=settings)
-    adjusted_usage = apply_red_zone_usage_adjustments(usage_df, rz_by_team, settings)
-    stress_by_team = build_team_pass_protection_stress(pbp, through_week, settings=settings)
-    adjusted_stats = apply_pass_protection_penalties(stats_df, stress_by_team, settings)
+    adjusted_usage = usage_df.copy()
+    adjusted_stats = stats_df.copy()
+    if settings.red_zone_playcall.enabled:
+        rz_by_team = build_team_red_zone_run_tendency(pbp, through_week, settings=settings)
+        adjusted_usage = apply_red_zone_usage_adjustments(adjusted_usage, rz_by_team, settings)
+    if settings.pass_protection.enabled:
+        stress_by_team = build_team_pass_protection_stress(pbp, through_week, settings=settings)
+        adjusted_stats = apply_pass_protection_penalties(adjusted_stats, stress_by_team, settings)
     return adjusted_usage, adjusted_stats
 
 
