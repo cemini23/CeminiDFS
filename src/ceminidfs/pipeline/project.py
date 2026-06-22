@@ -145,6 +145,8 @@ def _add_simulation_to_rows(
                 "opp": row.get("opp") or row.get("opponent") or "",
                 "game": row.get("game", ""),
                 "position": row.get("fd_position") or row.get("dk_position") or row.get("position", ""),
+                "coherence_risk_flag": row.get("coherence_risk_flag", False),
+                "pass_protection_stress": row.get("pass_protection_stress", 1.0),
             }
         )
 
@@ -164,6 +166,7 @@ def _add_simulation_to_rows(
         n_iterations=n_iterations,
         seed=int(seed) if seed is not None else None,
         method=method,
+        config=config,
     )
     for _, row in simulated.iterrows():
         index = int(row["_row_index"])

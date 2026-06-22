@@ -1,0 +1,18 @@
+{
+  "season": 2025,
+  "start_week": 5,
+  "end_week": 17,
+  "baseline": {
+    "mae_fd": 4.632696081321656,
+    "top50_mae": 21.453359912723577,
+    "n_players": 3843.0
+  },
+  "coherence": {
+    "mae_fd": 4.626406826937983,
+    "top50_mae": 21.52538878348565,
+    "n_players": 3843.0
+  },
+  "delta_mae": -0.006289254383673004,
+  "top50_delta": 0.07202887076207176,
+  "note": "Overall MAE -0.006 (slight improvement); top-50 MAE +0.072 (slight regression). coherence_risk.enabled defaults false for prod."
+}

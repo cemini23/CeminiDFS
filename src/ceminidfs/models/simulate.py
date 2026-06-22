@@ -7,6 +7,8 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from ceminidfs.models.coherence_risk import coherence_variance_multiplier
+from ceminidfs.models.coherence_settings import CoherenceRiskSettings
 from ceminidfs.models.correlation import build_correlation_matrix
 
 try:  # pragma: no cover - exercised only when scipy is installed.
@@ -38,6 +40,7 @@ def simulate_fd_points(
     seed: int | None = None,
     method: str = "team_shock",
     site: str = "fanduel",
+    config: Mapping[str, Any] | None = None,
 ) -> np.ndarray:
     """Return simulated FanDuel points with shape (n_players, n_iterations)."""
 
@@ -49,6 +52,7 @@ def simulate_fd_points(
             n_iterations=n_iterations,
             seed=seed,
             site=site,
+            config=config,
         )
     if df.empty:
         return np.empty((0, n_iterations), dtype=float)
@@ -57,10 +61,7 @@ def simulate_fd_points(
     projections = pd.to_numeric(df["fd_projection"], errors="coerce").fillna(0.0).clip(lower=0.0)
     medians = projections.to_numpy(dtype=float)
 
-    positions = df["position"].map(_normalize_position)
-    cv = positions.map(lambda position: POSITION_CV.get(position, DEFAULT_POSITION_CV)).to_numpy(
-        dtype=float
-    )
+    cv = df.apply(lambda row: position_cv_for_row(row, config=config), axis=1).to_numpy(dtype=float)
     sigma = np.sqrt(np.log1p(cv * cv))
     team_beta = sigma * TEAM_CORRELATION
     idio_beta = sigma * np.sqrt(1.0 - (TEAM_CORRELATION * TEAM_CORRELATION))
@@ -81,6 +82,7 @@ def simulate_fd_points_copula(
     n_iterations: int = 5000,
     seed: int | None = None,
     site: str = "fanduel",
+    config: Mapping[str, Any] | None = None,
 ) -> np.ndarray:
     """Return FanDuel point simulations from a Gaussian copula with lognormal marginals."""
 
@@ -92,10 +94,7 @@ def simulate_fd_points_copula(
     projections = pd.to_numeric(df["fd_projection"], errors="coerce").fillna(0.0).clip(lower=0.0)
     medians = projections.to_numpy(dtype=float)
 
-    positions = df["position"].map(_normalize_position)
-    cv = positions.map(lambda position: POSITION_CV.get(position, DEFAULT_POSITION_CV)).to_numpy(
-        dtype=float
-    )
+    cv = df.apply(lambda row: position_cv_for_row(row, config=config), axis=1).to_numpy(dtype=float)
     sigma = np.sqrt(np.log1p(cv * cv))
 
     correlation = build_correlation_matrix(df, site=site)
@@ -151,6 +150,7 @@ def add_simulation_columns(
         n_iterations=n_iterations,
         seed=seed,
         method=simulation_method,
+        config=config,
     )
     summary = simulation_summary(sim_matrix, df["player_id"])
 
@@ -167,6 +167,13 @@ def _validate_inputs(df: pd.DataFrame, n_iterations: int) -> None:
         raise ValueError(f"simulate_fd_points requires columns: {', '.join(missing)}")
     if n_iterations <= 0:
         raise ValueError("n_iterations must be positive")
+
+
+def position_cv_for_row(row: Mapping[str, Any], config: Mapping[str, Any] | None = None) -> float:
+    position = _normalize_position(row.get("position", ""))
+    base_cv = float(POSITION_CV.get(position, DEFAULT_POSITION_CV))
+    settings = CoherenceRiskSettings.from_config(config)
+    return base_cv * coherence_variance_multiplier(row, settings)
 
 
 def _method_from_config(config: Mapping[str, Any] | None, fallback: str) -> str:

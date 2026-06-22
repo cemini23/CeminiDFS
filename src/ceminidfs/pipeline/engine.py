@@ -6,6 +6,13 @@ from typing import Any, Mapping
 import pandas as pd
 
 from ceminidfs.data.fetch import week_cache_dir
+from ceminidfs.models.coherence_risk import (
+    apply_pass_protection_penalties,
+    apply_red_zone_usage_adjustments,
+    build_team_pass_protection_stress,
+    build_team_red_zone_run_tendency,
+)
+from ceminidfs.models.coherence_settings import CoherenceRiskSettings
 from ceminidfs.models.scoring import add_fantasy_points
 from ceminidfs.models.stats import build_week_stats
 from ceminidfs.models.dst import build_week_dst_projections
@@ -98,7 +105,7 @@ def build_diy_projections_from_frames(
 ) -> pd.DataFrame:
     """Build scored projections from in-memory weekly frames (backtest-safe)."""
 
-    _ = config  # stats layer reads shrinkage from config; usage reads usage.* keys
+    coherence_settings = CoherenceRiskSettings.from_config(config)
     historical_pbp = _historical_pbp(pbp, season, week)
     if vegas.empty or historical_pbp.empty:
         raise ValueError(f"Missing vegas or historical PBP for {season} week {week}")
@@ -118,9 +125,25 @@ def build_diy_projections_from_frames(
     if usage_df.empty:
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
+    if coherence_settings.enabled:
+        rz_by_team = build_team_red_zone_run_tendency(
+            historical_pbp,
+            week,
+            settings=coherence_settings,
+        )
+        usage_df = apply_red_zone_usage_adjustments(usage_df, rz_by_team, coherence_settings)
+
     stats_df = build_week_stats(usage_df, historical_pbp, season=season, week=week, config=config)
     if stats_df.empty:
         raise ValueError(f"No player stat projections built for {season} week {week}")
+
+    if coherence_settings.enabled:
+        stress_by_team = build_team_pass_protection_stress(
+            historical_pbp,
+            week,
+            settings=coherence_settings,
+        )
+        stats_df = apply_pass_protection_penalties(stats_df, stress_by_team, coherence_settings)
 
     scored = add_fantasy_points(stats_df)
     dst_df = build_week_dst_projections(
@@ -156,6 +179,9 @@ def merge_projections_into_canonical(
     for column in ("opp", "game", "opponent"):
         if column in stats_df.columns:
             merge_columns.append(column)
+    for column in ("coherence_risk_flag", "pass_protection_stress"):
+        if column in stats_df.columns:
+            merge_columns.append(column)
     stats_by_key = (
         stats_df.drop_duplicates(subset=["join_key"], keep="first")
         .set_index("join_key")[merge_columns]
@@ -180,6 +206,10 @@ def merge_projections_into_canonical(
             game = projection.get("game")
             if game:
                 mapped["game"] = game
+            if "coherence_risk_flag" in projection:
+                mapped["coherence_risk_flag"] = projection.get("coherence_risk_flag")
+            if "pass_protection_stress" in projection:
+                mapped["pass_protection_stress"] = projection.get("pass_protection_stress")
         merged.append(mapped)
     return merged
 

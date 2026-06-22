@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Sequence
 
@@ -57,6 +58,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     run_backtest = None  # type: ignore[assignment]
     write_backtest_report = None  # type: ignore[assignment]
     format_backtest_summary = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.coherence_eval import run_coherence_comparison
+except ImportError:  # pragma: no cover - defensive for partial installs
+    run_coherence_comparison = None  # type: ignore[assignment]
 
 try:
     from ceminidfs.data.benchmark import parse_benchmark_csv, write_benchmark_snapshot
@@ -242,6 +248,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON report path (default: reports/backtest.json)",
     )
     backtest.set_defaults(handler=_cmd_backtest)
+
+    coherence_eval = subparsers.add_parser(
+        "coherence-eval",
+        help="Compare baseline backtest vs coherence-risk enabled",
+    )
+    coherence_eval.add_argument("--season", type=int, required=True)
+    coherence_eval.add_argument("--start-week", type=int, required=True)
+    coherence_eval.add_argument("--end-week", type=int, required=True)
+    coherence_eval.set_defaults(handler=_cmd_coherence_eval)
 
     backtest_prepare = subparsers.add_parser(
         "backtest-prepare",
@@ -533,6 +548,15 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     report_path = write_backtest_report(summary, args.output_path)
     print(format_backtest_summary(summary))
     print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_coherence_eval(args: argparse.Namespace) -> int:
+    if run_coherence_comparison is None:
+        raise RuntimeError("Coherence eval unavailable: ceminidfs.pipeline.coherence_eval import failed")
+    config = runtime_config()
+    summary = run_coherence_comparison(args.season, args.start_week, args.end_week, config=config)
+    print(json.dumps(summary, indent=2))
     return 0
 
 

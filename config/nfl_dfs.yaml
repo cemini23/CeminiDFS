@@ -60,3 +60,19 @@ stats:
     catch_rate: 80
     adot: 40
     td_target: 80
+coherence_risk:
+  enabled: false
+  pass_protection:
+    stress_threshold: 1.12
+    max_penalty: 0.10
+    qb_yds_penalty: 0.35
+    recv_yds_penalty: 0.25
+  red_zone_playcall:
+    run_tendency_threshold: 1.08
+    rb_carry_boost: 0.06
+    te_target_boost: 0.08
+    wr_target_trim: 0.04
+  sim_variance:
+    enabled: true
+    high_risk_cv_multiplier: 1.25
+    stress_flag_threshold: 1.12
