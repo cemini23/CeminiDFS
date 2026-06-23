@@ -28,6 +28,7 @@ late-swap (post-lock)
 | Volume | `models.volume` | ✅ pace, PROE, pass rate, play allocation |
 | Usage | `models.usage` | ✅ rolling target/carry/air-yards shares, WOPR |
 | Stats | `models.stats` | ✅ regressed efficiency → counting stats |
+| DST | `models.dst` | ✅ Stat-first projections (sacks, turnovers, return TDs) |
 | Scoring | `models.scoring` | ✅ FD half-PPR + DK full-PPR |
 | Simulation | `models.simulate` + `models.correlation` | ✅ team-shock + Gaussian copula |
 | Ownership | `models.ownership` + `data.ownership_labels` | ✅ heuristic + ridge calibration |
@@ -41,7 +42,7 @@ late-swap (post-lock)
 
 ### v2 additions
 
-Monte Carlo distributions (floor/ceiling), role-prior copula correlation, calibrated ownership from paid labels, pydfs candidate reranking by simulated lineup score, late-swap re-optimization.
+Monte Carlo distributions (floor/ceiling), role-prior copula correlation, calibrated ownership from paid labels, pydfs candidate reranking by simulated lineup score, late-swap re-optimization, coherence risk modeling (K126 pass protection, red zone playcall, sim variance).
 
 ## Execution phases (all complete)
 
@@ -156,6 +157,8 @@ CeminiDFS/
 | Ownership | `@gambling-wiki/concepts/dfs-ownership-projection.md` |
 | Weather APIs | `@osint-wiki/entities/data-sources/open-meteo.md` |
 | Pipeline DAG | `@ccc-wiki/concepts/plan-then-execute-topological-orchestration.md` |
+| NGS/Participation | `docs/ngs-participation-eval.md` (K127 P2 reference) |
+| SportsDataVerse | `docs/sportsdataverse-eval.md` (K127 evaluation) |
 
 ## Future backlog (not started)
 
@@ -165,14 +168,16 @@ Operational and v3 enhancements — not blockers for live slate use:
 - Defense EPA opponent adjustments in stats layer
 - Open-Meteo **archive** API for historical weather in backtests
 - Injury play-probability redistribution in usage model
-- DST stat-first projections (currently salary FPPG fallback)
+- NGS/participation data integration (K127 reference-only, see `docs/ngs-participation-eval.md`)
 - Automated GitHub release / PyPI publish
 
 ## Session handoff
 
 **Workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
 
-**State:** Phases 0–5 complete. **103 tests**, CI green on `main`.
+**State:** Phases 0–5 complete. **194 tests**, CI green on `main`.
+
+**Profiles:** Base `config/nfl_dfs.yaml` (conservative, backtest/research); GPP profile extends with `simulate`, `sim_rerank`, `ownership` enabled via `--profile gpp` CLI flag.
 
 **Typical live workflow:**
 

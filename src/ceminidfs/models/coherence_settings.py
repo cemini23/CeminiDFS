@@ -26,6 +26,22 @@ class RedZonePlaycallSettings:
 
 
 @dataclass(frozen=True)
+class FourthDownSettings:
+    enabled: bool
+    aggression_threshold: float
+    pass_attempt_boost: float
+    target_boost: float
+
+
+@dataclass(frozen=True)
+class WorkloadSettings:
+    enabled: bool
+    rolling_weeks: int
+    z_threshold: float
+    high_risk_cv_multiplier: float
+
+
+@dataclass(frozen=True)
 class CoherenceSimVarianceSettings:
     enabled: bool
     high_risk_cv_multiplier: float
@@ -37,6 +53,8 @@ class CoherenceRiskSettings:
     enabled: bool
     pass_protection: PassProtectionSettings
     red_zone_playcall: RedZonePlaycallSettings
+    fourth_down: FourthDownSettings
+    workload: WorkloadSettings
     sim_variance: CoherenceSimVarianceSettings
 
     @classmethod
@@ -44,6 +62,8 @@ class CoherenceRiskSettings:
         coherence = dict((config or {}).get("coherence_risk") or {})
         pass_protection = dict(coherence.get("pass_protection") or {})
         red_zone_playcall = dict(coherence.get("red_zone_playcall") or {})
+        fourth_down = dict(coherence.get("fourth_down") or {})
+        workload = dict(coherence.get("workload") or {})
         sim_variance = dict(coherence.get("sim_variance") or {})
         return cls(
             enabled=bool(coherence.get("enabled", True)),
@@ -61,6 +81,18 @@ class CoherenceRiskSettings:
                 rb_carry_boost=float(red_zone_playcall.get("rb_carry_boost", 0.06)),
                 te_target_boost=float(red_zone_playcall.get("te_target_boost", 0.08)),
                 wr_target_trim=float(red_zone_playcall.get("wr_target_trim", 0.04)),
+            ),
+            fourth_down=FourthDownSettings(
+                enabled=bool(fourth_down.get("enabled", False)),
+                aggression_threshold=float(fourth_down.get("aggression_threshold", 1.15)),
+                pass_attempt_boost=float(fourth_down.get("pass_attempt_boost", 0.03)),
+                target_boost=float(fourth_down.get("target_boost", 0.02)),
+            ),
+            workload=WorkloadSettings(
+                enabled=bool(workload.get("enabled", False)),
+                rolling_weeks=int(workload.get("rolling_weeks", 3)),
+                z_threshold=float(workload.get("z_threshold", 1.0)),
+                high_risk_cv_multiplier=float(workload.get("high_risk_cv_multiplier", 1.15)),
             ),
             sim_variance=CoherenceSimVarianceSettings(
                 enabled=bool(sim_variance.get("enabled", True)),

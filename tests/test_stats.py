@@ -20,6 +20,7 @@ from ceminidfs.models.stats_settings import (
     LEAGUE_YPC,
     LEAGUE_YPT,
     QB_PASS_SHRINKAGE_K,
+    RB_YPC_SHRINKAGE_K,
     StatsSettings,
 )
 
@@ -123,7 +124,7 @@ def test_build_week_stats_end_to_end():
     wr = stats.loc[stats["player_id"] == "wr1"].iloc[0]
 
     expected_qb_ypa = regress_rate(7.5, 24.0, LEAGUE_YPA, QB_PASS_SHRINKAGE_K)
-    expected_rb_ypc = regress_rate(4.5, 12.0, LEAGUE_YPC, 250.0)
+    expected_rb_ypc = regress_rate(4.5, 12.0, LEAGUE_YPC, RB_YPC_SHRINKAGE_K)
     expected_wr_catch_rate = regress_rate(4 / 6, 6.0, LEAGUE_CATCH_RATE, 80.0)
 
     assert qb["pass_yds"] == pytest.approx(30.0 * expected_qb_ypa)
@@ -177,6 +178,68 @@ def test_calibrated_config_increases_qb_projection_vs_defaults():
 
     assert calibrated_qb["pass_yds"] > default_qb["pass_yds"]
     assert calibrated_qb["pass_td"] > default_qb["pass_td"]
+
+
+def test_rb_efficiency_uses_lighter_shrinkage_than_default():
+    """RB-specific shrinkage (120) is lighter than generic (250), so observed efficiency dominates."""
+    from ceminidfs.models.stats_settings import RB_YPC_SHRINKAGE_K, DEFAULT_RUSH_SHRINKAGE_K
+
+    rb_eff = player_efficiency_from_pbp(_synthetic_pbp(), "rb1", through_week=4, position="RB")
+    wr_eff = player_efficiency_from_pbp(_synthetic_pbp(), "wr1", through_week=4, position="WR")
+
+    # RB with observed 4.5 YPC on 12 carries should be less regressed than generic fallback
+    assert RB_YPC_SHRINKAGE_K < DEFAULT_RUSH_SHRINKAGE_K
+    # RB ypc should be closer to observed (4.5) than generic regressed toward 4.3
+    expected_rb_ypc = regress_rate(4.5, 12.0, 4.3, RB_YPC_SHRINKAGE_K)
+    assert rb_eff["ypc"] == pytest.approx(expected_rb_ypc)
+    # WR rushing (rare) should use generic shrinkage
+    assert wr_eff["ypc"] < expected_rb_ypc or wr_eff["ypc"] == pytest.approx(regress_rate(0, 0, 4.3, DEFAULT_RUSH_SHRINKAGE_K))
+
+
+def test_config_rb_shrinkage_keys_are_respected():
+    """RB-specific config keys override defaults for RB rushing efficiency."""
+    config = {
+        "stats": {
+            "shrinkage": {"rb_ypc": 80, "rb_td_per_carry": 80},
+            "priors": {"rb_ypc": 4.6, "rb_td_per_carry": 0.04},
+        }
+    }
+    settings = StatsSettings.from_config(config)
+
+    assert settings.rb_ypc_shrinkage_k == pytest.approx(80.0)
+    assert settings.rb_td_per_carry_shrinkage_k == pytest.approx(80.0)
+    assert settings.rb_ypc_prior == pytest.approx(4.6)
+    assert settings.rb_td_per_carry_prior == pytest.approx(0.04)
+
+    # Verify RB efficiency uses the tuned values
+    pbp = _synthetic_pbp()
+    tuned = player_efficiency_from_pbp(pbp, "rb1", through_week=4, position="RB", settings=settings)
+    expected_ypc = regress_rate(4.5, 12.0, 4.6, 80.0)
+    assert tuned["ypc"] == pytest.approx(expected_ypc)
+
+
+def test_calibrated_rb_config_increases_projection_vs_defaults():
+    """Lighter RB shrinkage + higher priors must lift RB rush projections (anti-under-bias)."""
+
+    usage = _usage_df()
+    pbp = _synthetic_pbp()
+
+    default_stats = build_week_stats(usage, pbp, season=2024, week=4)
+    calibrated_config = {
+        "stats": {
+            "shrinkage": {"rb_ypc": 120, "rb_td_per_carry": 120},
+            "priors": {"rb_ypc": 4.5, "rb_td_per_carry": 0.035},
+        }
+    }
+    calibrated_stats = build_week_stats(
+        usage, pbp, season=2024, week=4, config=calibrated_config
+    )
+
+    default_rb = default_stats.loc[default_stats["player_id"] == "rb1"].iloc[0]
+    calibrated_rb = calibrated_stats.loc[calibrated_stats["player_id"] == "rb1"].iloc[0]
+
+    # With higher prior (4.5 vs 4.3) and same 12 carries, projected rush yards should increase
+    assert calibrated_rb["rush_yds"] > default_rb["rush_yds"]
 
 
 def _qb_pbp_sample() -> pd.DataFrame:

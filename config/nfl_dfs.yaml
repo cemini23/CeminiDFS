@@ -66,11 +66,19 @@ stats:
     qb_td_rate: 55
     qb_int_rate: 90
     qb_rush: 140
+    # RB starters skew above league priors; lighter shrinkage than generic ypc=250
+    # helps retain observed efficiency and reduces under-bias in rush projections.
+    rb_ypc: 120
+    rb_td_per_carry: 120
   priors:
     # Anchors for QB shrinkage. League per-attempt averages include backups and
     # garbage time, biasing starters low; nudge anchors toward the starter pool.
     qb_ypa: 7.25
     qb_td_rate: 0.052
+    # RB anchors: starter YPC and TD/carry rates skew above league averages
+    # which include goal-line vultures and backup touches.
+    rb_ypc: 4.5
+    rb_td_per_carry: 0.035
 coherence_risk:
   enabled: true
   pass_protection:
@@ -88,6 +96,16 @@ coherence_risk:
     rb_carry_boost: 0.04
     te_target_boost: 0.05
     wr_target_trim: 0.03
+  fourth_down:
+    enabled: false
+    aggression_threshold: 1.15
+    pass_attempt_boost: 0.03
+    target_boost: 0.02
+  workload:
+    enabled: false
+    rolling_weeks: 3
+    z_threshold: 1.0
+    high_risk_cv_multiplier: 1.15
   sim_variance:
     enabled: true
     high_risk_cv_multiplier: 1.25

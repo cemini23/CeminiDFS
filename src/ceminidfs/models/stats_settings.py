@@ -34,6 +34,10 @@ DEFAULT_TD_TARGET_SHRINKAGE_K = 80.0
 QB_PASS_SHRINKAGE_K = 90.0
 QB_RUSH_SHRINKAGE_K = 160.0
 
+# RB-specific defaults (starter RBs skew above league; lighter shrinkage retains edge)
+RB_YPC_SHRINKAGE_K = 120.0
+RB_TD_PER_CARRY_SHRINKAGE_K = 120.0
+
 
 @dataclass(frozen=True)
 class StatsSettings:
@@ -53,6 +57,12 @@ class StatsSettings:
     qb_ypa_prior: float
     qb_td_rate_prior: float
     qb_int_rate_prior: float
+    # RB-specific shrinkage strengths (starter RBs retain more of their observed efficiency).
+    rb_ypc_shrinkage_k: float
+    rb_td_per_carry_shrinkage_k: float
+    # RB-specific regression priors (starter RBs skew above league average).
+    rb_ypc_prior: float
+    rb_td_per_carry_prior: float
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any] | None) -> "StatsSettings":
@@ -60,6 +70,9 @@ class StatsSettings:
         shrink = dict(stats.get("shrinkage") or {})
         priors = dict(stats.get("priors") or {})
         qb_pass_k = float(shrink.get("qb_ypa", QB_PASS_SHRINKAGE_K))
+        # RB shrinkage: use rb_ypc/rb_td_per_carry if set, fall back to generic ypc for compatibility
+        rb_ypc_k = float(shrink.get("rb_ypc", shrink.get("ypc", RB_YPC_SHRINKAGE_K)))
+        rb_td_k = float(shrink.get("rb_td_per_carry", shrink.get("ypc", RB_TD_PER_CARRY_SHRINKAGE_K)))
         return cls(
             pass_shrinkage_k=float(shrink.get("ypa", DEFAULT_PASS_SHRINKAGE_K)),
             rush_shrinkage_k=float(shrink.get("ypc", DEFAULT_RUSH_SHRINKAGE_K)),
@@ -78,4 +91,8 @@ class StatsSettings:
             qb_ypa_prior=float(priors.get("qb_ypa", LEAGUE_YPA)),
             qb_td_rate_prior=float(priors.get("qb_td_rate", LEAGUE_TD_PER_ATT)),
             qb_int_rate_prior=float(priors.get("qb_int_rate", LEAGUE_INT_RATE)),
+            rb_ypc_shrinkage_k=rb_ypc_k,
+            rb_td_per_carry_shrinkage_k=rb_td_k,
+            rb_ypc_prior=float(priors.get("rb_ypc", LEAGUE_YPC)),
+            rb_td_per_carry_prior=float(priors.get("rb_td_per_carry", LEAGUE_TD_PER_CARRY)),
         )

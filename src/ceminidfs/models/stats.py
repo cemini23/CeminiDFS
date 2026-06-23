@@ -90,7 +90,7 @@ def player_efficiency_from_pbp(
             td_prior=cfg.qb_td_rate_prior,
             int_prior=cfg.qb_int_rate_prior,
         )
-        rush_eff = _rushing_efficiency(historical, player, shrinkage_k=cfg.qb_rush_shrinkage_k)
+        rush_eff = _rushing_efficiency(historical, player, shrinkage_k=cfg.qb_rush_shrinkage_k, position=position, settings=cfg)
     else:
         pass_eff = _passing_efficiency(
             historical,
@@ -99,7 +99,7 @@ def player_efficiency_from_pbp(
             td_k=cfg.pass_shrinkage_k,
             int_k=cfg.pass_shrinkage_k,
         )
-        rush_eff = _rushing_efficiency(historical, player, shrinkage_k=cfg.rush_shrinkage_k)
+        rush_eff = _rushing_efficiency(historical, player, shrinkage_k=cfg.rush_shrinkage_k, position=position, settings=cfg)
     rec_eff = _receiving_efficiency(historical, player, settings=cfg)
     return {
         "ypa": pass_eff["ypa"],
@@ -219,7 +219,15 @@ def build_week_stats(
         )
         rows.append(projection.to_dict())
 
-    return pd.DataFrame(rows, columns=columns)
+    output = pd.DataFrame(rows, columns=columns)
+    for column in ("workload_index", "workload_risk_flag"):
+        if column not in week_usage.columns:
+            continue
+        values_by_player = week_usage.drop_duplicates(subset=["player_id"], keep="first").set_index(
+            "player_id"
+        )[column]
+        output[column] = output["player_id"].map(values_by_player)
+    return output
 
 
 def _passing_efficiency(
@@ -252,7 +260,14 @@ def _passing_efficiency(
     }
 
 
-def _rushing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float = DEFAULT_RUSH_SHRINKAGE_K) -> dict[str, float]:
+def _rushing_efficiency(
+    pbp: pd.DataFrame,
+    player_id: str,
+    *,
+    shrinkage_k: float = DEFAULT_RUSH_SHRINKAGE_K,
+    position: str = "",
+    settings: StatsSettings | None = None,
+) -> dict[str, float]:
     rusher_col = _first_present(pbp, ("rusher_player_id", "rusher_id"))
     if rusher_col is None:
         carries = pd.DataFrame()
@@ -262,13 +277,28 @@ def _rushing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float
     sample = float(len(carries))
     yards = _sum_first_numeric(carries, ("rushing_yards", "rush_yards", "yards_gained"))
     touchdowns = _sum_first_numeric(carries, ("rushing_tds", "rush_touchdown", "touchdown"))
+
+    # Use RB-specific shrinkage and priors when position is RB
+    cfg = settings or StatsSettings.from_config(None)
+    is_rb = str(position or "").upper() == "RB"
+    if is_rb:
+        ypc_k = cfg.rb_ypc_shrinkage_k
+        td_k = cfg.rb_td_per_carry_shrinkage_k
+        ypc_prior = cfg.rb_ypc_prior
+        td_prior = cfg.rb_td_per_carry_prior
+    else:
+        ypc_k = shrinkage_k
+        td_k = shrinkage_k
+        ypc_prior = LEAGUE_YPC
+        td_prior = LEAGUE_TD_PER_CARRY
+
     return {
-        "ypc": regress_rate(_rate(yards, sample), sample, LEAGUE_YPC, shrinkage_k),
+        "ypc": regress_rate(_rate(yards, sample), sample, ypc_prior, ypc_k),
         "td_per_carry": regress_rate(
             _rate(touchdowns, sample),
             sample,
-            LEAGUE_TD_PER_CARRY,
-            shrinkage_k,
+            td_prior,
+            td_k,
         ),
     }
 

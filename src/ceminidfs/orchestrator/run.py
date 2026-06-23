@@ -249,10 +249,13 @@ def _load_or_build_sim_rerank_inputs(
         )
     )
     seed = rerank_cfg.get("seed", simulate_cfg.get("seed", config.get("simulation_seed")))
+    method = str(simulate_cfg.get("method", config.get("simulation_method", "team_shock")))
     sim_matrix = simulate_fd_points(
         pd.DataFrame(sim_rows),
         n_iterations=n_iterations,
         seed=int(seed) if seed is not None else None,
+        method=method,
+        config=config,
     )
     return sim_matrix, build_player_index(sim_rows)
 
@@ -322,7 +325,13 @@ def _simulation_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
                 )
                 or 0.0,
                 "team": _first_present(row, ("team", "Team", "TeamAbbrev")) or "",
+                "opp": _first_present(row, ("opp", "Opponent")) or "",
+                "game": _first_present(row, ("game", "Game", "Game Info")) or "",
                 "position": _first_present(row, ("fd_position", "Position", "dk_position")) or "",
+                "coherence_risk_flag": _first_present(row, ("coherence_risk_flag",)) or False,
+                "pass_protection_stress": _first_present(row, ("pass_protection_stress",)) or 1.0,
+                "workload_index": _first_present(row, ("workload_index",)) or 0.0,
+                "workload_risk_flag": _first_present(row, ("workload_risk_flag",)) or False,
             }
         )
     return rows

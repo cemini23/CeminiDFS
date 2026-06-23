@@ -22,6 +22,8 @@ EXCLUDED_PLAY_TYPES = frozenset(
         "xp",
     }
 )
+FOURTH_DOWN_EXCLUDED_PLAY_TYPES = EXCLUDED_PLAY_TYPES - {"field_goal", "punt"}
+SKILL_POSITIONS = frozenset({"RB", "WR", "TE"})
 
 
 def build_team_pass_protection_stress(
@@ -121,6 +123,106 @@ def build_team_red_zone_run_tendency(
     }
 
 
+def build_team_fourth_down_aggressiveness(
+    pbp: pd.DataFrame,
+    through_week: int,
+    *,
+    settings: CoherenceRiskSettings,
+) -> dict[str, float]:
+    """Return team fourth-down go-rate indices versus league average."""
+
+    _ = settings
+    historical = _historical_fourth_down(pbp, through_week)
+    if historical.empty or "posteam" not in historical.columns:
+        return {}
+
+    historical["team"] = historical["posteam"].fillna("").astype(str)
+    historical = historical.loc[historical["team"] != ""].copy()
+    if historical.empty:
+        return {}
+
+    historical["go_flag"] = _scrimmage_mask(historical).astype(float)
+    grouped = historical.groupby("team", as_index=False).agg(
+        fourth_downs=("team", "size"),
+        go_attempts=("go_flag", "sum"),
+    )
+    grouped = grouped.loc[grouped["fourth_downs"] > 0].copy()
+    if grouped.empty:
+        return {}
+
+    grouped["go_rate"] = grouped["go_attempts"] / grouped["fourth_downs"]
+    league_rate = float(grouped["go_attempts"].sum() / grouped["fourth_downs"].sum())
+    if league_rate <= 0:
+        return {str(row["team"]): 1.0 for _, row in grouped.iterrows()}
+
+    return {
+        str(row["team"]): float(row["go_rate"]) / league_rate
+        for _, row in grouped.iterrows()
+        if str(row["team"])
+    }
+
+
+def build_player_workload_index(
+    pbp: pd.DataFrame,
+    through_week: int,
+    *,
+    settings: CoherenceRiskSettings,
+) -> dict[str, float]:
+    """Return player rolling workload z-scores versus same-position pools."""
+
+    if pbp.empty:
+        return {}
+
+    from ceminidfs.models.usage import assign_inferred_positions, player_game_stats_from_pbp
+
+    player_games = player_game_stats_from_pbp(pbp)
+    if player_games.empty or "player_id" not in player_games.columns or "week" not in player_games.columns:
+        return {}
+
+    player_games = player_games.loc[
+        pd.to_numeric(player_games["week"], errors="coerce") < through_week
+    ].copy()
+    if player_games.empty:
+        return {}
+
+    player_games = assign_inferred_positions(player_games)
+    player_games["position"] = player_games.get("position", "").fillna("").astype(str).str.upper()
+    player_games = player_games.loc[player_games["position"].isin(SKILL_POSITIONS)].copy()
+    if player_games.empty:
+        return {}
+
+    player_games["workload"] = (
+        pd.to_numeric(player_games.get("targets", 0.0), errors="coerce").fillna(0.0)
+        + pd.to_numeric(player_games.get("carries", 0.0), errors="coerce").fillna(0.0)
+    )
+    recent_window = max(int(settings.workload.rolling_weeks), 1)
+    recent = (
+        player_games.sort_values(["player_id", "week", "game_id"])
+        .groupby("player_id", group_keys=False)
+        .tail(recent_window)
+    )
+    if recent.empty:
+        return {}
+
+    player_recent = recent.groupby("player_id", as_index=False).agg(
+        position=("position", "last"),
+        workload=("workload", "mean"),
+    )
+    pool = player_recent.groupby("position")["workload"].agg(["mean", "std"]).to_dict("index")
+
+    index_by_player: dict[str, float] = {}
+    for _, row in player_recent.iterrows():
+        player_id = str(row["player_id"])
+        position = str(row["position"])
+        stats = pool.get(position) or {}
+        std = float(stats.get("std") or 0.0)
+        if std <= 0:
+            index_by_player[player_id] = 0.0
+            continue
+        index_by_player[player_id] = (float(row["workload"]) - float(stats.get("mean") or 0.0)) / std
+    return index_by_player
+
+
 def apply_pass_protection_penalties(
     stats_df: pd.DataFrame,
     stress_by_team: Mapping[str, float],
@@ -175,6 +277,73 @@ def apply_pass_protection_penalties(
             pd.to_numeric(output.loc[wr_te_mask, "rec_yds"], errors="coerce").fillna(0.0)
             * (1.0 - recv_penalty.loc[wr_te_mask])
         )
+    return output
+
+
+def apply_fourth_down_aggressiveness_adjustments(
+    usage_df: pd.DataFrame,
+    aggression_by_team: Mapping[str, float],
+    settings: CoherenceRiskSettings,
+) -> pd.DataFrame:
+    """Slightly boost passing usage for offenses that go for it more often."""
+
+    if usage_df.empty:
+        return usage_df.copy()
+
+    output = usage_df.copy()
+    threshold = settings.fourth_down.aggression_threshold
+    output["fourth_down_aggressiveness"] = output.get(
+        "team", pd.Series("", index=output.index)
+    ).map(lambda team: float(aggression_by_team.get(str(team), 1.0)))
+    output["fourth_down_excess"] = output["fourth_down_aggressiveness"].map(
+        lambda value: _index_excess(value, threshold)
+    )
+
+    position = output.get("position", pd.Series("", index=output.index)).astype(str).str.upper()
+    qb_mask = position.eq("QB")
+    skill_mask = position.isin(SKILL_POSITIONS)
+
+    if "projected_pass_attempts" in output.columns:
+        output.loc[qb_mask, "projected_pass_attempts"] = (
+            pd.to_numeric(output.loc[qb_mask, "projected_pass_attempts"], errors="coerce").fillna(0.0)
+            * (
+                1.0
+                + settings.fourth_down.pass_attempt_boost
+                * output.loc[qb_mask, "fourth_down_excess"]
+            )
+        )
+    if "projected_targets" in output.columns:
+        output.loc[skill_mask, "projected_targets"] = (
+            pd.to_numeric(output.loc[skill_mask, "projected_targets"], errors="coerce").fillna(0.0)
+            * (
+                1.0
+                + settings.fourth_down.target_boost
+                * output.loc[skill_mask, "fourth_down_excess"]
+            )
+        )
+    return output
+
+
+def apply_workload_risk_flags(
+    frame: pd.DataFrame,
+    workload_by_player: Mapping[str, float],
+    settings: CoherenceRiskSettings,
+) -> pd.DataFrame:
+    """Attach workload z-score and high-workload risk flags to player rows."""
+
+    if frame.empty:
+        return frame.copy()
+
+    output = frame.copy()
+    output["workload_index"] = output.get("player_id", pd.Series("", index=output.index)).map(
+        lambda player_id: float(workload_by_player.get(str(player_id), 0.0))
+    )
+    position = output.get("position", pd.Series("", index=output.index)).astype(str).str.upper()
+    high_workload = position.isin(SKILL_POSITIONS) & output["workload_index"].ge(
+        settings.workload.z_threshold
+    )
+    existing_flag = _truthy_series(output.get("workload_risk_flag", pd.Series(False, index=output.index)))
+    output["workload_risk_flag"] = existing_flag | high_workload
     return output
 
 
@@ -235,6 +404,17 @@ def apply_coherence_risk(
     if settings.red_zone_playcall.enabled:
         rz_by_team = build_team_red_zone_run_tendency(pbp, through_week, settings=settings)
         adjusted_usage = apply_red_zone_usage_adjustments(adjusted_usage, rz_by_team, settings)
+    if settings.fourth_down.enabled:
+        aggression_by_team = build_team_fourth_down_aggressiveness(
+            pbp, through_week, settings=settings
+        )
+        adjusted_usage = apply_fourth_down_aggressiveness_adjustments(
+            adjusted_usage, aggression_by_team, settings
+        )
+    if settings.workload.enabled:
+        workload_by_player = build_player_workload_index(pbp, through_week, settings=settings)
+        adjusted_usage = apply_workload_risk_flags(adjusted_usage, workload_by_player, settings)
+        adjusted_stats = apply_workload_risk_flags(adjusted_stats, workload_by_player, settings)
     if settings.pass_protection.enabled:
         stress_by_team = build_team_pass_protection_stress(pbp, through_week, settings=settings)
         adjusted_stats = apply_pass_protection_penalties(adjusted_stats, stress_by_team, settings)
@@ -244,15 +424,46 @@ def apply_coherence_risk(
 def coherence_variance_multiplier(row: Mapping[str, Any], settings: CoherenceRiskSettings) -> float:
     """Return a simulation CV multiplier for rows flagged by coherence risk."""
 
-    sim_settings = settings.sim_variance
-    if not sim_settings.enabled:
+    if not settings.enabled:
         return 1.0
+
+    sim_settings = settings.sim_variance
+    multiplier = 1.0
 
     flag = _truthy(row.get("coherence_risk_flag", False))
     stress = _row_float(row, "pass_protection_stress", default=1.0)
-    if flag or stress >= sim_settings.stress_flag_threshold:
-        return sim_settings.high_risk_cv_multiplier
-    return 1.0
+    if sim_settings.enabled and (flag or stress >= sim_settings.stress_flag_threshold):
+        multiplier = max(multiplier, sim_settings.high_risk_cv_multiplier)
+
+    workload_flag = _truthy(row.get("workload_risk_flag", False))
+    workload_index = _row_float(row, "workload_index", default=0.0)
+    if settings.workload.enabled and (
+        workload_flag or workload_index >= settings.workload.z_threshold
+    ):
+        multiplier = max(multiplier, settings.workload.high_risk_cv_multiplier)
+    return multiplier
+
+
+def _historical_fourth_down(pbp: pd.DataFrame, through_week: int) -> pd.DataFrame:
+    if pbp.empty or "week" not in pbp.columns or "down" not in pbp.columns:
+        return pd.DataFrame()
+
+    frame = pbp.copy()
+    frame = frame.loc[pd.to_numeric(frame["week"], errors="coerce") < through_week].copy()
+    if frame.empty:
+        return frame
+
+    frame = frame.loc[pd.to_numeric(frame["down"], errors="coerce").eq(4)].copy()
+    if frame.empty:
+        return frame
+
+    if "play_type" in frame.columns:
+        play_type = frame["play_type"].astype(str).str.lower()
+        frame = frame.loc[~play_type.isin(FOURTH_DOWN_EXCLUDED_PLAY_TYPES)]
+    if "desc" in frame.columns:
+        desc = frame["desc"].astype(str)
+        frame = frame.loc[~desc.str.startswith("Penalty", na=False)]
+    return frame.reset_index(drop=True)
 
 
 def _historical_scrimmage(pbp: pd.DataFrame, through_week: int) -> pd.DataFrame:

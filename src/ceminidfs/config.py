@@ -7,6 +7,9 @@ from typing import Any, Dict, Optional, Union
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "nfl_dfs.yaml"
+PROFILE_CONFIG_PATHS = {
+    "gpp": PROJECT_ROOT / "config" / "nfl_dfs_gpp.yaml",
+}
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "paths": {
@@ -35,25 +38,51 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 }
 
 
-def runtime_config(**overrides: Any) -> Dict[str, Any]:
+def runtime_config(profile: Optional[str] = None, **overrides: Any) -> Dict[str, Any]:
     """Load nfl_dfs.yaml defaults and apply CLI/runtime overrides."""
 
-    cfg = load_config()
+    cfg = load_config(profile=profile)
     for key, value in overrides.items():
         if value is not None:
-            cfg[key] = value
+            if isinstance(value, dict) and isinstance(cfg.get(key), dict):
+                cfg[key] = _deep_merge(cfg[key], deepcopy(value))
+            else:
+                cfg[key] = value
     return cfg
 
 
-def load_config(path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+def load_config(
+    path: Optional[Union[str, Path]] = None,
+    *,
+    profile: Optional[str] = None,
+) -> Dict[str, Any]:
     config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
     config = deepcopy(DEFAULT_CONFIG)
 
-    if not config_path.exists():
-        return config
+    if config_path.exists():
+        file_config = _read_yaml(config_path)
+        config = _deep_merge(config, file_config)
 
-    file_config = _read_yaml(config_path)
-    return _deep_merge(config, file_config)
+    return apply_profile(config, profile) if profile else config
+
+
+def apply_profile(cfg: Dict[str, Any], name: Optional[str]) -> Dict[str, Any]:
+    """Return a copy of cfg with a named profile deep-merged on top."""
+
+    if not name:
+        return deepcopy(cfg)
+
+    profile_name = name.strip().lower()
+    try:
+        profile_path = PROFILE_CONFIG_PATHS[profile_name]
+    except KeyError as exc:
+        supported = ", ".join(sorted(PROFILE_CONFIG_PATHS))
+        raise ValueError(f"Unknown config profile {name!r}; expected one of: {supported}") from exc
+
+    if not profile_path.exists():
+        raise FileNotFoundError(f"Config profile not found: {profile_path}")
+
+    return _deep_merge(deepcopy(cfg), _read_yaml(profile_path))
 
 
 def _read_yaml(path: Path) -> Dict[str, Any]:

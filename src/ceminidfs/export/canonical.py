@@ -48,6 +48,8 @@ OPTIONAL_PASS_THROUGH_FIELDS = [
     "Min Deviation",
     "Max Deviation",
     "projection_source",
+    "coherence_risk_flag",
+    "pass_protection_stress",
 ]
 
 

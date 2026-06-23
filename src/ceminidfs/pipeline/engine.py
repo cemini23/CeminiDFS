@@ -7,8 +7,12 @@ import pandas as pd
 
 from ceminidfs.data.fetch import week_cache_dir
 from ceminidfs.models.coherence_risk import (
+    apply_fourth_down_aggressiveness_adjustments,
     apply_pass_protection_penalties,
     apply_red_zone_usage_adjustments,
+    apply_workload_risk_flags,
+    build_player_workload_index,
+    build_team_fourth_down_aggressiveness,
     build_team_pass_protection_stress,
     build_team_red_zone_run_tendency,
 )
@@ -132,6 +136,24 @@ def build_diy_projections_from_frames(
             settings=coherence_settings,
         )
         usage_df = apply_red_zone_usage_adjustments(usage_df, rz_by_team, coherence_settings)
+    if coherence_settings.enabled and coherence_settings.fourth_down.enabled:
+        aggression_by_team = build_team_fourth_down_aggressiveness(
+            historical_pbp,
+            week,
+            settings=coherence_settings,
+        )
+        usage_df = apply_fourth_down_aggressiveness_adjustments(
+            usage_df,
+            aggression_by_team,
+            coherence_settings,
+        )
+    if coherence_settings.enabled and coherence_settings.workload.enabled:
+        workload_by_player = build_player_workload_index(
+            historical_pbp,
+            week,
+            settings=coherence_settings,
+        )
+        usage_df = apply_workload_risk_flags(usage_df, workload_by_player, coherence_settings)
 
     stats_df = build_week_stats(usage_df, historical_pbp, season=season, week=week, config=config)
     if stats_df.empty:
@@ -179,7 +201,12 @@ def merge_projections_into_canonical(
     for column in ("opp", "game", "opponent"):
         if column in stats_df.columns:
             merge_columns.append(column)
-    for column in ("coherence_risk_flag", "pass_protection_stress"):
+    for column in (
+        "coherence_risk_flag",
+        "pass_protection_stress",
+        "workload_index",
+        "workload_risk_flag",
+    ):
         if column in stats_df.columns:
             merge_columns.append(column)
     stats_by_key = (
@@ -210,6 +237,10 @@ def merge_projections_into_canonical(
                 mapped["coherence_risk_flag"] = projection.get("coherence_risk_flag")
             if "pass_protection_stress" in projection:
                 mapped["pass_protection_stress"] = projection.get("pass_protection_stress")
+            if "workload_index" in projection:
+                mapped["workload_index"] = projection.get("workload_index")
+            if "workload_risk_flag" in projection:
+                mapped["workload_risk_flag"] = projection.get("workload_risk_flag")
         merged.append(mapped)
     return merged
 

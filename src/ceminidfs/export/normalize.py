@@ -11,6 +11,8 @@ PASS_THROUGH_FIELDS = [
     "Projected Ownership",
     "Projection Floor",
     "Projection Ceil",
+    "coherence_risk_flag",
+    "pass_protection_stress",
 ]
 
 NAME_KEYS = ("name", "player", "player name", "nickname", "full name", "player_key")

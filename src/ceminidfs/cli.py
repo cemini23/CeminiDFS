@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 from ceminidfs.config import runtime_config
 
@@ -157,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
     project.add_argument("--season", type=int, required=True)
     project.add_argument("--week", type=int, required=True)
     project.add_argument("--salary", type=Path, required=True)
+    _add_profile_argument(project)
     project.set_defaults(handler=_cmd_project)
 
     salary = subparsers.add_parser("salary", help="Ingest a salary CSV into canonical schema")
@@ -179,12 +180,16 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--count", type=int, default=150)
     optimize.add_argument("--site", default="fanduel")
     optimize.add_argument(
-        "--sim-rerank", action="store_true", help="Rerank pydfs candidates by simulation"
+        "--sim-rerank",
+        action="store_true",
+        default=None,
+        help="Rerank pydfs candidates by simulation",
     )
     optimize.add_argument(
         "--candidates", type=int, default=2000, help="Candidate lineups before rerank"
     )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
+    _add_profile_argument(optimize)
     optimize.set_defaults(handler=_cmd_optimize)
 
     ownership = subparsers.add_parser("ownership", help="Ownership projection tools")
@@ -225,7 +230,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--site", default="fanduel")
     run.add_argument("--count", type=int, default=150)
     run.add_argument(
-        "--sim-rerank", action="store_true", help="Rerank optimizer candidates by simulation"
+        "--sim-rerank",
+        action="store_true",
+        default=None,
+        help="Rerank optimizer candidates by simulation",
     )
     run.add_argument("--candidates", type=int, default=2000, help="Candidate lineups before rerank")
     run.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
@@ -239,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow fetch stage to write stub artifacts when data deps are missing",
     )
+    _add_profile_argument(run)
     run.set_defaults(handler=_cmd_run)
 
     backtest = subparsers.add_parser("backtest", help="Walk-forward projection accuracy backtest")
@@ -453,7 +462,10 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
 def _cmd_project(args: argparse.Namespace) -> int:
     if project_week is None:
         raise RuntimeError("Projection stage unavailable: ceminidfs.pipeline.project import failed")
-    config = runtime_config(work_dir=Path("runs") / f"{args.season}_week_{args.week}")
+    config = runtime_config(
+        profile=args.profile,
+        work_dir=Path("runs") / f"{args.season}_week_{args.week}",
+    )
     output = project_week(args.season, args.week, args.salary, config)
     print(output)
     return 0
@@ -485,16 +497,19 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
 def _cmd_optimize(args: argparse.Namespace) -> int:
     if _run_optimize is None:
         raise RuntimeError("Optimize stage unavailable: orchestrator import failed")
-    count = args.final_count if args.sim_rerank else args.count
+    rerank_override: dict[str, Any] = {
+        "candidates": args.candidates,
+        "final_count": args.final_count,
+    }
+    if args.sim_rerank is not None:
+        rerank_override["enabled"] = args.sim_rerank
     config = runtime_config(
+        profile=args.profile,
         site=args.site,
-        count=count,
-        sim_rerank={
-            "enabled": args.sim_rerank,
-            "candidates": args.candidates,
-            "final_count": args.final_count,
-        },
+        sim_rerank=rerank_override,
     )
+    count = args.final_count if _sim_rerank_enabled(config) else args.count
+    config["count"] = count
     output = _run_optimize(args.csv_path, args.output_path, count, config)
     print(output)
     return 0
@@ -540,17 +555,20 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     if run_pipeline is None:
         raise RuntimeError("Run pipeline unavailable: orchestrator import failed")
-    count = args.final_count if args.sim_rerank else args.count
+    rerank_override: dict[str, Any] = {
+        "candidates": args.candidates,
+        "final_count": args.final_count,
+    }
+    if args.sim_rerank is not None:
+        rerank_override["enabled"] = args.sim_rerank
     config = runtime_config(
-        count=count,
+        profile=args.profile,
         site=args.site,
         allow_stub=args.allow_stub,
-        sim_rerank={
-            "enabled": args.sim_rerank,
-            "candidates": args.candidates,
-            "final_count": args.final_count,
-        },
+        sim_rerank=rerank_override,
     )
+    count = args.final_count if _sim_rerank_enabled(config) else args.count
+    config["count"] = count
     manifest = run_pipeline(
         season=args.season,
         week=args.week,
@@ -797,3 +815,18 @@ def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:
     if rows and rows[0].get("dk_id") and not rows[0].get("fd_id"):
         return "draftkings"
     return "fanduel"
+
+
+def _add_profile_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        choices=("gpp",),
+        help="Apply a named contest profile over the base config",
+    )
+
+
+def _sim_rerank_enabled(config: Mapping[str, Any]) -> bool:
+    rerank_cfg = config.get("sim_rerank", {})
+    if isinstance(rerank_cfg, Mapping):
+        return bool(rerank_cfg.get("enabled"))
+    return bool(rerank_cfg)

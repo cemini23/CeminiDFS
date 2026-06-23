@@ -1,0 +1,18 @@
+coherence_risk:
+  fourth_down:
+    enabled: true
+  workload:
+    enabled: true
+simulate:
+  enabled: true
+  method: copula
+  n_iterations: 5000
+sim_rerank:
+  enabled: true
+  candidates: 2000
+  final_count: 150
+  quantile: 0.85
+  ownership_penalty: 0.15
+ownership:
+  enabled: true
+  calibration_path: null

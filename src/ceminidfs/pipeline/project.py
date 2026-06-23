@@ -147,6 +147,8 @@ def _add_simulation_to_rows(
                 "position": row.get("fd_position") or row.get("dk_position") or row.get("position", ""),
                 "coherence_risk_flag": row.get("coherence_risk_flag", False),
                 "pass_protection_stress": row.get("pass_protection_stress", 1.0),
+                "workload_index": row.get("workload_index", 0.0),
+                "workload_risk_flag": row.get("workload_risk_flag", False),
             }
         )
 

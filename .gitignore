@@ -30,3 +30,7 @@ htmlcov/
 # Local salary drops (manual FD/DK exports — never commit)
 salaries/
 research/
+
+# Local reports output (calibration, backtest, benchmarks)
+# Note: docs/benchmarks/ is tracked for committed benchmarks
+reports/
