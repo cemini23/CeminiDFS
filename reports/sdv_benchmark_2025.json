@@ -1,0 +1,20 @@
+{
+  "season": 2025,
+  "week": null,
+  "generated": "2026-06-23",
+  "providers": {
+    "nflreadpy": {
+      "elapsed_sec": 1.988,
+      "rows": 48771,
+      "coverage_pct": 100.0
+    },
+    "sportsdataverse": {
+      "elapsed_sec": 0.019,
+      "rows": 0,
+      "coverage_pct": 0.0,
+      "error": "Import blocked: sportsdataverse.nfl pulls xgboost; libomp.dylib missing on this host. Fix: brew install libomp, then re-run ceminidfs sdv-benchmark --season 2025."
+    }
+  },
+  "verdict": "defer",
+  "note": "Same nflverse parquet lineage as nflreadpy; SDV live row parity pending libomp fix."
+}

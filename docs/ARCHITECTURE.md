@@ -162,6 +162,7 @@ MIT-licensed repos evaluated for contrast only (not integrated):
 - [nflverse/nfl_data_py](https://github.com/nflverse/nfl_data_py) — same data lineage as nflreadpy
 - [bbenbenek/nfl-fantasy-football](https://github.com/bbenbenek/nfl-fantasy-football) — Yahoo API wrapper; duplicates fetch stage
 - [hvpkod/NFL-Data](https://github.com/hvpkod/NFL-Data) — static CSV backtest parameters
+- [sportsdataverse/sportsdataverse-py](https://github.com/sportsdataverse/sportsdataverse-py) — unified sports fetch client; **evaluated K127**, **deferred** — see [sportsdataverse-eval.md](sportsdataverse-eval.md). Same nflverse parquet lineage; prod remains nflreadpy.
 
 Unlicensed repos (null `license` on GitHub) are **reference-only** for clean-room audits — e.g. playmaking EPA edge cases documented in [epa-cleanroom-audit.md](epa-cleanroom-audit.md) without R code merge.
 

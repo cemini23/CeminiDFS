@@ -65,6 +65,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     run_coherence_comparison = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.pipeline.sdv_benchmark import benchmark_pbp_fetch
+except ImportError:  # pragma: no cover - defensive for partial installs
+    benchmark_pbp_fetch = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.data.benchmark import parse_benchmark_csv, write_benchmark_snapshot
     from ceminidfs.pipeline.benchmark_compare import (
         compare_benchmark_week,
@@ -257,6 +262,23 @@ def build_parser() -> argparse.ArgumentParser:
     coherence_eval.add_argument("--start-week", type=int, required=True)
     coherence_eval.add_argument("--end-week", type=int, required=True)
     coherence_eval.set_defaults(handler=_cmd_coherence_eval)
+
+    sdv_benchmark = subparsers.add_parser(
+        "sdv-benchmark",
+        help="Compare nflreadpy vs sportsdataverse PBP fetch coverage and latency",
+    )
+    sdv_benchmark.add_argument("--season", type=int, required=True)
+    sdv_benchmark.add_argument("--week", type=int)
+    sdv_benchmark.add_argument("--start-week", type=int)
+    sdv_benchmark.add_argument("--end-week", type=int)
+    sdv_benchmark.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        required=True,
+        help="JSON report path",
+    )
+    sdv_benchmark.set_defaults(handler=_cmd_sdv_benchmark)
 
     backtest_prepare = subparsers.add_parser(
         "backtest-prepare",
@@ -557,6 +579,37 @@ def _cmd_coherence_eval(args: argparse.Namespace) -> int:
     config = runtime_config()
     summary = run_coherence_comparison(args.season, args.start_week, args.end_week, config=config)
     print(json.dumps(summary, indent=2))
+    return 0
+
+
+def _cmd_sdv_benchmark(args: argparse.Namespace) -> int:
+    if benchmark_pbp_fetch is None:
+        raise RuntimeError("SDV benchmark unavailable: ceminidfs.pipeline.sdv_benchmark import failed")
+
+    if args.week is not None and (args.start_week is not None or args.end_week is not None):
+        raise ValueError("Use either --week or --start-week/--end-week, not both")
+    if args.week is None and (args.start_week is None or args.end_week is None):
+        raise ValueError("Provide either --week or both --start-week and --end-week")
+    if args.start_week is not None and args.end_week is not None and args.start_week > args.end_week:
+        raise ValueError("start-week must be <= end-week")
+
+    if args.week is not None:
+        summary = benchmark_pbp_fetch(args.season, week=args.week)
+    else:
+        summary = {
+            "season": args.season,
+            "start_week": args.start_week,
+            "end_week": args.end_week,
+            "weeks": [
+                benchmark_pbp_fetch(args.season, week=week)
+                for week in range(args.start_week, args.end_week + 1)
+            ],
+        }
+
+    args.output_path.parent.mkdir(parents=True, exist_ok=True)
+    args.output_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(summary, indent=2))
+    print(f"\nReport: {args.output_path}")
     return 0
 
 

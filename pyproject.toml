@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 data = ["nflreadpy>=0.1.0", "pyarrow>=14.0"]
+eval = ["sportsdataverse>=0.0.60", "nflreadpy>=0.1.0", "pyarrow>=14.0"]
 optimize = ["pydfs-lineup-optimizer>=3.6"]
 dev = ["pytest>=8.0", "ruff>=0.4"]
 all = ["ceminidfs[data,optimize,dev]"]
