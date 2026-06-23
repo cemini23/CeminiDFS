@@ -148,12 +148,14 @@ def apply_pass_protection_penalties(
         output.get("position", pd.Series("", index=output.index)).astype(str).str.upper().isin({"WR", "TE"})
     )
 
+    qb_penalty_scale = settings.pass_protection.qb_yds_penalty_scale
     qb_penalty = output["pass_protection_penalty"].map(
         lambda excess: _bounded_penalty(
             excess,
             settings.pass_protection.qb_yds_penalty,
             settings.pass_protection.max_penalty,
         )
+        * qb_penalty_scale
     )
     recv_penalty = output["pass_protection_penalty"].map(
         lambda excess: _bounded_penalty(

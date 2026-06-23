@@ -2,33 +2,18 @@
 
 from __future__ import annotations
 
-import importlib
 import time
 from typing import Any
 
 import pandas as pd
 
 
-INSTALL_HINT = (
-    "Install sportsdataverse with `pip install sportsdataverse` "
-    "or `pip install -e '.[eval]'`."
-)
-
-
 def load_sdv_pbp_sample(season: int) -> pd.DataFrame:
     """Load one season of sportsdataverse NFL PBP as a pandas DataFrame."""
 
-    try:
-        sdv_nfl = importlib.import_module("sportsdataverse.nfl")
-    except Exception as exc:
-        raise ImportError(f"{INSTALL_HINT} Original import error: {exc}") from exc
+    from ceminidfs.pipeline.sdv_benchmark import _load_sdv_pbp
 
-    loader = getattr(sdv_nfl, "load_nfl_pbp", None)
-    if loader is None:
-        raise AttributeError("sportsdataverse.nfl does not expose load_nfl_pbp")
-
-    data = loader(seasons=[season], return_as_pandas=True)
-    return _to_pandas(data)
+    return _load_sdv_pbp(season)
 
 
 def smoke_fetch_pbp(season: int) -> dict[str, Any]:
@@ -50,11 +35,3 @@ def smoke_fetch_pbp(season: int) -> dict[str, Any]:
         "cols": int(len(frame.columns)),
         "elapsed_sec": round(time.perf_counter() - start, 3),
     }
-
-
-def _to_pandas(data: Any) -> pd.DataFrame:
-    if isinstance(data, pd.DataFrame):
-        return data
-    if hasattr(data, "to_pandas"):
-        return data.to_pandas()
-    return pd.DataFrame(data)

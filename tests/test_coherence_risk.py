@@ -1,4 +1,5 @@
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import pandas as pd
@@ -52,6 +53,31 @@ def test_apply_pass_protection_penalties_reduce_qb_and_receiver_yards():
     assert _player_row(adjusted, "alp_wr")["rec_yds"] < _player_row(stats, "alp_wr")["rec_yds"]
     assert _player_row(adjusted, "alp_te")["rec_yds"] < _player_row(stats, "alp_te")["rec_yds"]
     assert bool(_player_row(adjusted, "alp_qb")["coherence_risk_flag"]) is True
+
+
+def test_qb_yds_penalty_scale_softens_qb_penalty():
+    stats = _stats_frame()
+    config = _enabled_config()
+    scaled_config = deepcopy(config)
+    scaled_config["coherence_risk"]["pass_protection"]["qb_yds_penalty_scale"] = 0.5
+
+    full = apply_pass_protection_penalties(
+        stats, {"ALP": 1.50, "BET": 1.0}, CoherenceRiskSettings.from_config(config)
+    )
+    scaled = apply_pass_protection_penalties(
+        stats, {"ALP": 1.50, "BET": 1.0}, CoherenceRiskSettings.from_config(scaled_config)
+    )
+
+    base = _player_row(stats, "alp_qb")["pass_yds"]
+    full_drop = base - _player_row(full, "alp_qb")["pass_yds"]
+    scaled_drop = base - _player_row(scaled, "alp_qb")["pass_yds"]
+
+    assert scaled_drop < full_drop
+    assert scaled_drop == pytest.approx(full_drop * 0.5)
+    # Receiver penalty is independent of the QB scale.
+    assert _player_row(scaled, "alp_wr")["rec_yds"] == pytest.approx(
+        _player_row(full, "alp_wr")["rec_yds"]
+    )
 
 
 def test_apply_pass_protection_penalties_leave_low_stress_values_unchanged():

@@ -39,8 +39,8 @@ usage:
   min_backup_start_qb_pass_attempts: 12
   min_two_week_qb_pass_attempts: 25
   qb_backup_pass_share: 0.05
-  qb_implied_pass_boost: 0.014
-  qb_implied_pass_baseline: 22.0
+  qb_implied_pass_boost: 0.020
+  qb_implied_pass_baseline: 20.0
   min_backup_qb_season_attempts: 15
   min_backup_qb_l3_attempts: 5
   rb_committee_size: 3
@@ -60,6 +60,17 @@ stats:
     catch_rate: 80
     adot: 40
     td_target: 80
+    # QB starters skew above league priors; lighter shrinkage retains their edge
+    # (was a single hardcoded k=90 for ypa/td/int). Lower k => less pull to prior.
+    qb_ypa: 55
+    qb_td_rate: 55
+    qb_int_rate: 90
+    qb_rush: 140
+  priors:
+    # Anchors for QB shrinkage. League per-attempt averages include backups and
+    # garbage time, biasing starters low; nudge anchors toward the starter pool.
+    qb_ypa: 7.25
+    qb_td_rate: 0.052
 coherence_risk:
   enabled: true
   pass_protection:
@@ -68,6 +79,9 @@ coherence_risk:
     max_penalty: 0.06
     qb_yds_penalty: 0.25
     recv_yds_penalty: 0.18
+    # Pass-protection penalty is one-directional (only ever trims QB pass yards),
+    # so it adds net negative bias across the QB pool. Scale it back < 1.0.
+    qb_yds_penalty_scale: 0.5
   red_zone_playcall:
     enabled: true
     run_tendency_threshold: 1.10

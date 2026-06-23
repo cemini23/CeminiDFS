@@ -13,6 +13,7 @@ class PassProtectionSettings:
     max_penalty: float
     qb_yds_penalty: float
     recv_yds_penalty: float
+    qb_yds_penalty_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class CoherenceRiskSettings:
                 max_penalty=float(pass_protection.get("max_penalty", 0.10)),
                 qb_yds_penalty=float(pass_protection.get("qb_yds_penalty", 0.35)),
                 recv_yds_penalty=float(pass_protection.get("recv_yds_penalty", 0.25)),
+                qb_yds_penalty_scale=float(pass_protection.get("qb_yds_penalty_scale", 1.0)),
             ),
             red_zone_playcall=RedZonePlaycallSettings(
                 enabled=bool(red_zone_playcall.get("enabled", True)),

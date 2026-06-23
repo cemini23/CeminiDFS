@@ -8,21 +8,20 @@ from typing import Any, Mapping
 import pandas as pd
 
 from ceminidfs.models.defense import build_defense_ratings, defense_multiplier
-
-
-LEAGUE_YPA = 7.0
-LEAGUE_YPC = 4.3
-LEAGUE_YPT = 7.8
-LEAGUE_CATCH_RATE = 0.65
-LEAGUE_ADOT = 10.0
-LEAGUE_INT_RATE = 0.025
-LEAGUE_TD_PER_ATT = 0.045
-LEAGUE_TD_PER_CARRY = 0.03
-LEAGUE_TD_PER_TARGET = 0.045
-QB_PASS_SHRINKAGE_K = 90.0
-QB_RUSH_SHRINKAGE_K = 160.0
-DEFAULT_PASS_SHRINKAGE_K = 250.0
-DEFAULT_RUSH_SHRINKAGE_K = 250.0
+from ceminidfs.models.stats_settings import (
+    DEFAULT_PASS_SHRINKAGE_K,
+    DEFAULT_RUSH_SHRINKAGE_K,
+    LEAGUE_ADOT,
+    LEAGUE_CATCH_RATE,
+    LEAGUE_INT_RATE,
+    LEAGUE_TD_PER_ATT,
+    LEAGUE_TD_PER_CARRY,
+    LEAGUE_TD_PER_TARGET,
+    LEAGUE_YPA,
+    LEAGUE_YPC,
+    LEAGUE_YPT,
+    StatsSettings,
+)
 
 
 @dataclass(frozen=True)
@@ -69,20 +68,39 @@ def player_efficiency_from_pbp(
     through_week: int,
     *,
     position: str = "",
+    settings: StatsSettings | None = None,
 ) -> dict[str, float]:
     """Return regressed passing, rushing, and receiving efficiency for one player."""
 
+    cfg = settings or StatsSettings.from_config(None)
     historical = _historical_pbp(pbp, through_week)
     if historical.empty:
         return _league_efficiency()
 
     player = str(player_id)
     is_qb = str(position or "").upper() == "QB"
-    pass_k = QB_PASS_SHRINKAGE_K if is_qb else DEFAULT_PASS_SHRINKAGE_K
-    rush_k = QB_RUSH_SHRINKAGE_K if is_qb else DEFAULT_RUSH_SHRINKAGE_K
-    pass_eff = _passing_efficiency(historical, player, shrinkage_k=pass_k)
-    rush_eff = _rushing_efficiency(historical, player, shrinkage_k=rush_k)
-    rec_eff = _receiving_efficiency(historical, player)
+    if is_qb:
+        pass_eff = _passing_efficiency(
+            historical,
+            player,
+            ypa_k=cfg.qb_pass_ypa_shrinkage_k,
+            td_k=cfg.qb_pass_td_shrinkage_k,
+            int_k=cfg.qb_pass_int_shrinkage_k,
+            ypa_prior=cfg.qb_ypa_prior,
+            td_prior=cfg.qb_td_rate_prior,
+            int_prior=cfg.qb_int_rate_prior,
+        )
+        rush_eff = _rushing_efficiency(historical, player, shrinkage_k=cfg.qb_rush_shrinkage_k)
+    else:
+        pass_eff = _passing_efficiency(
+            historical,
+            player,
+            ypa_k=cfg.pass_shrinkage_k,
+            td_k=cfg.pass_shrinkage_k,
+            int_k=cfg.pass_shrinkage_k,
+        )
+        rush_eff = _rushing_efficiency(historical, player, shrinkage_k=cfg.rush_shrinkage_k)
+    rec_eff = _receiving_efficiency(historical, player, settings=cfg)
     return {
         "ypa": pass_eff["ypa"],
         "int_rate": pass_eff["int_rate"],
@@ -180,6 +198,7 @@ def build_week_stats(
     alpha = float(defense_cfg.get("alpha", 0.08)) if isinstance(defense_cfg, Mapping) else 0.08
     defense_ratings = build_defense_ratings(historical_pbp, through_week=week, alpha=alpha)
 
+    stats_settings = StatsSettings.from_config(config)
     efficiency_by_player: dict[str, dict[str, float]] = {}
     rows: list[dict[str, Any]] = []
     for _, usage_row in week_usage.iterrows():
@@ -190,6 +209,7 @@ def build_week_stats(
                 player_id,
                 through_week=week,
                 position=str(usage_row.get("position", "")),
+                settings=stats_settings,
             )
         projection = project_player_stats(
             usage_row.to_dict(),
@@ -202,7 +222,19 @@ def build_week_stats(
     return pd.DataFrame(rows, columns=columns)
 
 
-def _passing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float = DEFAULT_PASS_SHRINKAGE_K) -> dict[str, float]:
+def _passing_efficiency(
+    pbp: pd.DataFrame,
+    player_id: str,
+    *,
+    ypa_k: float = DEFAULT_PASS_SHRINKAGE_K,
+    td_k: float | None = None,
+    int_k: float | None = None,
+    ypa_prior: float = LEAGUE_YPA,
+    td_prior: float = LEAGUE_TD_PER_ATT,
+    int_prior: float = LEAGUE_INT_RATE,
+) -> dict[str, float]:
+    td_k = ypa_k if td_k is None else td_k
+    int_k = ypa_k if int_k is None else int_k
     passer_col = _first_present(pbp, ("passer_player_id", "passer_id", "qb_player_id"))
     if passer_col is None:
         attempts = pd.DataFrame()
@@ -214,9 +246,9 @@ def _passing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float
     touchdowns = _sum_first_numeric(attempts, ("passing_tds", "pass_touchdown", "touchdown"))
     interceptions = _sum_first_numeric(attempts, ("interceptions", "interception"))
     return {
-        "ypa": regress_rate(_rate(yards, sample), sample, LEAGUE_YPA, shrinkage_k),
-        "td_rate": regress_rate(_rate(touchdowns, sample), sample, LEAGUE_TD_PER_ATT, shrinkage_k),
-        "int_rate": regress_rate(_rate(interceptions, sample), sample, LEAGUE_INT_RATE, shrinkage_k),
+        "ypa": regress_rate(_rate(yards, sample), sample, ypa_prior, ypa_k),
+        "td_rate": regress_rate(_rate(touchdowns, sample), sample, td_prior, td_k),
+        "int_rate": regress_rate(_rate(interceptions, sample), sample, int_prior, int_k),
     }
 
 
@@ -241,7 +273,13 @@ def _rushing_efficiency(pbp: pd.DataFrame, player_id: str, *, shrinkage_k: float
     }
 
 
-def _receiving_efficiency(pbp: pd.DataFrame, player_id: str) -> dict[str, float]:
+def _receiving_efficiency(
+    pbp: pd.DataFrame,
+    player_id: str,
+    *,
+    settings: StatsSettings | None = None,
+) -> dict[str, float]:
+    cfg = settings or StatsSettings.from_config(None)
     receiver_col = _first_present(pbp, ("receiver_player_id", "receiver_id", "player_id"))
     if receiver_col is None:
         targets = pd.DataFrame()
@@ -256,14 +294,16 @@ def _receiving_efficiency(pbp: pd.DataFrame, player_id: str) -> dict[str, float]
     receptions = _sum_first_numeric(targets, ("complete_pass", "reception"))
     touchdowns = _sum_first_numeric(targets, ("receiving_tds", "pass_touchdown", "touchdown"))
     return {
-        "ypt": regress_rate(_rate(yards, sample), sample, LEAGUE_YPT, 250.0),
-        "catch_rate": regress_rate(_rate(receptions, sample), sample, LEAGUE_CATCH_RATE, 80.0),
-        "adot": regress_rate(_rate(air_yards, sample), sample, LEAGUE_ADOT, 40.0),
+        "ypt": regress_rate(_rate(yards, sample), sample, LEAGUE_YPT, cfg.ypt_shrinkage_k),
+        "catch_rate": regress_rate(
+            _rate(receptions, sample), sample, LEAGUE_CATCH_RATE, cfg.catch_rate_shrinkage_k
+        ),
+        "adot": regress_rate(_rate(air_yards, sample), sample, LEAGUE_ADOT, cfg.adot_shrinkage_k),
         "td_per_target": regress_rate(
             _rate(touchdowns, sample),
             sample,
             LEAGUE_TD_PER_TARGET,
-            80.0,
+            cfg.td_target_shrinkage_k,
         ),
     }
 

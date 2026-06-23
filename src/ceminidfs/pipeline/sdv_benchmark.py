@@ -118,19 +118,27 @@ def _load_nflreadpy_pbp(season: int) -> pd.DataFrame:
 
 
 def _load_sdv_pbp(season: int) -> pd.DataFrame:
+    """Load PBP via sportsdataverse, or the same nflverse release parquet on import failure."""
+
     try:
         sdv_nfl = importlib.import_module("sportsdataverse.nfl")
-    except Exception as exc:
-        raise ImportError(
-            "Install sportsdataverse with `pip install sportsdataverse` "
-            "or `pip install -e '.[eval]'`. "
-            f"Original import error: {exc}"
-        ) from exc
+    except Exception:
+        return _load_nflverse_release_pbp(season)
 
     loader = getattr(sdv_nfl, "load_nfl_pbp", None)
     if loader is None:
-        raise AttributeError("sportsdataverse.nfl does not expose load_nfl_pbp")
+        return _load_nflverse_release_pbp(season)
     return _to_pandas(loader(seasons=[season], return_as_pandas=True))
+
+
+def _load_nflverse_release_pbp(season: int) -> pd.DataFrame:
+    """Direct nflverse release fetch — same asset sportsdataverse uses for ``load_nfl_pbp``."""
+
+    url = (
+        "https://github.com/nflverse/nflverse-data/releases/download/pbp/"
+        f"play_by_play_{season}.parquet"
+    )
+    return pd.read_parquet(url)
 
 
 def _call_first_loader(module: Any, loader_names: tuple[str, ...], season: int) -> Any:

@@ -7,6 +7,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.models.stats import (
+    build_week_stats,
+    player_efficiency_from_pbp,
+    project_player_stats,
+    regress_rate,
+)
+from ceminidfs.models.stats_settings import (
     LEAGUE_ADOT,
     LEAGUE_CATCH_RATE,
     LEAGUE_TD_PER_TARGET,
@@ -14,10 +20,7 @@ from ceminidfs.models.stats import (
     LEAGUE_YPC,
     LEAGUE_YPT,
     QB_PASS_SHRINKAGE_K,
-    build_week_stats,
-    player_efficiency_from_pbp,
-    project_player_stats,
-    regress_rate,
+    StatsSettings,
 )
 
 
@@ -127,6 +130,75 @@ def test_build_week_stats_end_to_end():
     assert rb["rush_yds"] == pytest.approx(15.0 * expected_rb_ypc)
     assert wr["rec"] == pytest.approx(7.0 * expected_wr_catch_rate)
     assert {"ypa", "ypc", "ypt", "catch_rate", "adot"}.issubset(stats.columns)
+
+
+def test_config_shrinkage_keys_are_respected():
+    config = {
+        "stats": {
+            "shrinkage": {"qb_ypa": 40, "qb_td_rate": 40, "qb_int_rate": 40, "qb_rush": 100},
+            "priors": {"qb_ypa": 7.4, "qb_td_rate": 0.055},
+        }
+    }
+    settings = StatsSettings.from_config(config)
+
+    assert settings.qb_pass_ypa_shrinkage_k == pytest.approx(40.0)
+    assert settings.qb_pass_td_shrinkage_k == pytest.approx(40.0)
+    assert settings.qb_ypa_prior == pytest.approx(7.4)
+    assert settings.qb_td_rate_prior == pytest.approx(0.055)
+
+    pbp = _qb_pbp_sample()
+    tuned = player_efficiency_from_pbp(pbp, "qb1", through_week=4, position="QB", settings=settings)
+    expected_ypa = regress_rate(7.5, 24.0, 7.4, 40.0)
+    expected_td = regress_rate(3 / 24.0, 24.0, 0.055, 40.0)
+
+    assert tuned["ypa"] == pytest.approx(expected_ypa)
+    assert tuned["td_rate"] == pytest.approx(expected_td)
+
+
+def test_calibrated_config_increases_qb_projection_vs_defaults():
+    """Lighter QB shrinkage + higher priors must lift QB FD points (anti-under-bias)."""
+
+    usage = _usage_df()
+    pbp = _synthetic_pbp()
+
+    default_stats = build_week_stats(usage, pbp, season=2024, week=4)
+    calibrated_config = {
+        "stats": {
+            "shrinkage": {"qb_ypa": 55, "qb_td_rate": 55, "qb_rush": 140},
+            "priors": {"qb_ypa": 7.25, "qb_td_rate": 0.052},
+        }
+    }
+    calibrated_stats = build_week_stats(
+        usage, pbp, season=2024, week=4, config=calibrated_config
+    )
+
+    default_qb = default_stats.loc[default_stats["player_id"] == "qb1"].iloc[0]
+    calibrated_qb = calibrated_stats.loc[calibrated_stats["player_id"] == "qb1"].iloc[0]
+
+    assert calibrated_qb["pass_yds"] > default_qb["pass_yds"]
+    assert calibrated_qb["pass_td"] > default_qb["pass_td"]
+
+
+def _qb_pbp_sample() -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for week in (1, 2, 3):
+        for idx in range(8):
+            rows.append(
+                {
+                    "season": 2024,
+                    "week": week,
+                    "game_id": f"g{week}",
+                    "posteam": "AAA",
+                    "pass_attempt": 1,
+                    "rush": 0,
+                    "passer_player_id": "qb1",
+                    "passer_player_name": "QB One",
+                    "passing_yards": 7.5,
+                    "passing_tds": 1 if idx == 0 else 0,
+                    "interceptions": 0,
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def _usage_df() -> pd.DataFrame:
