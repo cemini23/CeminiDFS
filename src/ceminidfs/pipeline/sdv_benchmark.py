@@ -118,16 +118,27 @@ def _load_nflreadpy_pbp(season: int) -> pd.DataFrame:
 
 
 def _load_sdv_pbp(season: int) -> pd.DataFrame:
-    """Load PBP via sportsdataverse, or the same nflverse release parquet on import failure."""
+    """Load PBP via sportsdataverse, or the same nflverse release parquet when opted in."""
+
+    import os
 
     try:
         sdv_nfl = importlib.import_module("sportsdataverse.nfl")
-    except Exception:
-        return _load_nflverse_release_pbp(season)
+    except Exception as exc:
+        if os.environ.get("CEMINIDFS_LIVE_SDV") == "1":
+            return _load_nflverse_release_pbp(season)
+        raise ImportError(
+            "Install sportsdataverse with `pip install sportsdataverse` "
+            "or `pip install -e '.[eval]'`, or set CEMINIDFS_LIVE_SDV=1 to "
+            "fetch the nflverse release parquet directly. "
+            f"Original import error: {exc}"
+        ) from exc
 
     loader = getattr(sdv_nfl, "load_nfl_pbp", None)
     if loader is None:
-        return _load_nflverse_release_pbp(season)
+        if os.environ.get("CEMINIDFS_LIVE_SDV") == "1":
+            return _load_nflverse_release_pbp(season)
+        raise AttributeError("sportsdataverse.nfl does not expose load_nfl_pbp")
     return _to_pandas(loader(seasons=[season], return_as_pandas=True))
 
 
