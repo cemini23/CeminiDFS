@@ -31,6 +31,9 @@ htmlcov/
 salaries/
 research/
 
+# BBM runtime data (ledger, registry snapshots)
+data/bbm/
+
 # Local reports output (calibration, backtest, benchmarks)
 # Note: docs/benchmarks/ is tracked for committed benchmarks
 reports/

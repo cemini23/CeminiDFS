@@ -23,7 +23,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package
-        run: pip install -e ".[dev,data,optimize]"
+        run: pip install -e ".[dev,data,optimize,bbm]"
 
       - name: Run tests
         run: pytest -q

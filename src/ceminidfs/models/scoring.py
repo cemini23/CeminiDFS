@@ -93,6 +93,22 @@ def fd_dst_points_allowed(points_allowed: float) -> float:
     return -4.0
 
 
+def score_half_ppr_season(stats: StatsMapping) -> float:
+    """Return Underdog BBM half-PPR season fantasy points (no yardage bonuses)."""
+
+    return (
+        _stat(stats, "pass_yds") * 0.04
+        + _stat(stats, "pass_td") * 4.0
+        - _stat(stats, "int") * 1.0
+        + _stat(stats, "rush_yds") * 0.1
+        + _stat(stats, "rush_td") * 6.0
+        + _stat(stats, "rec") * 0.5
+        + _stat(stats, "rec_yds") * 0.1
+        + _stat(stats, "rec_td") * 6.0
+        - _stat(stats, "fumbles_lost") * 2.0
+    )
+
+
 def fd_points(stats: StatsMapping) -> float:
     """Return FanDuel half-PPR fantasy points from counting stats."""
 

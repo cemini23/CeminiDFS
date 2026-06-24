@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ceminidfs.config import runtime_config
+
+try:
+    from ceminidfs.bbm.cli import build_bbm_parser, handle_bbm_command
+except ImportError:  # pragma: no cover - defensive for partial installs
+    build_bbm_parser = None  # type: ignore[assignment]
+    handle_bbm_command = None  # type: ignore[assignment]
 
 try:
     from ceminidfs.orchestrator.run import run_pipeline
@@ -444,6 +451,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibrate.set_defaults(handler=_cmd_calibrate)
 
+    # BBM (Best Ball Mania) draft copilot
+    bbm_parser = subparsers.add_parser("bbm", help="Best Ball Mania draft copilot")
+    bbm_sub = bbm_parser.add_subparsers(dest="bbm_command")
+    if build_bbm_parser is not None:
+        build_bbm_parser(bbm_sub)
+    bbm_parser.set_defaults(handler=_cmd_bbm)
+
     return parser
 
 
@@ -809,6 +823,14 @@ def _cmd_regression(args: argparse.Namespace) -> int:
     )
     print("\n" + format_regression_result(result))
     return 0
+
+
+def _cmd_bbm(args: argparse.Namespace) -> int:
+    """Dispatch to BBM subcommand handler."""
+    if handle_bbm_command is None:
+        print("Error: BBM module not available", file=sys.stderr)
+        return 1
+    return handle_bbm_command(args)
 
 
 def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:
