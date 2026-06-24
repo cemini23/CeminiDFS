@@ -16,9 +16,11 @@ from ceminidfs.bbm.ledger import (
     create_draft,
     exposure_pct,
     get_draft_state,
+    get_players_by_name,
     get_player_by_name,
     record_pick,
     record_taken,
+    update_draft_archetype,
     undo_last_action,
 )
 from ceminidfs.bbm.models import Draft, DraftStatus, LedgerCounts, Roster
@@ -144,7 +146,11 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
                 continue
             player = get_player_by_name(arg)
             if player is None:
-                print(f"Player not found: {arg}")
+                matches = get_players_by_name(arg)
+                if len(matches) > 1:
+                    print("Ambiguous: use full name")
+                else:
+                    print(f"Player not found: {arg}")
                 continue
             record_pick(draft_id, current_round, pick_num, player["player_id"], is_mine=True)
             print(f"  -> Picked: {player['name']} ({player['position']} {player.get('team', '')})")
@@ -157,7 +163,11 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
                 continue
             player = get_player_by_name(arg)
             if player is None:
-                print(f"Player not found: {arg}")
+                matches = get_players_by_name(arg)
+                if len(matches) > 1:
+                    print("Ambiguous: use full name")
+                else:
+                    print(f"Player not found: {arg}")
                 continue
             record_taken(draft_id, current_round, pick_num, player["player_id"])
             print(f"  -> Marked taken: {player['name']}")
@@ -176,6 +186,7 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
         if cmd == "sync":
             print("  -> Paste board snapshot (blank line to finish):")
             count = 0
+            unmatched_lines: list[str] = []
             while True:
                 try:
                     line = input()
@@ -187,7 +198,13 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
                 if player:
                     record_taken(draft_id, current_round, pick_num, player["player_id"])
                     count += 1
+                else:
+                    unmatched_lines.append(line.rstrip())
             print(f"  -> Synced {count} players")
+            if unmatched_lines:
+                print("  Unmatched lines:")
+                for unmatched in unmatched_lines:
+                    print(f"    {unmatched}")
             continue
 
         if cmd == "exp":
@@ -197,6 +214,7 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
         if cmd == "archetype":
             if arg:
                 archetype = arg.upper()
+                update_draft_archetype(draft_id, archetype)
                 print(f"  -> Switched to archetype: {archetype}")
             else:
                 print(archetype_header(archetype))

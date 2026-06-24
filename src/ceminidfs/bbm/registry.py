@@ -15,6 +15,7 @@ from ceminidfs.bbm.config import (
     BUY_TE_CLUSTER,
     BUY_WR,
     FADE_PLAYERS,
+    FADE_ROUND_BANDS,
     TIER_EXPOSURE_CAPS,
     get_bye_week,
 )
@@ -146,6 +147,17 @@ def build_seed_registry() -> dict[str, Any]:
         seen.add(merge)
         team = entry["team"]
         tier = entry.get("tier", "mid_target")
+        signal = entry.get("signal", "BUY")
+
+        # Set fade_rounds for FADE players based on FADE_ROUND_BANDS config
+        fade_rounds = None
+        if signal == "FADE":
+            # Check if this player has round-specific fade bands
+            for pattern, band in FADE_ROUND_BANDS.items():
+                if pattern in merge:
+                    fade_rounds = [band]
+                    break
+
         players.append(
             {
                 "player_id": entry.get("player_id") or _slug_id(entry["name"]),
@@ -157,12 +169,13 @@ def build_seed_registry() -> dict[str, Any]:
                 "adp": entry["adp"],
                 "strategy_rank": int(entry["adp"]),
                 "projection_pts": entry.get("projection_pts", 100.0),
-                "signal": entry.get("signal", "BUY"),
+                "signal": signal,
                 "tier": tier,
                 "exposure_cap_pct": TIER_EXPOSURE_CAPS.get(tier, 0.20),
                 "drift_coeff": entry.get("drift_coeff", 0.0),
                 "injury_fade": False,
                 "notes": entry.get("notes", ""),
+                "fade_rounds": fade_rounds,
             }
         )
 

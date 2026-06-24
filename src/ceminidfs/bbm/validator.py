@@ -55,7 +55,7 @@ def validate_pick(player: Player, roster: Roster, archetype: Archetype) -> List[
 
 
 def _validate_qb_byes(player: Player, roster: Roster) -> List[str]:
-    """Validate that all 3 QBs would have distinct bye weeks."""
+    """Validate that all QBs have distinct bye weeks."""
     violations: List[str] = []
 
     if player.position != "QB":
@@ -63,15 +63,13 @@ def _validate_qb_byes(player: Player, roster: Roster) -> List[str]:
 
     existing_qb_byes = roster.get_qb_bye_weeks()
 
-    # If we're adding a QB and would have 3 QBs total
-    if roster.qb_count >= 2:
-        # Check if any existing QB shares this bye
-        if player.bye_week in existing_qb_byes:
-            violations.append(
-                f"QB_BYE_DUPLICATE: 3rd QB {player.name} shares bye {player.bye_week}"
-            )
+    # Check duplicate bye when adding ANY QB (remove qb_count >= 2 guard)
+    if player.bye_week in existing_qb_byes:
+        violations.append(
+            f"QB_BYE_DUPLICATE: QB {player.name} shares bye {player.bye_week} with existing QB"
+        )
 
-    # If we're adding a 4th QB, that's also a structural issue
+    # Overflow check for 4+ QBs
     if roster.qb_count >= 3:
         violations.append(f"QB_OVERFLOW: Already have {roster.qb_count} QBs")
 
@@ -79,24 +77,23 @@ def _validate_qb_byes(player: Player, roster: Roster) -> List[str]:
 
 
 def _validate_te_byes(player: Player, roster: Roster) -> List[str]:
-    """Validate that in 3-TE builds, all TEs have distinct bye weeks."""
+    """Validate that TEs have distinct bye weeks in 2+ TE builds."""
     violations: List[str] = []
 
     if player.position != "TE":
         return violations
 
-    # Only applies to 3-TE builds
-    if roster.te_count < 2:
+    # Only applies to 2+ TE builds (for 3-TE builds)
+    if roster.te_count < 1:
         return violations
 
     existing_te_byes = roster.get_te_bye_weeks()
 
-    # If adding 3rd TE, check for bye conflicts
-    if roster.te_count >= 2:
-        if player.bye_week in existing_te_byes:
-            violations.append(
-                f"TE_BYE_DUPLICATE: 3rd TE {player.name} shares bye {player.bye_week}"
-            )
+    # Check duplicate bye when adding TE if te_count >= 1 and bye conflicts
+    if roster.te_count >= 1 and player.bye_week in existing_te_byes:
+        violations.append(
+            f"TE_BYE_DUPLICATE: TE {player.name} shares bye {player.bye_week} with existing TE"
+        )
 
     return violations
 
@@ -210,10 +207,23 @@ def get_violation_severity(violation: str) -> str:
 
     Returns: "CRITICAL", "WARNING", or "INFO"
     """
-    if "FADED" in violation:
-        return "CRITICAL"
-    if "HARD_LIMIT" in violation or "OVERFLOW" in violation:
-        return "CRITICAL"
-    if "DUPLICATE" in violation or "LIMIT" in violation:
-        return "WARNING"
+    # Critical violations that block picks
+    critical_patterns = [
+        "FADED",
+        "QB_BYE_DUPLICATE",
+        "TE_BYE_DUPLICATE",
+        "BYE_HARD_LIMIT",
+        "TEAM_LIMIT",
+        "QB_OVERFLOW",
+    ]
+    for pattern in critical_patterns:
+        if pattern in violation:
+            return "CRITICAL"
+
+    # Warning violations
+    warning_patterns = ["BYE_SOFT_LIMIT", "DUPLICATE"]
+    for pattern in warning_patterns:
+        if pattern in violation:
+            return "WARNING"
+
     return "INFO"

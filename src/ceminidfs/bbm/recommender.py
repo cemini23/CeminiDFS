@@ -19,11 +19,13 @@ from ceminidfs.bbm.config import (
     EXPOSURE_SOFT_BRAKE_PCT,
     MAX_RECOMMENDATIONS,
     RECOMMENDER_TIMEOUT_MS,
+    COMBO_PAIR_CAP,
     clv_weight,
 )
 from ceminidfs.bbm.models import Player, Roster, DraftState, Archetype, Recommendation
 from ceminidfs.bbm.archetype import archetype_mult
 from ceminidfs.bbm.validator import validate_pick, get_violation_severity
+from ceminidfs.bbm.ledger import combo_pct
 
 
 @dataclass
@@ -230,6 +232,19 @@ def _calculate_exposure_mult(
     return 1.0, None
 
 
+def _combo_cap_blocks(player: Player, roster: Roster) -> bool:
+    """Check if adding this player would exceed COMBO_PAIR_CAP with any roster teammate.
+
+    Uses combo_pct from ledger to check if any player pair exceeds the 25% cap.
+    Returns True if any combo would exceed the cap (player should be blocked).
+    """
+    for roster_player in roster.players:
+        combo_info = combo_pct(roster_player.player_id, player.player_id)
+        if combo_info["current"] >= COMBO_PAIR_CAP:
+            return True
+    return False
+
+
 def _get_default_cap(player: Player) -> float:
     """Get default exposure cap based on player tier."""
     from ceminidfs.bbm.config import TIER_EXPOSURE_CAPS
@@ -272,13 +287,18 @@ def recommend_top3(
     start_time = time.time()
     roster = draft_state.roster
     archetype = draft_state.archetype
+    current_round = roster.current_round
 
     scored_players: List[Tuple[Player, float, ScoreComponents, List[str]]] = []
 
     # Filter and score available players
     for player in available_players:
-        # Exclude faded players
-        if player.is_faded():
+        # Exclude faded players (use round-specific fade check)
+        if player.is_faded_for_round(current_round):
+            continue
+
+        # Skip players where any roster teammate combo exceeds COMBO_PAIR_CAP
+        if _combo_cap_blocks(player, roster):
             continue
 
         # Validate against hard constraints

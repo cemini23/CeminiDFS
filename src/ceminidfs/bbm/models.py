@@ -48,10 +48,29 @@ class Player:
     drift_coeff: float = 0.0
     injury_fade: bool = False
     notes: Optional[str] = None
+    fade_rounds: Optional[List[str]] = None  # e.g. ["r3_5"] for round-specific fades
 
     def is_faded(self) -> bool:
-        """Check if player should be excluded."""
+        """Check if player should be excluded (global fade)."""
         return self.signal == Signal.FADE or self.injury_fade
+
+    def is_faded_for_round(self, round_num: int) -> bool:
+        """Check if player is faded for a specific round.
+
+        If signal is FADE and fade_rounds is specified, only fade during those rounds.
+        If signal is FADE and no fade_rounds, apply global fade to all rounds.
+        """
+        if self.signal != Signal.FADE and not self.injury_fade:
+            return False
+
+        # If no specific fade_rounds, apply global fade
+        if not self.fade_rounds:
+            return self.is_faded()
+
+        # Check if current round falls within any fade band
+        from ceminidfs.bbm.config import get_round_band
+        current_band = get_round_band(round_num)
+        return current_band in self.fade_rounds
 
 
 @dataclass

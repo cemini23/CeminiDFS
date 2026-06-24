@@ -134,6 +134,14 @@ PIVOT_TRIGGERS = {
 SIGNAL_BUY = "BUY"
 SIGNAL_FADE = "FADE"
 
+# Fade round bands for specific players (merge_name pattern -> round band where FADE applies)
+# e.g. "josh allen": "r3_5" means fade Josh Allen only in rounds 3-5, allow in other rounds
+FADE_ROUND_BANDS: Dict[str, str] = {
+    "josh allen": "r3_5",      # Fade in rounds 3-5
+    "brock bowers": "r1_2",    # Fade in rounds 1-2
+    "trey mcbride": "r1_2",    # Fade in rounds 1-2
+}
+
 # Position codes
 POSITIONS = {"QB", "RB", "WR", "TE"}
 FLEX_POSITIONS = {"RB", "WR", "TE"}

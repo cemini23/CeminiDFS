@@ -43,10 +43,20 @@ def player_from_row(row: dict[str, Any]) -> Player:
     """Convert ledger/registry row to Player model."""
 
     team = row.get("team") or ""
+    merge_name = row.get("merge_name") or row["name"].lower()
+    fade_rounds = row.get("fade_rounds")
+    if fade_rounds is None and _signal_from_str(row.get("signal")) == Signal.FADE:
+        from ceminidfs.bbm.config import FADE_ROUND_BANDS
+
+        for pattern, band in FADE_ROUND_BANDS.items():
+            if pattern in merge_name:
+                fade_rounds = [band]
+                break
+
     return Player(
         player_id=row["player_id"],
         name=row["name"],
-        merge_name=row.get("merge_name") or row["name"].lower(),
+        merge_name=merge_name,
         position=row["position"],
         team=team,
         bye_week=int(row.get("bye_week") or get_bye_week(team) or 0),
@@ -59,6 +69,7 @@ def player_from_row(row: dict[str, Any]) -> Player:
         drift_coeff=float(row.get("drift_coeff") or 0),
         injury_fade=bool(row.get("injury_fade")),
         notes=row.get("notes"),
+        fade_rounds=fade_rounds,
     )
 
 
@@ -100,7 +111,9 @@ def build_draft_state(draft_id: str, round_num: int) -> DraftState | None:
                 team=pick.get("team") or "",
                 bye_week=int(pick.get("bye_week") or 0),
                 adp=float(pick.get("adp") or 999),
-                signal=Signal.NEUTRAL,
+                signal=_signal_from_str(pick.get("signal")),
+                tier=pick.get("tier"),
+                exposure_cap_pct=pick.get("cap_pct"),
             )
         )
 
@@ -145,11 +158,20 @@ def get_recommendations(
     draft_id: str,
     limit: int = 3,
 ) -> list[dict[str, Any]]:
-    """CLI bridge — return top-N recommendations as display dicts."""
+    """CLI bridge — return top-N recommendations as display dicts.
+    archetype_str overrides draft_state.archetype when valid.
+    """
 
     draft_state = build_draft_state(draft_id, round_num)
     if draft_state is None:
         return []
+
+    # Override archetype with archetype_str when valid
+    if archetype_str:
+        try:
+            draft_state.archetype = Archetype(archetype_str)
+        except ValueError:
+            pass  # Keep original archetype if invalid
 
     available = get_available_models(draft_id)
 

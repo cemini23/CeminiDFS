@@ -8,6 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from ceminidfs.bbm.config import IN_PROGRESS_EXPOSURE_WEIGHT, TOTAL_ENTRIES
+from ceminidfs.bbm.normalize_adp import normalize_name
+
 
 def get_db_path() -> Path:
     """Return default database path."""
@@ -175,6 +178,7 @@ def exposure_pct(player_id: str, db_path: Optional[Path] = None) -> dict[str, fl
     """
     Calculate exposure percentage for a player.
     Complete drafts count at 100%, in_progress at 50% weight.
+    Denominator is TOTAL_ENTRIES (150) from config.
     Returns dict with 'current', 'cap', 'available'.
     """
     db = db_path or get_db_path()
@@ -206,28 +210,21 @@ def exposure_pct(player_id: str, db_path: Optional[Path] = None) -> dict[str, fl
 
     conn.close()
 
-    # Calculate total drafts and exposure
-    weighted = complete_count + (0.5 * in_progress_count)
-
-    # Get total draft count
-    conn = sqlite3.connect(db)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM drafts WHERE status IN ('complete', 'in_progress')")
-    total = cursor.fetchone()[0] or 1  # Avoid div by zero
-    conn.close()
-
-    exposure = weighted / total if total > 0 else 0.0
+    # Calculate exposure using TOTAL_ENTRIES as denominator
+    weighted = complete_count + (IN_PROGRESS_EXPOSURE_WEIGHT * in_progress_count)
+    exposure = weighted / TOTAL_ENTRIES
 
     return {
-        "current": round(exposure, 3),
+        "current": exposure,
         "cap": cap or 0.35,
-        "available": round((cap or 0.35) - exposure, 3),
+        "available": (cap or 0.35) - exposure,
     }
 
 
 def combo_pct(player_a: str, player_b: str, db_path: Optional[Path] = None) -> dict[str, float]:
     """
     Calculate combo pair exposure (e.g., QB-WR stacks).
+    Denominator is TOTAL_ENTRIES (150) from config.
     Returns dict with 'current', 'cap', 'available'.
     """
     db = db_path or get_db_path()
@@ -255,13 +252,8 @@ def combo_pct(player_a: str, player_b: str, db_path: Optional[Path] = None) -> d
 
     conn.close()
 
-    conn = sqlite3.connect(db)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM drafts WHERE status = 'complete'")
-    total = cursor.fetchone()[0] or 1
-    conn.close()
-
-    exposure = combo_count / total if total > 0 else 0.0
+    # Calculate exposure using TOTAL_ENTRIES as denominator
+    exposure = combo_count / TOTAL_ENTRIES
 
     return {
         "current": round(exposure, 3),
@@ -318,9 +310,9 @@ def record_pick(
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
 
-    # Insert pick
+    # Insert or replace pick (allows updating existing picks)
     cursor.execute("""
-        INSERT INTO picks (draft_id, round, pick_num, player_id, is_mine)
+        INSERT OR REPLACE INTO picks (draft_id, round, pick_num, player_id, is_mine)
         VALUES (?, ?, ?, ?, ?)
     """, (draft_id, round_num, pick_num, player_id, 1 if is_mine else 0))
 
@@ -354,7 +346,10 @@ def record_taken(
     player_id: str,
     db_path: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Record a player taken by another drafter (does not advance round)."""
+    """Record a player taken by another drafter (does not advance round).
+    Only logs action if the player was actually inserted (not a duplicate).
+    Returns whether the insert occurred.
+    """
     db = db_path or get_db_path()
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
@@ -367,13 +362,17 @@ def record_taken(
         (draft_id, player_id),
     )
 
-    cursor.execute(
-        """
-        INSERT INTO action_log (draft_id, action_type, round, player_id)
-        VALUES (?, 'taken', ?, ?)
-        """,
-        (draft_id, round_num, player_id),
-    )
+    inserted = cursor.rowcount > 0
+
+    # Only log action if actually inserted
+    if inserted:
+        cursor.execute(
+            """
+            INSERT INTO action_log (draft_id, action_type, round, player_id)
+            VALUES (?, 'taken', ?, ?)
+            """,
+            (draft_id, round_num, player_id),
+        )
 
     conn.commit()
     conn.close()
@@ -384,6 +383,7 @@ def record_taken(
         "pick_num": pick_num,
         "player_id": player_id,
         "is_mine": False,
+        "inserted": inserted,
     }
 
 
@@ -453,9 +453,10 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
 
     draft_id, slot, archetype, status, current_round, total_rounds = row
 
-    # Get my picks with player details
+    # Get my picks with player details (including bye_week, adp, signal, tier, cap_pct)
     cursor.execute("""
-        SELECT p.round, p.pick_num, p.player_id, pd.name, pd.position, pd.team
+        SELECT p.round, p.pick_num, p.player_id, pd.name, pd.position, pd.team,
+               pd.bye_week, pd.adp, pd.signal, pd.tier, pd.cap_pct
         FROM picks p
         JOIN players_dim pd ON p.player_id = pd.player_id
         WHERE p.draft_id = ? AND p.is_mine = 1
@@ -469,13 +470,19 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
             "name": r[3],
             "position": r[4],
             "team": r[5],
+            "bye_week": r[6],
+            "adp": r[7],
+            "signal": r[8],
+            "tier": r[9],
+            "cap_pct": r[10],
         }
         for r in cursor.fetchall()
     ]
 
-    # Get all picks
+    # Get all picks (including bye_week, adp, signal, tier, cap_pct)
     cursor.execute("""
-        SELECT p.round, p.pick_num, p.player_id, pd.name, pd.position, pd.team, p.is_mine
+        SELECT p.round, p.pick_num, p.player_id, pd.name, pd.position, pd.team, p.is_mine,
+               pd.bye_week, pd.adp, pd.signal, pd.tier, pd.cap_pct
         FROM picks p
         JOIN players_dim pd ON p.player_id = pd.player_id
         WHERE p.draft_id = ?
@@ -490,6 +497,11 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
             "position": r[4],
             "team": r[5],
             "is_mine": bool(r[6]),
+            "bye_week": r[7],
+            "adp": r[8],
+            "signal": r[9],
+            "tier": r[10],
+            "cap_pct": r[11],
         }
         for r in cursor.fetchall()
     ]
@@ -552,37 +564,78 @@ def complete_draft(draft_id: str, db_path: Optional[Path] = None) -> dict[str, A
     return {"draft_id": draft_id, "status": "complete"}
 
 
-def get_player_by_name(name: str, db_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
-    """Lookup player by name (case-insensitive partial match)."""
+def update_draft_archetype(draft_id: str, archetype: str, db_path: Optional[Path] = None) -> dict[str, Any]:
+    """Update the archetype for a draft."""
     db = db_path or get_db_path()
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT player_id, name, team, position, bye_week, tier, cap_pct, adp, signal, injury_fade
-        FROM players_dim
-        WHERE LOWER(name) LIKE LOWER(?) OR LOWER(merge_name) LIKE LOWER(?)
-        LIMIT 1
-    """, (f"%{name}%", f"%{name}%"))
+    cursor.execute(
+        "UPDATE drafts SET archetype = ? WHERE draft_id = ?",
+        (archetype, draft_id)
+    )
 
-    row = cursor.fetchone()
+    conn.commit()
     conn.close()
 
-    if not row:
-        return None
+    return {"draft_id": draft_id, "archetype": archetype}
 
-    return {
-        "player_id": row[0],
-        "name": row[1],
-        "team": row[2],
-        "position": row[3],
-        "bye_week": row[4],
-        "tier": row[5],
-        "cap_pct": row[6],
-        "adp": row[7],
-        "signal": row[8],
-        "injury_fade": bool(row[9]),
-    }
+
+def get_players_by_name(name: str, db_path: Optional[Path] = None) -> list[dict[str, Any]]:
+    """Return matches by exact merge_name first, then partial matches."""
+    db = db_path or get_db_path()
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+    normalized = normalize_name(name)
+
+    cursor.execute(
+        """
+        SELECT player_id, name, team, position, bye_week, tier, cap_pct, adp, signal, injury_fade
+        FROM players_dim
+        WHERE LOWER(COALESCE(merge_name, '')) = ?
+        ORDER BY adp ASC, name ASC
+        """,
+        (normalized,),
+    )
+    rows = cursor.fetchall()
+
+    if not rows:
+        cursor.execute(
+            """
+            SELECT player_id, name, team, position, bye_week, tier, cap_pct, adp, signal, injury_fade
+            FROM players_dim
+            WHERE LOWER(name) LIKE ? OR LOWER(COALESCE(merge_name, '')) LIKE ?
+            ORDER BY adp ASC, name ASC
+            """,
+            (f"%{normalized}%", f"%{normalized}%"),
+        )
+        rows = cursor.fetchall()
+
+    conn.close()
+
+    return [
+        {
+            "player_id": row[0],
+            "name": row[1],
+            "team": row[2],
+            "position": row[3],
+            "bye_week": row[4],
+            "tier": row[5],
+            "cap_pct": row[6],
+            "adp": row[7],
+            "signal": row[8],
+            "injury_fade": bool(row[9]),
+        }
+        for row in rows
+    ]
+
+
+def get_player_by_name(name: str, db_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
+    """Lookup player by name, preferring exact merge-name matches."""
+    matches = get_players_by_name(name, db_path=db_path)
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def list_available_players(

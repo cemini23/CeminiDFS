@@ -28,10 +28,9 @@ def assign_archetype(ledger_counts: LedgerCounts) -> Archetype:
         Archetype that is most under-represented
     """
     gaps: Dict[str, float] = {}
-
-    for code in ARCHETYPE_TARGETS:
-        gap = ledger_counts.get_archetype_gap(code)
-        gaps[code] = gap
+    for code, target in ARCHETYPE_TARGETS.items():
+        current = ledger_counts.archetype_counts.get(code, 0)
+        gaps[code] = ((target - current) / target) if target > 0 else 0.0
 
     # Return archetype with highest gap (furthest below target)
     max_gap_code = max(gaps, key=gaps.get)
