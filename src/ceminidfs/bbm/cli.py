@@ -13,20 +13,22 @@ from ceminidfs.bbm.audit import audit_draft, format_audit_report
 from ceminidfs.bbm.draft_card import write_draft_card
 from ceminidfs.bbm.ledger import (
     complete_draft,
+    count_room_taken,
     create_draft,
     exposure_pct,
     get_draft_state,
-    get_players_by_name,
-    get_player_by_name,
+    get_last_ambiguous_matches,
+    list_room_taken_names,
     record_pick,
     record_taken,
+    resolve_player_query,
     update_draft_archetype,
     undo_last_action,
 )
 from ceminidfs.bbm.models import Draft, DraftStatus, LedgerCounts, Roster
 from ceminidfs.bbm.normalize_adp import merge_adp_csv
 from ceminidfs.bbm.reconcile import format_reconcile_report, reconcile_from_csv
-from ceminidfs.bbm.registry import load_registry, save_registry
+from ceminidfs.bbm.registry import check_registry_coverage, load_registry, save_registry
 from ceminidfs.bbm.session import (
     archetype_header,
     ensure_initialized,
@@ -82,6 +84,11 @@ def build_bbm_parser(subparsers: Any) -> None:
 def _cmd_draft(args: argparse.Namespace) -> int:
     ensure_initialized()
 
+    # Print coverage summary
+    registry = load_registry()
+    coverage = check_registry_coverage(registry)
+    print(f"Registry: {coverage['player_count']} players, {coverage['team_count']} teams")
+
     if args.draft_id:
         draft_id = args.draft_id
         state = get_draft_state(draft_id)
@@ -92,6 +99,14 @@ def _cmd_draft(args: argparse.Namespace) -> int:
         archetype = args.archetype or state.archetype
         current_round = state.current_round
         print(f"Resumed draft: {draft_id}")
+
+        # Show room taken info on resume (P1-4)
+        taken_count = count_room_taken(draft_id)
+        if taken_count > 0:
+            print(f"Room: {taken_count} players marked taken")
+            taken_names = list_room_taken_names(draft_id, limit=5)
+            for name in taken_names:
+                print(f"  - {name}")
     else:
         slot = args.slot
         if slot < 1 or slot > 12:
@@ -144,11 +159,14 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
             if not arg:
                 print("Usage: p <player_name>")
                 continue
-            player = get_player_by_name(arg)
+            player = resolve_player_query(arg)
             if player is None:
-                matches = get_players_by_name(arg)
-                if len(matches) > 1:
-                    print("Ambiguous: use full name")
+                # Check if there were ambiguous matches
+                ambiguous = get_last_ambiguous_matches()
+                if len(ambiguous) > 1:
+                    print("Ambiguous — pick number:")
+                    for idx, m in enumerate(ambiguous, 1):
+                        print(f"  {idx}. {m['name']} {m['position']} {m.get('team', '')}")
                 else:
                     print(f"Player not found: {arg}")
                 continue
@@ -161,11 +179,14 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
             if not arg:
                 print("Usage: t <player_name>")
                 continue
-            player = get_player_by_name(arg)
+            player = resolve_player_query(arg)
             if player is None:
-                matches = get_players_by_name(arg)
-                if len(matches) > 1:
-                    print("Ambiguous: use full name")
+                # Check if there were ambiguous matches
+                ambiguous = get_last_ambiguous_matches()
+                if len(ambiguous) > 1:
+                    print("Ambiguous — pick number:")
+                    for idx, m in enumerate(ambiguous, 1):
+                        print(f"  {idx}. {m['name']} {m['position']} {m.get('team', '')}")
                 else:
                     print(f"Player not found: {arg}")
                 continue
@@ -194,11 +215,15 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
                     break
                 if not line.strip():
                     break
-                player = get_player_by_name(line.strip())
+                player = resolve_player_query(line.strip())
                 if player:
                     record_taken(draft_id, current_round, pick_num, player["player_id"])
                     count += 1
                 else:
+                    # Check if ambiguous
+                    ambiguous = get_last_ambiguous_matches()
+                    if len(ambiguous) > 1:
+                        print(f"    Ambiguous '{line.strip()}' — skipping (use 't' command to pick)")
                     unmatched_lines.append(line.rstrip())
             print(f"  -> Synced {count} players")
             if unmatched_lines:
@@ -235,6 +260,10 @@ def _show_recommendations(round_num: int, pick_num: int, archetype: str, draft_i
     if not recs:
         print("  (no recommendations — check registry sync)")
         return
+
+    # Display pivot warning if present (attached to first recommendation)
+    if recs and recs[0].get("pivot_warning"):
+        print(f"  [!] {recs[0]['pivot_warning']}")
 
     for index, player in enumerate(recs, 1):
         signal_str = f"  {player['signal']}" if player.get("signal") else ""
@@ -295,7 +324,10 @@ def _cmd_refresh_adp(args: argparse.Namespace) -> int:
     from ceminidfs.bbm.ledger import sync_players_from_registry
 
     sync_players_from_registry(registry)
-    print(f"Updated {result.matched} players from {args.csv}")
+    print(
+        f"Updated {result.matched} (exact {result.exact_matched}, "
+        f"fuzzy {result.fuzzy_matched}, unmatched {len(result.unmatched)})"
+    )
     if result.unmatched:
         print(f"Unmatched ({len(result.unmatched)}): {', '.join(result.unmatched[:10])}")
         if len(result.unmatched) > 10:

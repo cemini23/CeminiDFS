@@ -147,23 +147,54 @@ def _is_elite_rb_tier_empty(board: List[Player]) -> bool:
 
 
 def _is_stack_anchor_gone(board: List[Player]) -> bool:
-    """Check if stack anchors (Chase, McConkey) are gone."""
-    anchors = {"chase", "mcconkey"}
+    """Check if stack anchors from config.STACK_PAIRS are gone.
+
+    Uses merge_name patterns from config for stack anchors (WR/TE portions).
+    """
+    from ceminidfs.bbm.config import STACK_PAIRS
+    from ceminidfs.bbm.normalize_adp import normalize_name
+
+    # Extract WR/TE anchor names from STACK_PAIRS (second player in each pair)
+    anchor_names = set()
+    for _, wr_te_name in STACK_PAIRS:
+        anchor_names.add(normalize_name(wr_te_name))
 
     for player in board:
-        if player.position == "WR":
-            name_lower = player.name.lower()
-            if any(anchor in name_lower for anchor in anchors):
+        if player.position in ("WR", "TE"):
+            merge_name = player.merge_name.lower() if player.merge_name else player.name.lower()
+            if normalize_name(player.name) in anchor_names or any(
+                anchor in merge_name for anchor in anchor_names
+            ):
                 return False  # Anchor still available
 
     return True  # All anchors gone
 
 
 def _is_stack_lane_dead(roster: Roster, board: List[Player]) -> bool:
-    """Check if stack completion lane is dead (no QB/WR pairs available)."""
-    # Simplified: check if we have a viable QB stack option
-    # In practice, this would check for QB-WR pairs from same team
-    return False  # Conservative default
+    """Check if stack completion lane is dead.
+
+    Returns True if no WR/TE on board shares team with any roster QB,
+    AND no QB on board shares team with any roster WR/TE.
+    This means no viable stack pairs can be completed.
+    """
+    # Get roster QBs and their teams
+    roster_qbs = roster.get_players_by_position("QB")
+    roster_qb_teams = {qb.team for qb in roster_qbs if qb.team}
+
+    # Get roster WRs/TEs and their teams
+    roster_wr_te = roster.get_players_by_position("WR") + roster.get_players_by_position("TE")
+    roster_wr_te_teams = {p.team for p in roster_wr_te if p.team}
+
+    # Check if any board WR/TE shares team with a roster QB
+    board_wr_te = [p for p in board if p.position in ("WR", "TE")]
+    viable_wr_te_teams = {p.team for p in board_wr_te if p.team and p.team in roster_qb_teams}
+
+    # Check if any board QB shares team with a roster WR/TE
+    board_qbs = [p for p in board if p.position == "QB"]
+    viable_qb_teams = {p.team for p in board_qbs if p.team and p.team in roster_wr_te_teams}
+
+    # Stack lane is dead if no viable connections exist
+    return not viable_wr_te_teams and not viable_qb_teams
 
 
 def _is_rb_run_happening(board: List[Player], round_num: int) -> bool:

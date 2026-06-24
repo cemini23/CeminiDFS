@@ -236,6 +236,39 @@ def build_seed_registry() -> dict[str, Any]:
     }
 
 
+def check_registry_coverage(registry: dict[str, Any]) -> dict[str, Any]:
+    """Check registry coverage and return summary with warnings.
+
+    Returns dict with:
+    - player_count: number of players in registry
+    - team_count: number of unique teams
+    - warnings: list of warning messages
+    """
+    players = registry.get("players", [])
+    player_count = len(players)
+
+    teams: set[str] = set()
+    for p in players:
+        team = p.get("team")
+        if team and team != "FA":
+            teams.add(team)
+    team_count = len(teams)
+
+    warnings: list[str] = []
+
+    if player_count < 120:
+        warnings.append(f"Low player count: {player_count} (expected >= 120)")
+
+    if team_count < 8:
+        warnings.append(f"Low team coverage: {team_count} teams (expected >= 8)")
+
+    return {
+        "player_count": player_count,
+        "team_count": team_count,
+        "warnings": warnings,
+    }
+
+
 def ensure_seed_registry() -> dict[str, Any]:
     """Load registry or create seed file if missing."""
 
@@ -257,4 +290,6 @@ def ensure_seed_registry() -> dict[str, Any]:
         )
 
     return registry
+
+
 

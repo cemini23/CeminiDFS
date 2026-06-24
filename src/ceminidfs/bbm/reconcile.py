@@ -238,7 +238,8 @@ def reconcile_exposure(
     ledger_name_map: Dict[str, str],  # player_id -> canonical name
     underdog_records: List[UnderdogExposureRecord],
     total_entries: int = 150,
-    variance_threshold: float = 0.02  # 2% difference threshold
+    variance_threshold: float = 0.02,  # 2% difference threshold
+    ledger_positions: Optional[Dict[str, str]] = None,
 ) -> ReconcileResult:
     """Reconcile internal ledger against Underdog exposure CSV.
 
@@ -271,10 +272,18 @@ def reconcile_exposure(
         # Try to match by name
         normalized_ud = _normalize_name(ud_record.player_name)
         player_id = name_to_id.get(normalized_ud)
+        if player_id and ledger_positions and ud_record.position:
+            if ledger_positions.get(player_id, "").upper() != ud_record.position.upper():
+                player_id = None
 
         # Try fuzzy match if exact fails
         if not player_id:
-            player_id = _fuzzy_match_name(normalized_ud, name_to_id)
+            player_id = _fuzzy_match_name(
+                normalized_ud,
+                name_to_id,
+                position=ud_record.position,
+                player_positions=ledger_positions,
+            )
 
         if player_id:
             ledger_matched.add(player_id)
@@ -366,14 +375,26 @@ def _normalize_name(name: str) -> str:
     return normalized
 
 
-def _fuzzy_match_name(normalized_name: str, name_to_id: Dict[str, str]) -> Optional[str]:
+def _fuzzy_match_name(
+    normalized_name: str,
+    name_to_id: Dict[str, str],
+    position: Optional[str] = None,
+    player_positions: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
     """Attempt fuzzy name match for unmatched players."""
+    normalized_position = position.upper() if position else None
+    fallback_player_id: Optional[str] = None
+
     # Simple substring match first
     for name, player_id in name_to_id.items():
         if normalized_name in name or name in normalized_name:
-            return player_id
+            if normalized_position and player_positions:
+                if player_positions.get(player_id, "").upper() == normalized_position:
+                    return player_id
+            if fallback_player_id is None:
+                fallback_player_id = player_id
 
-    return None
+    return fallback_player_id
 
 
 def format_reconcile_report(result: ReconcileResult) -> str:
@@ -395,19 +416,21 @@ def reconcile_from_csv(csv_path: str | Path) -> ReconcileResult:
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT p.player_id, pd.name, COUNT(DISTINCT d.draft_id)
+        SELECT p.player_id, pd.name, pd.position, COUNT(DISTINCT d.draft_id)
         FROM picks p
         JOIN drafts d ON p.draft_id = d.draft_id
         JOIN players_dim pd ON p.player_id = pd.player_id
         WHERE p.is_mine = 1 AND d.status = 'complete'
-        GROUP BY p.player_id, pd.name
+        GROUP BY p.player_id, pd.name, pd.position
         """
     )
     ledger_counts: dict[str, int] = {}
     ledger_name_map: dict[str, str] = {}
-    for player_id, name, count in cursor.fetchall():
+    ledger_positions: dict[str, str] = {}
+    for player_id, name, position, count in cursor.fetchall():
         ledger_counts[player_id] = count
         ledger_name_map[player_id] = name
+        ledger_positions[player_id] = position
     conn.close()
 
     records = parse_underdog_exposure_csv(csv_path)
@@ -416,6 +439,7 @@ def reconcile_from_csv(csv_path: str | Path) -> ReconcileResult:
         ledger_name_map,
         records,
         total_entries=TOTAL_ENTRIES,
+        ledger_positions=ledger_positions,
     )
 
 

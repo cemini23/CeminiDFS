@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
@@ -198,7 +198,10 @@ def merge_bbtb_csv(
 @dataclass(slots=True)
 class AdpMergeResult:
     matched: int
+    exact_matched: int
+    fuzzy_matched: int
     unmatched: list[str]
+    ambiguous: list[str] = field(default_factory=list)
 
 
 def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeResult:
@@ -211,7 +214,10 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
     }
     candidate_names = list(by_merge)
     matched = 0
+    exact_matched = 0
+    fuzzy_matched = 0
     unmatched: list[str] = []
+    ambiguous: list[str] = []
 
     for row in rows:
         raw_name = _pick(row, ("merge_name", "name", "player", "player_name", "full_name"))
@@ -231,9 +237,14 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
             fuzzy = _best_fuzzy_match(merge_name, candidate_names, threshold=90)
             if fuzzy:
                 player = by_merge[fuzzy[0]]
+                fuzzy_matched += 1
+                if fuzzy[1] < 95:
+                    ambiguous.append(raw_name)
             else:
                 unmatched.append(raw_name)
                 continue
+        else:
+            exact_matched += 1
 
         player["adp"] = adp_val
         player["strategy_rank"] = int(adp_val)
@@ -241,5 +252,11 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
 
     registry.setdefault("meta", {})["updated"] = __import__("datetime").date.today().isoformat()
     registry["meta"]["adp_source"] = Path(csv_path).name
-    return AdpMergeResult(matched=matched, unmatched=unmatched)
+    return AdpMergeResult(
+        matched=matched,
+        exact_matched=exact_matched,
+        fuzzy_matched=fuzzy_matched,
+        unmatched=unmatched,
+        ambiguous=ambiguous,
+    )
 

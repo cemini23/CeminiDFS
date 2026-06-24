@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from datetime import datetime
 from typing import Any
 
 from ceminidfs.bbm.config import ARCHETYPE_NAMES, TOTAL_ENTRIES, get_bye_week
 from ceminidfs.bbm.ledger import (
+    apply_pivot,
     exposure_pct as ledger_exposure,
     get_db_path,
     get_draft_state,
     init_db,
+    is_pivot_applied,
     list_available_players,
     sync_players_from_registry,
 )
 from ceminidfs.bbm.models import Archetype, DraftState, DraftStatus, Player, Roster, Signal
-from ceminidfs.bbm.registry import ensure_seed_registry
+from ceminidfs.bbm.registry import check_registry_coverage, ensure_seed_registry
 from ceminidfs.bbm.recommender import recommend_top3
+from ceminidfs.bbm.archetype import pivot_state_machine
 
 
 def ensure_initialized() -> None:
@@ -25,6 +29,13 @@ def ensure_initialized() -> None:
 
     init_db()
     registry = ensure_seed_registry()
+
+    # Check registry coverage and warn if insufficient
+    coverage = check_registry_coverage(registry)
+    if coverage["warnings"]:
+        for warning in coverage["warnings"]:
+            print(f"WARNING: {warning}", file=sys.stderr)
+
     sync_players_from_registry(registry)
 
 
@@ -160,6 +171,7 @@ def get_recommendations(
 ) -> list[dict[str, Any]]:
     """CLI bridge — return top-N recommendations as display dicts.
     archetype_str overrides draft_state.archetype when valid.
+    Includes pivot warning if archetype pivot was triggered.
     """
 
     draft_state = build_draft_state(draft_id, round_num)
@@ -174,6 +186,22 @@ def get_recommendations(
             pass  # Keep original archetype if invalid
 
     available = get_available_models(draft_id)
+
+    # Check for archetype pivot before generating recommendations
+    pivot_result = pivot_state_machine(
+        primary=draft_state.archetype,
+        roster=draft_state.roster,
+        round_num=round_num,
+        board=available
+    )
+
+    pivot_warning = None
+    if pivot_result.new_archetype and not is_pivot_applied(draft_id):
+        # Apply the pivot
+        warning = pivot_result.warning or f"Pivot to {pivot_result.new_archetype.value}"
+        apply_pivot(draft_id, pivot_result.new_archetype.value, warning)
+        draft_state.archetype = pivot_result.new_archetype
+        pivot_warning = warning
 
     def exposure_fn(player_id: str) -> float:
         return ledger_exposure(player_id)["current"]
@@ -198,7 +226,18 @@ def get_recommendations(
                 "score": rec.score,
             }
         )
+
+    # Add pivot warning to first result if present (for CLI display)
+    if pivot_warning and results:
+        results[0]["pivot_warning"] = pivot_warning
+
     return results
+
+
+def get_pivot_message(draft_id: str) -> str | None:
+    """Get pivot warning message for display in CLI."""
+    from ceminidfs.bbm.ledger import get_pivot_warning
+    return get_pivot_warning(draft_id)
 
 
 def archetype_gap_pct(archetype: str) -> float:

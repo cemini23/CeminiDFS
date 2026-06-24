@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,6 +11,21 @@ from typing import Any, Optional
 
 from ceminidfs.bbm.config import IN_PROGRESS_EXPOSURE_WEIGHT, TOTAL_ENTRIES
 from ceminidfs.bbm.normalize_adp import normalize_name
+
+
+# Module-level storage for last ambiguous matches (for CLI disambiguation)
+_last_ambiguous_matches: list[dict[str, Any]] = []
+
+
+def get_last_ambiguous_matches() -> list[dict[str, Any]]:
+    """Return the last ambiguous matches from resolve_player_query."""
+    return _last_ambiguous_matches.copy()
+
+
+def _set_last_ambiguous_matches(matches: list[dict[str, Any]]) -> None:
+    """Set the last ambiguous matches (internal use)."""
+    global _last_ambiguous_matches
+    _last_ambiguous_matches = matches
 
 
 def get_db_path() -> Path:
@@ -54,9 +70,21 @@ def init_db(path: Optional[Path | str] = None) -> Path:
             status TEXT CHECK(status IN ('in_progress','complete')),
             underdog_entry_id TEXT,
             current_round INTEGER DEFAULT 1,
-            total_rounds INTEGER DEFAULT 18
+            total_rounds INTEGER DEFAULT 18,
+            pivot_applied INTEGER DEFAULT 0,
+            pivot_warning TEXT
         )
     """)
+
+    # Add pivot columns if they don't exist (ALTER-safe for existing databases)
+    try:
+        cursor.execute("ALTER TABLE drafts ADD COLUMN pivot_applied INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        cursor.execute("ALTER TABLE drafts ADD COLUMN pivot_warning TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     # Picks table
     cursor.execute("""
@@ -103,7 +131,60 @@ def init_db(path: Optional[Path | str] = None) -> Path:
     conn.commit()
     conn.close()
 
+    # Seed combo_pairs from config if players exist in players_dim
+    _seed_combo_pairs_from_config(path=db_path)
+
     return db_path
+
+
+def _seed_combo_pairs_from_config(
+    cap_pct: float = 0.25,
+    path: Optional[Path] = None
+) -> int:
+    """Seed combo_pairs table from config.STACK_PAIRS using merge_name lookup.
+
+    Returns count of pairs seeded.
+    """
+    from ceminidfs.bbm.config import STACK_PAIRS
+    from ceminidfs.bbm.normalize_adp import normalize_name
+
+    db_path = path or get_db_path()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    count = 0
+    for qb_name, wr_te_name in STACK_PAIRS:
+        # Look up players by merge_name
+        qb_normalized = normalize_name(qb_name)
+        wr_te_normalized = normalize_name(wr_te_name)
+
+        cursor.execute(
+            "SELECT player_id FROM players_dim WHERE LOWER(COALESCE(merge_name, name)) = ?",
+            (qb_normalized,)
+        )
+        qb_row = cursor.fetchone()
+
+        cursor.execute(
+            "SELECT player_id FROM players_dim WHERE LOWER(COALESCE(merge_name, name)) = ?",
+            (wr_te_normalized,)
+        )
+        wr_te_row = cursor.fetchone()
+
+        if qb_row and wr_te_row:
+            player_a, player_b = sorted([qb_row[0], wr_te_row[0]])
+            try:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO combo_pairs (player_a, player_b, cap_pct) VALUES (?, ?, ?)",
+                    (player_a, player_b, cap_pct)
+                )
+                if cursor.rowcount > 0:
+                    count += 1
+            except sqlite3.IntegrityError:
+                pass  # Already exists
+
+    conn.commit()
+    conn.close()
+    return count
 
 
 @dataclass
@@ -171,6 +252,10 @@ def sync_players_from_registry(registry: dict[str, Any], db_path: Optional[Path]
 
     conn.commit()
     conn.close()
+
+    # Seed combo_pairs after syncing players
+    _seed_combo_pairs_from_config(path=db)
+
     return count
 
 
@@ -547,6 +632,8 @@ def list_in_progress_drafts(db_path: Optional[Path] = None) -> list[dict[str, An
     return results
 
 
+
+
 def complete_draft(draft_id: str, db_path: Optional[Path] = None) -> dict[str, Any]:
     """Mark a draft as complete."""
     db = db_path or get_db_path()
@@ -632,10 +719,58 @@ def get_players_by_name(name: str, db_path: Optional[Path] = None) -> list[dict[
 
 def get_player_by_name(name: str, db_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Lookup player by name, preferring exact merge-name matches."""
-    matches = get_players_by_name(name, db_path=db_path)
-    if len(matches) != 1:
+    return resolve_player_query(name, db_path=db_path)
+
+
+def resolve_player_query(
+    query: str,
+    index: Optional[int] = None,
+    db_path: Optional[Path] = None,
+) -> dict[str, Any] | None:
+    """
+    Resolve a player query to a player dict.
+
+    - If query starts with digit + space (e.g. "2 Chase"), use index into get_players_by_name(rest).
+      Index is 1-based.
+    - Else, call get_players_by_name(query). If 1 match, return it.
+      If >1 match, store the list in _last_ambiguous_matches and return None.
+
+    Returns player dict on success, None if ambiguous or not found.
+    """
+    query = query.strip()
+
+    if index is not None:
+        matches = get_players_by_name(query, db_path=db_path)
+        if 1 <= index <= len(matches):
+            _set_last_ambiguous_matches([])  # Clear ambiguous matches on successful index selection
+            return matches[index - 1]
         return None
-    return matches[0]
+
+    # Check for digit prefix pattern: "1 Player Name" or "12 Player Name"
+    index_match = re.match(r"^(\d+)\s+(.+)$", query)
+    if index_match:
+        index = int(index_match.group(1))
+        rest = index_match.group(2).strip()
+        matches = get_players_by_name(rest, db_path=db_path)
+        if 1 <= index <= len(matches):
+            _set_last_ambiguous_matches([])  # Clear ambiguous matches on successful index selection
+            return matches[index - 1]  # Convert 1-based to 0-based
+        return None
+
+    # Normal lookup
+    matches = get_players_by_name(query, db_path=db_path)
+
+    if len(matches) == 0:
+        _set_last_ambiguous_matches([])
+        return None
+
+    if len(matches) == 1:
+        _set_last_ambiguous_matches([])
+        return matches[0]
+
+    # Multiple matches - store for disambiguation
+    _set_last_ambiguous_matches(matches)
+    return None
 
 
 def list_available_players(
@@ -706,3 +841,111 @@ def list_available_players(
 
     conn.close()
     return results
+
+
+def count_room_taken(draft_id: str, db_path: Optional[Path] = None) -> int:
+    """Count players marked as taken in the draft room."""
+    db = db_path or get_db_path()
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM room_taken WHERE draft_id = ?",
+        (draft_id,),
+    )
+    count = cursor.fetchone()[0] or 0
+
+    conn.close()
+    return count
+
+
+def list_room_taken_names(
+    draft_id: str,
+    limit: int = 5,
+    db_path: Optional[Path] = None,
+) -> list[str]:
+    """List names of players marked as taken, up to limit."""
+    db = db_path or get_db_path()
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT pd.name, pd.position, pd.team
+        FROM room_taken rt
+        JOIN players_dim pd ON rt.player_id = pd.player_id
+        WHERE rt.draft_id = ?
+        ORDER BY rt.recorded_at DESC
+        LIMIT ?
+        """,
+        (draft_id, limit),
+    )
+
+    results = [
+        f"{r[0]} {r[1]} {r[2]}" for r in cursor.fetchall()
+    ]
+
+    conn.close()
+    return results
+
+
+def apply_pivot(
+    draft_id: str,
+    new_archetype: str,
+    warning: str,
+    db_path: Optional[Path] = None
+) -> dict[str, Any]:
+    """Apply a pivot to a draft, updating archetype and storing warning."""
+    db = db_path or get_db_path()
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        UPDATE drafts
+        SET archetype = ?, pivot_applied = 1, pivot_warning = ?
+        WHERE draft_id = ?
+    """, (new_archetype, warning, draft_id))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "draft_id": draft_id,
+        "archetype": new_archetype,
+        "pivot_applied": True,
+        "warning": warning,
+    }
+
+
+def get_pivot_warning(draft_id: str, db_path: Optional[Path] = None) -> Optional[str]:
+    """Get the pivot warning message for a draft if one exists."""
+    db = db_path or get_db_path()
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT pivot_warning FROM drafts WHERE draft_id = ? AND pivot_applied = 1",
+        (draft_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if row and row[0]:
+        return row[0]
+    return None
+
+
+def is_pivot_applied(draft_id: str, db_path: Optional[Path] = None) -> bool:
+    """Check if a pivot has already been applied to this draft."""
+    db = db_path or get_db_path()
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT pivot_applied FROM drafts WHERE draft_id = ?",
+        (draft_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    return bool(row and row[0])

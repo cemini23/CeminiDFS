@@ -12,15 +12,17 @@ from ceminidfs.bbm.ledger import (
     create_draft,
     complete_draft,
     get_draft_state,
+    get_players_by_name,
     exposure_pct,
     init_db,
     record_pick,
     record_taken,
+    resolve_player_query,
     sync_players_from_registry,
 )
-from ceminidfs.bbm.models import Archetype, Player, Roster
-from ceminidfs.bbm.normalize_adp import normalize_name
-from ceminidfs.bbm.registry import build_seed_registry
+from ceminidfs.bbm.models import Archetype, DraftState, DraftStatus, Player, Roster
+from ceminidfs.bbm.normalize_adp import merge_adp_csv, normalize_name
+from ceminidfs.bbm.registry import build_seed_registry, check_registry_coverage
 from ceminidfs.bbm.session import get_recommendations
 from ceminidfs.bbm.validator import validate_pick
 from ceminidfs.models.scoring import score_half_ppr_season
@@ -62,6 +64,17 @@ def test_draft_card_markdown():
     assert "Exposure caps" in card
 
 
+def test_snake_pick_num_slot_12_round_18():
+    state = DraftState(
+        draft_id="draft-001",
+        slot=12,
+        archetype=Archetype.B,
+        status=DraftStatus.IN_PROGRESS,
+        roster=Roster(players=[], draft_position=12, current_round=18),
+    )
+    assert state.current_pick_num == 205
+
+
 def test_half_ppr_scoring():
     pts = score_half_ppr_season(
         {"rec": 80, "rec_yds": 1000, "rec_td": 8, "rush_yds": 0, "rush_td": 0}
@@ -96,6 +109,22 @@ def test_exposure_uses_total_entries(bbm_db: Path):
 
     exp = exposure_pct(player_id, db_path=bbm_db)
     assert exp["current"] == pytest.approx(1 / 150, rel=1e-3)
+
+
+def test_refresh_adp_merge_stats(tmp_path: Path):
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text(
+        "name,adp\nJa'Marr Chase,1.0\n",
+        encoding="utf-8",
+    )
+    registry = build_seed_registry()
+
+    result = merge_adp_csv(csv_path, registry)
+
+    assert result.matched == 1
+    assert result.exact_matched == 1
+    assert result.fuzzy_matched == 0
+    assert result.unmatched == []
 
 
 def test_qb_bye_second_qb_duplicate_blocked():
@@ -143,6 +172,15 @@ def test_archetype_override_in_recommendations(bbm_db: Path, monkeypatch: pytest
     recs = get_recommendations(1, 4, "C", draft_id, limit=3)
     assert recs == []
     assert captured["archetype"] == Archetype.C
+
+
+def test_resolve_player_query_index(bbm_db: Path):
+    matches = get_players_by_name("j", db_path=bbm_db)
+    if len(matches) < 2:
+        pytest.skip("Need at least two matches to test index selection")
+
+    selected = resolve_player_query("j", index=2, db_path=bbm_db)
+    assert selected == matches[1]
 
 
 def test_get_draft_state_includes_bye_week(bbm_db: Path):
@@ -212,3 +250,9 @@ def test_validator_qb_bye_constraint():
     )
     violations = validate_pick(candidate, roster, Archetype.B)
     assert any("QB_BYE" in v for v in violations)
+
+
+def test_registry_coverage_warning():
+    coverage = check_registry_coverage(build_seed_registry())
+    assert coverage["player_count"] < 120
+    assert coverage["warnings"]
