@@ -28,7 +28,7 @@ Make Phases 0–5 production-safe for FanDuel main slates after 6-model council 
 
 ## Verification
 ```bash
-cd /Users/claudiobarone/Desktop/projects/CeminiDFS
+cd /Users/claudiobarone/Projects/CeminiDFS
 python -m pytest tests/ -q
 python -m ruff check src tests
 ```

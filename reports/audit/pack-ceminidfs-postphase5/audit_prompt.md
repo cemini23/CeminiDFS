@@ -25,7 +25,7 @@ Deliver:
 | Fact | Value |
 |------|-------|
 | Repo | `github.com/cemini23/CeminiDFS` |
-| Workspace | `/Users/claudiobarone/Desktop/projects/CeminiDFS` |
+| Workspace | `/Users/claudiobarone/Projects/CeminiDFS` |
 | Tests | 103 passing (pytest + ruff CI) |
 | Phases | 0–5 complete (DIY engine, backtest, calibration, simulate, ownership, late-swap, sim rerank) |
 | Wiki hub | `@gambling-wiki/concepts/diy-nfl-dfs-model-architecture.md` (K125) |
@@ -95,29 +95,29 @@ late-swap (post-lock)
 ```
 # Super-audit pack — built 2026-06-20T15:40:53Z
 
-Workspace: `/Users/claudiobarone/Desktop/projects/CeminiDFS`
-Prompt source: `/Users/claudiobarone/Desktop/projects/CeminiDFS/prompts/ceminidfs_postphase5_super_audit.md`
+Workspace: `/Users/claudiobarone/Projects/CeminiDFS`
+Prompt source: `/Users/claudiobarone/Projects/CeminiDFS/prompts/ceminidfs_postphase5_super_audit.md`
 
 ## Read order
 
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5/nfl_dfs.yaml`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5/prior_phase0_synthesis.md`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5/pytest_summary`
+- `/Users/claudiobarone/Projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5/nfl_dfs.yaml`
+- `/Users/claudiobarone/Projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5/prior_phase0_synthesis.md`
+- `/Users/claudiobarone/Projects/CeminiDFS/reports/audit/pack-ceminidfs-postphase5/pytest_summary`
 
 ## Code paths (absolute)
 
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/data/weather.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/data/stadiums.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/pipeline/engine.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/pipeline/backtest.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/simulate.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/correlation.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/export/sim_rerank.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/orchestrator/run.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/orchestrator/validate.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/ownership.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/volume.py`
-- `/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/stats.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/data/weather.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/data/stadiums.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/pipeline/engine.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/pipeline/backtest.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/simulate.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/correlation.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/export/sim_rerank.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/orchestrator/run.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/orchestrator/validate.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/ownership.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/volume.py`
+- `/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/stats.py`
 
 ```
 

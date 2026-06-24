@@ -155,6 +155,33 @@ def test_ownership_calibrate_cli_writes_calibration_json(tmp_path: Path):
     assert "__global__" in payload["coefficients"]
 
 
+def test_ownership_calibrate_cli_accepts_sample_fixture(tmp_path: Path):
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    output = tmp_path / "ownership_calibration.json"
+
+    status = main(
+        [
+            "ownership",
+            "calibrate",
+            "--labels",
+            str(fixtures / "sample_ownership_labels.csv"),
+            "--salary",
+            str(fixtures / "synthetic_fd_slate.csv"),
+            "--season",
+            "2024",
+            "--week",
+            "1",
+            "--out",
+            str(output),
+        ]
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert status == 0
+    assert payload["sample_size"] == 8
+    assert "__global__" in payload["coefficients"]
+
+
 def _row(name: str, team: str, position: str, salary: int, projection: float) -> dict[str, object]:
     return {
         "player_name": name,

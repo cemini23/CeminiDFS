@@ -2,7 +2,7 @@
 
 > **Goal:** Ship all optional pre-season edge improvements: GPP sim stack, ownership path, RB calibration, K126 P2 prototypes, NGS eval stub, repo hygiene.
 >
-> **Workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS` · **159 tests** · CI green
+> **Workspace:** `/Users/claudiobarone/Projects/CeminiDFS` · **159 tests** · CI green
 
 ## Tracks (parallel subagents)
 
@@ -106,11 +106,11 @@ Implement **two** additional coherence-risk signals from audit (no HF):
 
 ## Exit criteria
 
-- [ ] `ceminidfs run --profile gpp` documented and tested (mock pydfs where needed)
-- [ ] RB + QB both config-driven; regression gates pass
-- [ ] 2 new K126 P2 signals behind config toggles
-- [ ] PLAN.md current; reports gitignored
-- [ ] `pytest` + `ruff` green; do NOT commit unless user asks
+- [x] `ceminidfs run --profile gpp` documented and tested (mock pydfs where needed)
+- [x] RB + QB both config-driven; regression gates pass
+- [x] 2 new K126 P2 signals behind config toggles
+- [x] PLAN.md current; reports gitignored
+- [x] `pytest` + `ruff` green; do NOT commit unless user asks
 
 ## Execution order after merge
 

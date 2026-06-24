@@ -29,11 +29,11 @@ when you have contest-specific projections:
 
 ```bash
 ceminidfs ownership calibrate \
-  --labels paid_ownership.csv \
-  --salary slate.csv \
-  --season 2025 \
+  --labels tests/fixtures/sample_ownership_labels.csv \
+  --salary tests/fixtures/synthetic_fd_slate.csv \
+  --season 2024 \
   --week 1 \
-  --out artifacts/ownership/2025_w1.json
+  --out artifacts/ownership/demo_w1.json
 ```
 
 Then set `ownership.calibration_path` in a local copy of the GPP profile or pass it

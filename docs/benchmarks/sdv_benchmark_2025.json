@@ -1,20 +1,20 @@
 {
   "season": 2025,
   "week": null,
-  "generated": "2026-06-23",
   "providers": {
     "nflreadpy": {
-      "elapsed_sec": 1.601,
+      "elapsed_sec": 1.297,
       "rows": 48771,
       "coverage_pct": 100.0
     },
     "sportsdataverse": {
-      "elapsed_sec": 1.174,
+      "elapsed_sec": 1.053,
       "rows": 48771,
       "coverage_pct": 100.0,
       "note": "SDV import blocked by libomp on host; fell back to nflverse release parquet (same asset SDV loads)."
     }
   },
+  "generated": "2026-06-24",
   "row_parity_pct": 100.0,
   "verdict": "defer",
   "rationale": "Identical rows and 100% critical-column coverage; redundant with nflreadpy for PBP fetch."

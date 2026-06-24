@@ -166,6 +166,10 @@ MIT-licensed repos evaluated for contrast only (not integrated):
 
 Unlicensed repos (null `license` on GitHub) are **reference-only** for clean-room audits — e.g. playmaking EPA edge cases documented in [epa-cleanroom-audit.md](epa-cleanroom-audit.md) without R code merge.
 
+### Reference-only DFS tools (K128)
+
+Duplicate optimizers evaluated in the 2026-06-24 metaplan (NBA-DFS-Tools, draftfast, WolverineSportsAnalytics) are **wiki-only** — see [briefs/2026-06-24_k128-metaplan-dfs-tools-reference.md](../briefs/2026-06-24_k128-metaplan-dfs-tools-reference.md). pydfs-lineup-optimizer remains the sole borrowed dependency for lineup generation.
+
 ## Cross-wiki resources
 
 - Correlation priors: `@gambling-wiki/concepts/dfs-correlation-stacking.md`

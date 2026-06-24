@@ -25,7 +25,7 @@ Deliver:
 | Fact | Value |
 |------|-------|
 | Repo | `github.com/cemini23/CeminiDFS` |
-| Workspace | `/Users/claudiobarone/Desktop/projects/CeminiDFS` |
+| Workspace | `/Users/claudiobarone/Projects/CeminiDFS` |
 | Tests | 103 passing (pytest + ruff CI) |
 | Phases | 0–5 complete (DIY engine, backtest, calibration, simulate, ownership, late-swap, sim rerank) |
 | Wiki hub | `@gambling-wiki/concepts/diy-nfl-dfs-model-architecture.md` (K125) |

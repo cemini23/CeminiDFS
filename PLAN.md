@@ -173,9 +173,9 @@ Operational and v3 enhancements — not blockers for live slate use:
 
 ## Session handoff
 
-**Workspace:** `/Users/claudiobarone/Desktop/projects/CeminiDFS`
+**Workspace:** `/Users/claudiobarone/Projects/CeminiDFS`
 
-**State:** Phases 0–5 complete. **194 tests**, CI green on `main`.
+**State:** Phases 0–5 complete. **179 tests**, CI green on `main`.
 
 **Profiles:** Base `config/nfl_dfs.yaml` (conservative, backtest/research); GPP profile extends with `simulate`, `sim_rerank`, `ownership` enabled via `--profile gpp` CLI flag.
 

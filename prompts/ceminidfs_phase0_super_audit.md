@@ -26,7 +26,7 @@ Deliver:
 | Fact | Value |
 |------|-------|
 | Repo | `github.com/cemini23/CeminiDFS` — Phase 0 bootstrap |
-| Workspace | `/Users/claudiobarone/Desktop/projects/CeminiDFS` |
+| Workspace | `/Users/claudiobarone/Projects/CeminiDFS` |
 | Wiki hub | `@gambling-wiki/concepts/diy-nfl-dfs-model-architecture.md` (K125) |
 | Integration spec | `@gambling-wiki/concepts/dfs-pipeline-integration-spec.md` |
 | Pipeline DAG | `fetch → project → normalize → optimize` |
@@ -86,33 +86,33 @@ Deliver:
 ## Code / data paths (READ these in workspace)
 
 ```
-/Users/claudiobarone/Desktop/projects/CeminiDFS/PLAN.md
-/Users/claudiobarone/Desktop/projects/CeminiDFS/README.md
-/Users/claudiobarone/Desktop/projects/CeminiDFS/docs/ARCHITECTURE.md
-/Users/claudiobarone/Desktop/projects/CeminiDFS/config/nfl_dfs.yaml
-/Users/claudiobarone/Desktop/projects/CeminiDFS/pyproject.toml
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/cli.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/orchestrator/run.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/pipeline/project.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/export/canonical.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/export/normalize.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/export/optimize.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/scoring.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/models/implied_totals.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/data/fetch.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/data/vegas.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/data/weather.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/config.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/src/ceminidfs/manifest.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/tests/test_scoring.py
-/Users/claudiobarone/Desktop/projects/CeminiDFS/tests/test_implied_totals.py
+/Users/claudiobarone/Projects/CeminiDFS/PLAN.md
+/Users/claudiobarone/Projects/CeminiDFS/README.md
+/Users/claudiobarone/Projects/CeminiDFS/docs/ARCHITECTURE.md
+/Users/claudiobarone/Projects/CeminiDFS/config/nfl_dfs.yaml
+/Users/claudiobarone/Projects/CeminiDFS/pyproject.toml
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/cli.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/orchestrator/run.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/pipeline/project.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/export/canonical.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/export/normalize.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/export/optimize.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/scoring.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/models/implied_totals.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/data/fetch.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/data/vegas.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/data/weather.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/config.py
+/Users/claudiobarone/Projects/CeminiDFS/src/ceminidfs/manifest.py
+/Users/claudiobarone/Projects/CeminiDFS/tests/test_scoring.py
+/Users/claudiobarone/Projects/CeminiDFS/tests/test_implied_totals.py
 ```
 
 Wiki cross-read (if available):
 
 ```
-/Users/claudiobarone/Desktop/projects/Gambling wiki/wiki/concepts/diy-nfl-dfs-model-architecture.md
-/Users/claudiobarone/Desktop/projects/Gambling wiki/wiki/concepts/dfs-pipeline-integration-spec.md
+/Users/claudiobarone/Projects/Gambling wiki/wiki/concepts/diy-nfl-dfs-model-architecture.md
+/Users/claudiobarone/Projects/Gambling wiki/wiki/concepts/dfs-pipeline-integration-spec.md
 ```
 
 ---
