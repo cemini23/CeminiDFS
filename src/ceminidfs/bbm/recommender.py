@@ -265,6 +265,63 @@ def _get_default_cap(player: Player) -> float:
         return 0.10  # single_dart
 
 
+def _prefilter_candidates(
+    players: List[Player],
+    draft_state: DraftState,
+    roster: Roster,
+    archetype: Archetype,
+) -> List[Player]:
+    """Pre-filter candidates to remove obvious exclusions before expensive scoring.
+
+    Removes:
+    - Stub players (unknown players from CLI)
+    - Players faded for the current round
+    - Players with obvious critical violations (team limits, bye hard limits)
+
+    Args:
+        players: List of available players
+        draft_state: Current draft state
+        roster: Current roster
+        archetype: Current archetype
+
+    Returns:
+        Filtered list of candidate players for scoring
+    """
+    candidates: List[Player] = []
+    current_round = roster.current_round
+
+    for player in players:
+        # Skip stub players (unknown players that were added as stubs)
+        if player.player_id.startswith("stub:"):
+            continue
+
+        # Exclude faded players (use round-specific fade check)
+        if player.is_faded_for_round(current_round):
+            continue
+
+        # Skip players where any roster teammate combo exceeds COMBO_PAIR_CAP
+        if _combo_cap_blocks(player, roster):
+            continue
+
+        # Quick check for obvious critical violations (without full validation)
+        # Team stacking limits
+        from ceminidfs.bbm.config import MAX_SAME_TEAM, MAX_SAME_TEAM_ARCHETYPE_C
+        team_count = roster.get_player_count_by_team(player.team)
+        max_team = MAX_SAME_TEAM_ARCHETYPE_C if archetype == Archetype.C else MAX_SAME_TEAM
+        if team_count >= max_team:
+            continue
+
+        # Bye week hard limits - never allow 10+ same bye
+        from ceminidfs.bbm.config import NEVER_SAME_BYE
+        bye_count = roster.get_player_count_by_bye(player.bye_week)
+        if bye_count + 1 >= NEVER_SAME_BYE:
+            continue
+
+        candidates.append(player)
+
+    return candidates
+
+
 def recommend_top3(
     draft_state: DraftState,
     available_players: List[Player],
@@ -287,20 +344,14 @@ def recommend_top3(
     start_time = time.time()
     roster = draft_state.roster
     archetype = draft_state.archetype
-    current_round = roster.current_round
 
     scored_players: List[Tuple[Player, float, ScoreComponents, List[str]]] = []
 
-    # Filter and score available players
-    for player in available_players:
-        # Exclude faded players (use round-specific fade check)
-        if player.is_faded_for_round(current_round):
-            continue
+    # Pre-filter candidates to remove obvious exclusions before expensive scoring
+    candidates = _prefilter_candidates(available_players, draft_state, roster, archetype)
 
-        # Skip players where any roster teammate combo exceeds COMBO_PAIR_CAP
-        if _combo_cap_blocks(player, roster):
-            continue
-
+    # Score filtered candidates
+    for player in candidates:
         # Validate against hard constraints
         violations = validate_pick(player, roster, archetype)
         critical_violations = [v for v in violations if get_violation_severity(v) == "CRITICAL"]
@@ -354,6 +405,44 @@ def recommend_top3(
         print(f"WARN: recommender took {elapsed_ms:.1f}ms (target <{RECOMMENDER_TIMEOUT_MS}ms)")
 
     return recommendations
+
+
+def benchmark_recommend_top3(
+    draft_state: DraftState,
+    available: List[Player],
+    exposure_fn: Callable[[str], float],
+    iterations: int = 50,
+) -> dict:
+    """Benchmark recommend_top3 performance over multiple iterations.
+
+    Args:
+        draft_state: Current draft state
+        available: List of available players to consider
+        exposure_fn: Function to get exposure % for a player_id
+        iterations: Number of benchmark iterations
+
+    Returns:
+        Dict with p50, p99 timing in milliseconds, plus raw timings
+    """
+    timings_ms: List[float] = []
+
+    for _ in range(iterations):
+        start = time.time()
+        recommend_top3(draft_state, available, exposure_fn)
+        elapsed_ms = (time.time() - start) * 1000
+        timings_ms.append(elapsed_ms)
+
+    timings_ms.sort()
+
+    p50_idx = int(iterations * 0.5)
+    p99_idx = int(iterations * 0.99)
+
+    return {
+        "p50_ms": round(timings_ms[p50_idx], 2),
+        "p99_ms": round(timings_ms[p99_idx], 2),
+        "iterations": iterations,
+        "timings_ms": timings_ms,
+    }
 
 
 # Tie-breaker functions (for equal scores)

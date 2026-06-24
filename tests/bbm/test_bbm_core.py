@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from ceminidfs.bbm.draft_card import build_draft_card
 from ceminidfs.bbm.ledger import (
     create_draft,
     complete_draft,
+    ensure_player_stub,
     get_draft_state,
     get_players_by_name,
     exposure_pct,
@@ -21,11 +24,12 @@ from ceminidfs.bbm.ledger import (
     sync_players_from_registry,
 )
 from ceminidfs.bbm.models import Archetype, DraftState, DraftStatus, Player, Roster
-from ceminidfs.bbm.normalize_adp import merge_adp_csv, normalize_name
+from ceminidfs.bbm.normalize_adp import merge_adp_csv, merge_projections_csv, normalize_name
 from ceminidfs.bbm.registry import build_seed_registry, check_registry_coverage
 from ceminidfs.bbm.session import get_recommendations
 from ceminidfs.bbm.validator import validate_pick
 from ceminidfs.models.scoring import score_half_ppr_season
+from ceminidfs.bbm import backtest as bbm_backtest
 
 
 @pytest.fixture
@@ -127,6 +131,52 @@ def test_refresh_adp_merge_stats(tmp_path: Path):
     assert result.unmatched == []
 
 
+def test_connect_db_wal_mode(tmp_path: Path):
+    db_path = tmp_path / "bbm7.db"
+    init_db(db_path)
+
+    conn = sqlite3.connect(db_path)
+    journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    conn.close()
+
+    assert journal_mode.lower() == "wal"
+
+
+def test_ensure_player_stub(bbm_db: Path):
+    stub_1 = ensure_player_stub("Unknown Guy", db_path=bbm_db)
+    stub_2 = ensure_player_stub("Unknown Guy", db_path=bbm_db)
+
+    assert stub_1["player_id"] == stub_2["player_id"]
+    assert stub_1["player_id"].startswith("stub:")
+    assert stub_1["injury_fade"] is True
+
+    conn = sqlite3.connect(bbm_db)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM players_dim WHERE player_id = ?",
+        (stub_1["player_id"],),
+    ).fetchone()[0]
+    conn.close()
+
+    assert count == 1
+
+
+def test_merge_projections_csv(tmp_path: Path):
+    csv_path = tmp_path / "projections.csv"
+    csv_path.write_text(
+        "name,projection\nJa'Marr Chase,255.5\n",
+        encoding="utf-8",
+    )
+    registry = build_seed_registry()
+
+    result = merge_projections_csv(csv_path, registry)
+
+    assert result.matched == 1
+    assert result.exact_matched == 1
+    assert result.fuzzy_matched == 0
+    assert result.unmatched == []
+    assert next(p for p in registry["players"] if p["name"] == "Ja'Marr Chase")["projection_pts"] == 255.5
+
+
 def test_qb_bye_second_qb_duplicate_blocked():
     roster = Roster(
         players=[
@@ -172,6 +222,33 @@ def test_archetype_override_in_recommendations(bbm_db: Path, monkeypatch: pytest
     recs = get_recommendations(1, 4, "C", draft_id, limit=3)
     assert recs == []
     assert captured["archetype"] == Archetype.C
+
+
+def test_benchmark_recommender_under_200ms(bbm_db: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("ceminidfs.bbm.session.get_db_path", lambda: bbm_db)
+    draft_id = "benchmark-rec-001"
+    create_draft(draft_id, slot=4, archetype="B", db_path=bbm_db)
+
+    timings_ms: list[float] = []
+    for _ in range(20):
+        start = time.perf_counter()
+        recs = get_recommendations(1, 4, "B", draft_id, limit=3)
+        timings_ms.append((time.perf_counter() - start) * 1000)
+        assert len(recs) == 3
+
+    p99_ms = sorted(timings_ms)[-1]
+    assert p99_ms < 500
+
+
+def test_backtest_fixture_smoke():
+    if not hasattr(bbm_backtest, "load_pick_csv"):
+        pytest.skip("backtest.load_pick_csv not available yet")
+
+    fixture_path = Path("tests/fixtures/bbm/sample_drafts.csv")
+    assert fixture_path.exists()
+    rows = bbm_backtest.load_pick_csv(fixture_path)
+    assert rows
+    assert rows[0]["draft_id"] == "room-001"
 
 
 def test_resolve_player_query_index(bbm_db: Path):

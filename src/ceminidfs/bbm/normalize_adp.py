@@ -6,6 +6,7 @@ import csv
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -60,6 +61,18 @@ def _pick(row: dict[str, str], keys: Iterable[str]) -> str:
         if str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _coerce_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip().replace(",", "")
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
 
 
 def load_nflverse_index(path: Path | str) -> dict[str, MatchResult]:
@@ -250,7 +263,7 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
         player["strategy_rank"] = int(adp_val)
         matched += 1
 
-    registry.setdefault("meta", {})["updated"] = __import__("datetime").date.today().isoformat()
+    registry.setdefault("meta", {})["updated"] = date.today().isoformat()
     registry["meta"]["adp_source"] = Path(csv_path).name
     return AdpMergeResult(
         matched=matched,
@@ -258,5 +271,69 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
         fuzzy_matched=fuzzy_matched,
         unmatched=unmatched,
         ambiguous=ambiguous,
+    )
+
+
+@dataclass(slots=True)
+class ProjectionMergeResult:
+    matched: int
+    exact_matched: int
+    fuzzy_matched: int
+    unmatched: list[str]
+
+
+def merge_projections_csv(
+    csv_path: Path | str,
+    registry: dict[str, Any],
+) -> ProjectionMergeResult:
+    """Update registry projection points from a CSV keyed by merge name."""
+
+    rows = _read_csv_rows(csv_path)
+    players = registry.setdefault("players", [])
+    by_merge: dict[str, dict[str, Any]] = {
+        normalize_name(str(p.get("merge_name") or p.get("name", ""))): p for p in players
+    }
+    candidate_names = list(by_merge)
+    matched = 0
+    exact_matched = 0
+    fuzzy_matched = 0
+    unmatched: list[str] = []
+
+    for row in rows:
+        raw_name = _pick(row, ("merge_name", "name", "player", "player_name", "full_name"))
+        if not raw_name:
+            continue
+
+        merge_name = normalize_name(raw_name)
+        projection_val = _coerce_float(
+            _pick(row, ("projection_pts", "projection", "fpts", "half_ppr"))
+        )
+        if projection_val is None:
+            unmatched.append(raw_name)
+            continue
+
+        player = by_merge.get(merge_name)
+        if player is None:
+            fuzzy = _best_fuzzy_match(merge_name, candidate_names, threshold=90)
+            if fuzzy is None:
+                unmatched.append(raw_name)
+                continue
+            player = by_merge[fuzzy[0]]
+            fuzzy_matched += 1
+        else:
+            exact_matched += 1
+
+        player["projection_pts"] = projection_val
+        matched += 1
+
+    meta = registry.setdefault("meta", {})
+    meta["updated"] = date.today().isoformat()
+    meta["projection_source"] = Path(csv_path).name
+
+    return ProjectionMergeResult(
+        matched=matched,
+        exact_matched=exact_matched,
+        fuzzy_matched=fuzzy_matched,
+        unmatched=unmatched,
     )
 

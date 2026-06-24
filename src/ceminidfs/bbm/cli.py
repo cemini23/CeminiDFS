@@ -10,11 +10,13 @@ from typing import Any
 
 from ceminidfs.bbm.archetype import assign_archetype
 from ceminidfs.bbm.audit import audit_draft, format_audit_report
+from ceminidfs.bbm.backtest import run_backtest, write_backtest_report
 from ceminidfs.bbm.draft_card import write_draft_card
 from ceminidfs.bbm.ledger import (
     complete_draft,
     count_room_taken,
     create_draft,
+    ensure_player_stub,
     exposure_pct,
     get_draft_state,
     get_last_ambiguous_matches,
@@ -26,7 +28,7 @@ from ceminidfs.bbm.ledger import (
     undo_last_action,
 )
 from ceminidfs.bbm.models import Draft, DraftStatus, LedgerCounts, Roster
-from ceminidfs.bbm.normalize_adp import merge_adp_csv
+from ceminidfs.bbm.normalize_adp import merge_adp_csv, merge_projections_csv
 from ceminidfs.bbm.reconcile import format_reconcile_report, reconcile_from_csv
 from ceminidfs.bbm.registry import check_registry_coverage, load_registry, save_registry
 from ceminidfs.bbm.session import (
@@ -35,6 +37,7 @@ from ceminidfs.bbm.session import (
     get_recommendations,
     player_from_row,
 )
+from ceminidfs.bbm.ledger import sync_players_from_registry
 
 
 def handle_bbm_command(args: argparse.Namespace) -> int:
@@ -42,12 +45,15 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
 
     if not hasattr(args, "bbm_command") or args.bbm_command is None:
         print("Error: No BBM subcommand specified", file=sys.stderr)
-        print("Available: draft, refresh-adp, draft-card, audit, reconcile, backtest")
+        print(
+            "Available: draft, refresh-adp, refresh-weekly, draft-card, audit, reconcile, backtest"
+        )
         return 2
 
     handler_map = {
         "draft": _cmd_draft,
         "refresh-adp": _cmd_refresh_adp,
+        "refresh-weekly": _cmd_refresh_weekly,
         "draft-card": _cmd_draft_card,
         "audit": _cmd_audit,
         "reconcile": _cmd_reconcile,
@@ -71,14 +77,29 @@ def build_bbm_parser(subparsers: Any) -> None:
     refresh_parser = subparsers.add_parser("refresh-adp", help="Refresh ADP from CSV")
     refresh_parser.add_argument("--csv", type=Path, required=True, help="Path to BBTB ADP CSV")
 
+    weekly_parser = subparsers.add_parser(
+        "refresh-weekly",
+        help="Refresh ADP and optional projections, then sync the registry",
+    )
+    weekly_parser.add_argument("--adp", type=Path, required=True, help="Path to ADP CSV")
+    weekly_parser.add_argument(
+        "--projections",
+        type=Path,
+        default=None,
+        help="Optional path to projections CSV",
+    )
+
     card_parser = subparsers.add_parser("draft-card", help="Generate markdown draft card")
     card_parser.add_argument("--out", type=Path, required=True)
     audit = subparsers.add_parser("audit", help="Audit a completed draft")
     audit.add_argument("--draft-id", type=str, required=True)
     recon = subparsers.add_parser("reconcile", help="Reconcile Underdog exposure CSV")
     recon.add_argument("--csv", type=Path, required=True)
-    bt = subparsers.add_parser("backtest", help="BBM III replay backtest (stub)")
+    bt = subparsers.add_parser("backtest", help="BBM III replay backtest")
     bt.add_argument("--sample", type=int, default=100)
+    bt.add_argument("--csv", type=Path, default=None, help="Path to custom pick data CSV")
+    bt.add_argument("--fixture", type=Path, default=None, help="Path to fixture CSV for testing")
+    bt.add_argument("--out", type=Path, default=Path("reports/bbm_backtest.json"), help="Output path for JSON report")
 
 
 def _cmd_draft(args: argparse.Namespace) -> int:
@@ -187,8 +208,11 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
                     print("Ambiguous — pick number:")
                     for idx, m in enumerate(ambiguous, 1):
                         print(f"  {idx}. {m['name']} {m['position']} {m.get('team', '')}")
-                else:
-                    print(f"Player not found: {arg}")
+                    continue
+                # Not found and not ambiguous — create stub
+                stub = ensure_player_stub(arg)
+                record_taken(draft_id, current_round, pick_num, stub["player_id"])
+                print(f"Created stub for: {arg}")
                 continue
             record_taken(draft_id, current_round, pick_num, player["player_id"])
             print(f"  -> Marked taken: {player['name']}")
@@ -313,26 +337,71 @@ def _suggest_archetype() -> str:
 
 
 def _cmd_refresh_adp(args: argparse.Namespace) -> int:
-    ensure_initialized()
-    if not args.csv.exists():
-        print(f"Error: File not found: {args.csv}", file=sys.stderr)
+    refresh_summary = _refresh_registry(args.csv)
+    if refresh_summary is None:
         return 1
+    adp_result, projection_result, synced_count = refresh_summary
+    _print_refresh_summary(adp_result, projection_result, synced_count)
+    return 0
+
+
+def _cmd_refresh_weekly(args: argparse.Namespace) -> int:
+    refresh_summary = _refresh_registry(args.adp, args.projections)
+    if refresh_summary is None:
+        return 1
+    adp_result, projection_result, synced_count = refresh_summary
+    _print_refresh_summary(adp_result, projection_result, synced_count)
+    return 0
+
+
+def _refresh_registry(
+    adp_csv: Path,
+    projections_csv: Path | None = None,
+) -> tuple[Any, Any | None, int] | None:
+    ensure_initialized()
+    if not adp_csv.exists():
+        print(f"Error: File not found: {adp_csv}", file=sys.stderr)
+        return None
+    if projections_csv is not None and not projections_csv.exists():
+        print(f"Error: File not found: {projections_csv}", file=sys.stderr)
+        return None
 
     registry = load_registry()
-    result = merge_adp_csv(args.csv, registry)
-    save_registry(registry)
-    from ceminidfs.bbm.ledger import sync_players_from_registry
-
-    sync_players_from_registry(registry)
-    print(
-        f"Updated {result.matched} (exact {result.exact_matched}, "
-        f"fuzzy {result.fuzzy_matched}, unmatched {len(result.unmatched)})"
+    adp_result = merge_adp_csv(adp_csv, registry)
+    projection_result = (
+        merge_projections_csv(projections_csv, registry) if projections_csv is not None else None
     )
-    if result.unmatched:
-        print(f"Unmatched ({len(result.unmatched)}): {', '.join(result.unmatched[:10])}")
-        if len(result.unmatched) > 10:
-            print(f"  ... and {len(result.unmatched) - 10} more")
-    return 0
+    save_registry(registry)
+    synced_count = sync_players_from_registry(registry)
+    return adp_result, projection_result, synced_count
+
+
+def _print_refresh_summary(adp_result: Any, projection_result: Any | None, synced_count: int) -> None:
+    print(
+        f"ADP updated {adp_result.matched} (exact {adp_result.exact_matched}, "
+        f"fuzzy {adp_result.fuzzy_matched}, unmatched {len(adp_result.unmatched)})"
+    )
+    if adp_result.unmatched:
+        print(f"  ADP unmatched ({len(adp_result.unmatched)}): {', '.join(adp_result.unmatched[:10])}")
+        if len(adp_result.unmatched) > 10:
+            print(f"    ... and {len(adp_result.unmatched) - 10} more")
+
+    if projection_result is None:
+        print("Projections: skipped")
+    else:
+        print(
+            f"Projections updated {projection_result.matched} (exact {projection_result.exact_matched}, "
+            f"fuzzy {projection_result.fuzzy_matched}, unmatched {len(projection_result.unmatched)})"
+        )
+        if projection_result.unmatched:
+            print(
+                f"  Projection unmatched ({len(projection_result.unmatched)}): "
+                f"{', '.join(projection_result.unmatched[:10])}"
+            )
+            if len(projection_result.unmatched) > 10:
+                print(f"    ... and {len(projection_result.unmatched) - 10} more")
+
+    print(f"Registry synced: {synced_count} players")
 
 
 def _cmd_draft_card(args: argparse.Namespace) -> int:
@@ -423,14 +492,23 @@ def _cmd_reconcile(args: argparse.Namespace) -> int:
 
 
 def _cmd_backtest(args: argparse.Namespace) -> int:
-    from ceminidfs.bbm.backtest import run_backtest
-
-    result = run_backtest(args.sample)
+    result = run_backtest(
+        sample=args.sample,
+        csv_path=args.csv,
+        fixture_path=args.fixture,
+    )
     print(result.message)
     if result.metrics:
         m = result.metrics
         print(
             f"  structural pass: {m.structural_pass_rate:.0%} | "
-            f"median CLV: {m.median_clv_delta:+.1f} | p99: {m.latency_p99_ms:.0f}ms"
+            f"median CLV: {m.median_clv_delta:+.1f} | p99: {m.latency_p99_ms:.0f}ms | "
+            f"picks evaluated: {m.picks_evaluated}"
         )
-    return 0
+        # Write report
+        report_path = write_backtest_report(result, args.out)
+        print(f"  report written to: {report_path}")
+        return 0
+    else:
+        print("  (no data available - provide --csv or --fixture)")
+        return 1

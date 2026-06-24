@@ -13,6 +13,22 @@ from ceminidfs.bbm.config import IN_PROGRESS_EXPOSURE_WEIGHT, TOTAL_ENTRIES
 from ceminidfs.bbm.normalize_adp import normalize_name
 
 
+def connect_db(db_path: Optional[Path | str] = None) -> sqlite3.Connection:
+    """Create a SQLite connection with WAL mode and busy timeout.
+
+    Args:
+        db_path: Path to the database file. If None, uses default path.
+
+    Returns:
+        sqlite3.Connection with WAL journal mode and 5s busy timeout.
+    """
+    path = Path(db_path) if db_path else get_db_path()
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
 # Module-level storage for last ambiguous matches (for CLI disambiguation)
 _last_ambiguous_matches: list[dict[str, Any]] = []
 
@@ -28,6 +44,11 @@ def _set_last_ambiguous_matches(matches: list[dict[str, Any]]) -> None:
     _last_ambiguous_matches = matches
 
 
+def _stub_player_id(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", normalize_name(name)).strip("-")
+    return f"stub:{slug or 'unknown'}"
+
+
 def get_db_path() -> Path:
     """Return default database path."""
     return Path("data/bbm/bbm7.db")
@@ -38,8 +59,10 @@ def init_db(path: Optional[Path | str] = None) -> Path:
     db_path = Path(path) if path else get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(db_path)
+    conn = connect_db(db_path)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
 
     # Players dimension table
     cursor.execute("""
@@ -149,7 +172,7 @@ def _seed_combo_pairs_from_config(
     from ceminidfs.bbm.normalize_adp import normalize_name
 
     db_path = path or get_db_path()
-    conn = sqlite3.connect(db_path)
+    conn = connect_db(db_path)
     cursor = conn.cursor()
 
     count = 0
@@ -221,7 +244,7 @@ class DraftState:
 def sync_players_from_registry(registry: dict[str, Any], db_path: Optional[Path] = None) -> int:
     """Sync players from registry dict to database. Returns count inserted/updated."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     players = registry.get("players", [])
@@ -267,7 +290,7 @@ def exposure_pct(player_id: str, db_path: Optional[Path] = None) -> dict[str, fl
     Returns dict with 'current', 'cap', 'available'.
     """
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     # Get player cap
@@ -313,7 +336,7 @@ def combo_pct(player_a: str, player_b: str, db_path: Optional[Path] = None) -> d
     Returns dict with 'current', 'cap', 'available'.
     """
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     # Get cap for this combo
@@ -356,7 +379,7 @@ def create_draft(
 ) -> dict[str, Any]:
     """Create a new draft record."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -392,7 +415,7 @@ def record_pick(
 ) -> dict[str, Any]:
     """Record a pick in the draft."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     # Insert or replace pick (allows updating existing picks)
@@ -436,7 +459,7 @@ def record_taken(
     Returns whether the insert occurred.
     """
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -475,7 +498,7 @@ def record_taken(
 def undo_last_action(draft_id: str, db_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Undo the last pick or taken action in a draft."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     # Get last action
@@ -522,7 +545,7 @@ def undo_last_action(draft_id: str, db_path: Optional[Path] = None) -> Optional[
 def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[DraftState]:
     """Get current state of a draft including all picks."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     # Get draft info
@@ -608,7 +631,7 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
 def list_in_progress_drafts(db_path: Optional[Path] = None) -> list[dict[str, Any]]:
     """List all in-progress drafts."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -637,7 +660,7 @@ def list_in_progress_drafts(db_path: Optional[Path] = None) -> list[dict[str, An
 def complete_draft(draft_id: str, db_path: Optional[Path] = None) -> dict[str, Any]:
     """Mark a draft as complete."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -654,7 +677,7 @@ def complete_draft(draft_id: str, db_path: Optional[Path] = None) -> dict[str, A
 def update_draft_archetype(draft_id: str, archetype: str, db_path: Optional[Path] = None) -> dict[str, Any]:
     """Update the archetype for a draft."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -671,7 +694,7 @@ def update_draft_archetype(draft_id: str, archetype: str, db_path: Optional[Path
 def get_players_by_name(name: str, db_path: Optional[Path] = None) -> list[dict[str, Any]]:
     """Return matches by exact merge_name first, then partial matches."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
     normalized = normalize_name(name)
 
@@ -722,6 +745,82 @@ def get_player_by_name(name: str, db_path: Optional[Path] = None) -> Optional[di
     return resolve_player_query(name, db_path=db_path)
 
 
+def ensure_player_stub(
+    name: str,
+    *,
+    position: str | None = None,
+    team: str | None = None,
+    db_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Create or return an idempotent hidden stub player."""
+
+    db = db_path or get_db_path()
+    conn = connect_db(db)
+    cursor = conn.cursor()
+    normalized = normalize_name(name)
+    player_id = _stub_player_id(name)
+
+    cursor.execute(
+        """
+        SELECT player_id, name, team, position, bye_week, tier, cap_pct, adp, signal, injury_fade
+        FROM players_dim
+        WHERE player_id = ? OR LOWER(COALESCE(merge_name, '')) = ?
+        """,
+        (player_id, normalized),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO players_dim (
+                player_id, name, merge_name, team, position, bye_week,
+                tier, cap_pct, adp, projection_pts, signal, injury_fade, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                player_id,
+                name.strip(),
+                normalized,
+                team or "FA",
+                position or "WR",
+                0,
+                "late_lottery",
+                0.0,
+                999.0,
+                0.0,
+                "NEUTRAL",
+                1,
+                "auto-stub",
+            ),
+        )
+        conn.commit()
+        cursor.execute(
+            """
+            SELECT player_id, name, team, position, bye_week, tier, cap_pct, adp, signal, injury_fade
+            FROM players_dim
+            WHERE player_id = ?
+            """,
+            (player_id,),
+        )
+        row = cursor.fetchone()
+
+    conn.close()
+    if row is None:
+        raise RuntimeError(f"Failed to create stub player for {name!r}")
+    return {
+        "player_id": row[0],
+        "name": row[1],
+        "team": row[2],
+        "position": row[3],
+        "bye_week": row[4],
+        "tier": row[5],
+        "cap_pct": row[6],
+        "adp": row[7],
+        "signal": row[8],
+        "injury_fade": bool(row[9]),
+    }
+
+
 def resolve_player_query(
     query: str,
     index: Optional[int] = None,
@@ -762,7 +861,7 @@ def resolve_player_query(
 
     if len(matches) == 0:
         _set_last_ambiguous_matches([])
-        return None
+        return ensure_player_stub(query, db_path=db_path)
 
     if len(matches) == 1:
         _set_last_ambiguous_matches([])
@@ -781,7 +880,7 @@ def list_available_players(
 ) -> list[dict[str, Any]]:
     """List players from registry, excluding those taken in draft_id if provided."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     taken_clause = ""
@@ -846,7 +945,7 @@ def list_available_players(
 def count_room_taken(draft_id: str, db_path: Optional[Path] = None) -> int:
     """Count players marked as taken in the draft room."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -866,7 +965,7 @@ def list_room_taken_names(
 ) -> list[str]:
     """List names of players marked as taken, up to limit."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -897,7 +996,7 @@ def apply_pivot(
 ) -> dict[str, Any]:
     """Apply a pivot to a draft, updating archetype and storing warning."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -920,7 +1019,7 @@ def apply_pivot(
 def get_pivot_warning(draft_id: str, db_path: Optional[Path] = None) -> Optional[str]:
     """Get the pivot warning message for a draft if one exists."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
@@ -938,7 +1037,7 @@ def get_pivot_warning(draft_id: str, db_path: Optional[Path] = None) -> Optional
 def is_pivot_applied(draft_id: str, db_path: Optional[Path] = None) -> bool:
     """Check if a pivot has already been applied to this draft."""
     db = db_path or get_db_path()
-    conn = sqlite3.connect(db)
+    conn = connect_db(db)
     cursor = conn.cursor()
 
     cursor.execute(
