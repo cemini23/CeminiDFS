@@ -75,6 +75,9 @@ player_registry.json + BBTB ADP CSV
 | Reconcile | `ceminidfs.bbm.reconcile` | Underdog exposure CSV diff |
 | Audit | `ceminidfs.bbm.audit` | Post-draft checklist + CLV |
 | Backtest | `ceminidfs.bbm.backtest` | BBM III pick replay vs recommender |
+| Local API | `ceminidfs.bbm.api_server` | `ceminidfs bbm serve` — extension bridge |
+| Board parse | `ceminidfs.bbm.board_parse` | aria-label name extraction (shared w/ extension) |
+| Extension | `extension/bbm-copilot/` | MV3 read-only overlay (manual scan) |
 | Scoring reuse | `models.scoring.score_half_ppr_season` | Optional season half-PPR `projection_pts` |
 
 Runtime artifacts: `data/bbm/bbm7.db`, `data/bbm/player_registry.json` (gitignored).

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import pytest
 
+from ceminidfs.bbm import backtest as bbm_backtest
+from ceminidfs.bbm import board_parse
+from ceminidfs.bbm.api_server import create_server
 from ceminidfs.bbm.config import get_bye_week
 from ceminidfs.bbm.draft_card import build_draft_card
 from ceminidfs.bbm.ledger import (
@@ -29,7 +35,6 @@ from ceminidfs.bbm.registry import build_seed_registry, check_registry_coverage
 from ceminidfs.bbm.session import get_recommendations
 from ceminidfs.bbm.validator import validate_pick
 from ceminidfs.models.scoring import score_half_ppr_season
-from ceminidfs.bbm import backtest as bbm_backtest
 
 
 @pytest.fixture
@@ -333,3 +338,86 @@ def test_registry_coverage_warning():
     coverage = check_registry_coverage(build_seed_registry())
     assert coverage["player_count"] < 120
     assert coverage["warnings"]
+
+
+def test_board_parse_aria_labels():
+    """Test parsing of Underdog-style aria labels."""
+    # Test basic player name extraction
+    assert board_parse.parse_aria_label("Select Ja'Marr Chase, WR, CIN") == "jamarr chase"
+    assert board_parse.parse_aria_label("Pick Patrick Mahomes") == "patrick mahomes"
+    assert board_parse.parse_aria_label("Player: Justin Jefferson") == "justin jefferson"
+
+    # Test name with suffix stripping
+    assert board_parse.parse_aria_label("Select Odell Beckham Jr.") == "odell beckham"
+    assert board_parse.parse_aria_label("Pick Marvin Harrison Jr") == "marvin harrison"
+
+    # Test noise filtering
+    assert board_parse.parse_aria_label("draft pick") is None
+    assert board_parse.parse_aria_label("button submit") is None
+    assert board_parse.parse_aria_label("menu options") is None
+
+    # Test extract_names_from_aria_labels
+    labels = [
+        "Select Ja'Marr Chase",
+        "Pick Patrick Mahomes",
+        "button noise",
+        "Pick Justin Jefferson",
+    ]
+    names = board_parse.extract_names_from_aria_labels(labels)
+    assert len(names) == 3
+    assert "jamarr chase" in names
+    assert "patrick mahomes" in names
+    assert "justin jefferson" in names
+
+    # Test filter_draft_board_names deduplication
+    names = ["jamarr chase", "patrick mahomes", "jamarr chase", "justin jefferson"]
+    filtered = board_parse.filter_draft_board_names(names)
+    assert len(filtered) == 3
+    assert "jamarr chase" in filtered
+
+
+def test_api_health(bbm_db: Path, monkeypatch: pytest.MonkeyPatch):
+    """Test API server health endpoint."""
+    from ceminidfs.bbm import ledger
+
+    monkeypatch.setattr(ledger, "get_db_path", lambda: bbm_db)
+    monkeypatch.setattr("ceminidfs.bbm.api_server._get_ledger", lambda: ledger)
+
+    # Create a test draft
+    draft_id = "test-api-001"
+    ledger.create_draft(draft_id, slot=4, archetype="B", db_path=bbm_db)
+
+    # Start server in thread
+    server = create_server(host="127.0.0.1", port=18765, draft_id=draft_id, slot=4, archetype="B")
+
+    def run_server():
+        server.serve_forever()
+
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+
+    # Wait for server to start
+    time.sleep(0.5)
+
+    try:
+        # Test health endpoint
+        req = urllib.request.Request("http://127.0.0.1:18765/health")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            assert response.status == 200
+            body = response.read().decode("utf-8")
+            data = json.loads(body)  # type: ignore
+            assert data.get("ok") is True
+
+        # Test state endpoint
+        req = urllib.request.Request(f"http://127.0.0.1:18765/api/state?draft_id={draft_id}")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            assert response.status == 200
+            body = response.read().decode("utf-8")
+            data = json.loads(body)  # type: ignore
+            assert data.get("draft_id") == draft_id
+            assert data.get("slot") == 4
+            assert data.get("archetype") == "B"
+            assert data.get("current_round") == 1
+            assert data.get("pick_num") == 4  # (1-1)*12 + 4
+    finally:
+        server.shutdown()

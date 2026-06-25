@@ -55,6 +55,13 @@ ceminidfs bbm draft --slot 4          # interactive REPL: p / t / undo / sync / 
 ceminidfs bbm audit --draft-id <id>   # post-draft checklist
 ```
 
+**Single-monitor (extension):**
+
+```bash
+ceminidfs bbm serve --slot 4 --port 8765
+# Load extension/bbm-copilot in Chrome; set draft ID in popup; open Underdog draft room
+```
+
 Full operator guide: [docs/BBM.md](docs/BBM.md).
 
 ## Pipeline
@@ -103,6 +110,9 @@ Requires `pip install -e ".[bbm]"`. See [docs/BBM.md](docs/BBM.md).
 | `ceminidfs bbm audit` | Post-draft structural + CLV audit |
 | `ceminidfs bbm reconcile` | Diff local exposure vs Underdog email CSV |
 | `ceminidfs bbm backtest` | Replay BBM III picks vs recommender (fixture or downloaded CSV) |
+| `ceminidfs bbm serve` | Local HTTP API for Chrome extension overlay (`--slot`, `--draft-id`, `--port`) |
+
+**Chrome extension (optional):** load `extension/bbm-copilot/` unpacked — read-only top-3 panel on Underdog with manual board scan. See [docs/BBM.md](docs/BBM.md#chrome-extension-phase-3).
 
 ### Common invocations
 
@@ -253,6 +263,7 @@ src/ceminidfs/
   orchestrator/       # stage DAG, validation
 config/nfl_dfs.yaml
 scripts/bbm_weekly_refresh.sh   # weekly ADP + projection wrapper
+extension/bbm-copilot/          # Chrome MV3 overlay (optional)
 tests/                # unit + integration + e2e + tests/bbm/
 data/bbm/             # gitignored — SQLite ledger, player registry
 artifacts/            # gitignored — parquet cache, reports

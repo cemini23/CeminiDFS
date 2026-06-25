@@ -107,6 +107,7 @@ Shipped 2026-06-24 as optional `[bbm]` extra. Separate from weekly DFS pipeline.
 | BBM-1b | Validator, archetype router, recommender top-3 |
 | BBM-1c | Audit, reconcile, ADP normalize |
 | BBM-2 | Backtest replay, `refresh-weekly`, projection merge, WAL ledger |
+| BBM-3 | Chrome MV3 overlay + `bbm serve` local API + board aria-label parse |
 
 Operator guide: [docs/BBM.md](docs/BBM.md). Implementation brief: `briefs/2026-06-24_bbm7-draft-copilot-implementation-brief.md`.
 
@@ -190,13 +191,12 @@ Operational and v3 enhancements — not blockers for live slate use:
 - Injury play-probability redistribution in usage model
 - NGS/participation data integration (K127 reference-only, see `docs/ngs-participation-eval.md`)
 - Automated GitHub release / PyPI publish
-- BBM browser overlay (MV3 read-only; Phase 3 in BBM brief)
 
 ## Session handoff
 
 **Workspace:** `/Users/claudiobarone/Projects/CeminiDFS`
 
-**State:** Phases 0–5 + BBM extension complete. **202 tests**, CI green on `main` (includes `[bbm]` extra).
+**State:** Phases 0–5 + BBM extension (through Phase 3 overlay) complete. **203 tests**, CI green on `main` (includes `[bbm]` extra).
 
 **Profiles:** Base `config/nfl_dfs.yaml` (conservative, backtest/research); GPP profile extends with `simulate`, `sim_rerank`, `ownership` enabled via `--profile gpp` CLI flag.
 

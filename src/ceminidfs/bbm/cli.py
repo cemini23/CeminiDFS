@@ -38,6 +38,7 @@ from ceminidfs.bbm.session import (
     player_from_row,
 )
 from ceminidfs.bbm.ledger import sync_players_from_registry
+from ceminidfs.bbm.api_server import run_server
 
 
 def handle_bbm_command(args: argparse.Namespace) -> int:
@@ -46,12 +47,13 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
     if not hasattr(args, "bbm_command") or args.bbm_command is None:
         print("Error: No BBM subcommand specified", file=sys.stderr)
         print(
-            "Available: draft, refresh-adp, refresh-weekly, draft-card, audit, reconcile, backtest"
+            "Available: draft, serve, refresh-adp, refresh-weekly, draft-card, audit, reconcile, backtest"
         )
         return 2
 
     handler_map = {
         "draft": _cmd_draft,
+        "serve": _cmd_serve,
         "refresh-adp": _cmd_refresh_adp,
         "refresh-weekly": _cmd_refresh_weekly,
         "draft-card": _cmd_draft_card,
@@ -73,6 +75,13 @@ def build_bbm_parser(subparsers: Any) -> None:
     draft_parser.add_argument("--slot", type=int, required=True, help="Draft slot (1-12)")
     draft_parser.add_argument("--archetype", type=str, default=None, help="Archetype override A-E")
     draft_parser.add_argument("--draft-id", type=str, default=None, help="Resume existing draft")
+
+    serve_parser = subparsers.add_parser("serve", help="Run local API server for Chrome extension")
+    serve_parser.add_argument("--slot", type=int, default=None, help="Draft slot (1-12)")
+    serve_parser.add_argument("--draft-id", type=str, default=None, help="Existing draft ID")
+    serve_parser.add_argument("--archetype", type=str, default=None, help="Archetype A-E")
+    serve_parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
+    serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
 
     refresh_parser = subparsers.add_parser("refresh-adp", help="Refresh ADP from CSV")
     refresh_parser.add_argument("--csv", type=Path, required=True, help="Path to BBTB ADP CSV")
@@ -512,3 +521,50 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
     else:
         print("  (no data available - provide --csv or --fixture)")
         return 1
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the local API server for Chrome extension integration."""
+    ensure_initialized()
+
+    # Determine draft_id
+    draft_id = args.draft_id
+    slot = args.slot
+    archetype = args.archetype
+
+    if draft_id:
+        # Resume existing draft
+        state = get_draft_state(draft_id)
+        if state is None:
+            print(f"Error: Draft '{draft_id}' not found", file=sys.stderr)
+            return 1
+        slot = slot or state.slot
+        archetype = archetype or state.archetype
+        print(f"Resuming draft: {draft_id}")
+    else:
+        # Create new draft if slot provided
+        if slot is None:
+            print("Error: --slot required when creating new draft", file=sys.stderr)
+            print("Usage: ceminidfs bbm serve --slot <1-12> [--archetype A-E]", file=sys.stderr)
+            return 1
+        if slot < 1 or slot > 12:
+            print("Error: --slot must be 1-12", file=sys.stderr)
+            return 1
+
+        archetype = archetype or _suggest_archetype()
+        draft_id = f"draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        create_draft(draft_id, slot, archetype)
+        print(f"Created draft: {draft_id}")
+
+    print(f"Slot: {slot}, Archetype: {archetype}")
+
+    # Run server until Ctrl+C
+    run_server(
+        host=args.host,
+        port=args.port,
+        draft_id=draft_id,
+        slot=slot,
+        archetype=archetype,
+    )
+
+    return 0

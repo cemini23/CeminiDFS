@@ -84,6 +84,29 @@ ceminidfs bbm reconcile --csv ~/Downloads/underdog_exposure.csv
 | `bbm audit` | Post-draft checklist + CLV estimate |
 | `bbm reconcile` | Diff local exposure vs Underdog CSV |
 | `bbm backtest` | Replay historical picks vs recommender |
+| `bbm serve` | Local HTTP API for Chrome extension (`--slot`, `--draft-id`, `--port`) |
+
+### Chrome extension (Phase 3)
+
+Optional MV3 overlay for Underdog draft rooms — **read-only** top-3 panel with **manual** board scan (no auto-pick, no continuous scraping).
+
+```bash
+# Terminal — local API (ledger remains source of truth)
+ceminidfs bbm serve --slot 4 --port 8765
+
+# Chrome: chrome://extensions → Load unpacked → extension/bbm-copilot/
+# Set API base (http://127.0.0.1:8765) and draft ID in extension popup
+```
+
+Panel UX follows the [draft-co-pilot](https://github.com/howrealizdat/draft-co-pilot) zero-dependency MV3 pattern; recommendations come from the Cemini recommender via localhost, not ESPN VBD.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/recommendations` | Top-3 for current draft state |
+| `POST /api/sync` | Apply scanned board names to `room_taken` |
+| `POST /api/pick` / `POST /api/taken` | Record picks from extension (optional) |
+
+See `extension/bbm-copilot/README.md` for install details.
 
 ### Backtest
 
@@ -128,6 +151,8 @@ src/ceminidfs/bbm/
   reconcile.py     # Underdog exposure diff
   audit.py         # Post-draft checklist
   backtest.py      # BBM III replay harness
+  api_server.py    # Local HTTP API for Chrome extension
+  board_parse.py   # aria-label board name extraction
   draft_card.py    # Markdown cheat sheet
   config.py        # Strategy constants (caps, stacks, fades)
 ```
@@ -144,10 +169,9 @@ The weekly DFS pipeline (`fetch` → `project` → `optimize`) is unchanged. BBM
 
 ## What this tool does not do
 
-- Auto-pick or submit picks to Underdog
-- Scrape draft rooms or live ADP
+- Auto-pick or submit picks to Underdog (extension is read-only)
+- Continuous DOM scraping (board scan is manual button only)
 - Replace paid research tools (BBTB, Stokastic) — manual CSV import only
-- Browser overlay (planned Phase 3; not shipped)
 
 ## Further reading
 
