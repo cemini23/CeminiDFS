@@ -497,20 +497,20 @@ def run_server(
     """
     server = create_server(host, port, draft_id, slot, archetype)
 
-    print(f"BBM API Server running at http://{host}:{port}")
-    print("Endpoints:")
-    print("  GET  /health               -> {\"ok\": true}")
-    print("  GET  /api/state?draft_id=  -> draft state")
-    print("  GET  /api/recommendations?draft_id= -> recommendations")
-    print("  POST /api/sync             -> {draft_id, names: []}")
-    print("  POST /api/pick             -> {draft_id, name}")
-    print("  POST /api/taken            -> {draft_id, name}")
-    print("\nPress Ctrl+C to stop")
+    print(f"BBM API server listening at http://{host}:{port}", flush=True)
+    print("Endpoints:", flush=True)
+    print("  GET  /health               -> {\"ok\": true}", flush=True)
+    print("  GET  /api/state?draft_id=  -> draft state", flush=True)
+    print("  GET  /api/recommendations?draft_id= -> recommendations", flush=True)
+    print("  POST /api/sync             -> {draft_id, names: []}", flush=True)
+    print("  POST /api/pick             -> {draft_id, name}", flush=True)
+    print("  POST /api/taken            -> {draft_id, name}", flush=True)
+    print("\nWaiting for Chrome extension (Ctrl+C to stop)", flush=True)
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        print("\nShutting down...", flush=True)
     finally:
         server.shutdown()
         if on_shutdown:

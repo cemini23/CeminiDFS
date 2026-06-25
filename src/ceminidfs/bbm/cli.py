@@ -525,7 +525,13 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the local API server for Chrome extension integration."""
-    ensure_initialized()
+    print("CeminiBBM serve — starting…", flush=True)
+
+    try:
+        ensure_initialized()
+    except Exception as exc:
+        print(f"Error: initialization failed: {exc}", file=sys.stderr, flush=True)
+        return 1
 
     # Determine draft_id
     draft_id = args.draft_id
@@ -536,35 +542,49 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         # Resume existing draft
         state = get_draft_state(draft_id)
         if state is None:
-            print(f"Error: Draft '{draft_id}' not found", file=sys.stderr)
+            print(f"Error: Draft '{draft_id}' not found", file=sys.stderr, flush=True)
             return 1
         slot = slot or state.slot
         archetype = archetype or state.archetype
-        print(f"Resuming draft: {draft_id}")
+        print(f"Resuming draft: {draft_id}", flush=True)
     else:
         # Create new draft if slot provided
         if slot is None:
-            print("Error: --slot required when creating new draft", file=sys.stderr)
-            print("Usage: ceminidfs bbm serve --slot <1-12> [--archetype A-E]", file=sys.stderr)
+            print("Error: --slot required when creating new draft", file=sys.stderr, flush=True)
+            print("Usage: ceminidfs bbm serve --slot <1-12> [--archetype A-E]", file=sys.stderr, flush=True)
             return 1
         if slot < 1 or slot > 12:
-            print("Error: --slot must be 1-12", file=sys.stderr)
+            print("Error: --slot must be 1-12", file=sys.stderr, flush=True)
             return 1
 
         archetype = archetype or _suggest_archetype()
-        draft_id = f"draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        draft_id = f"draft-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
         create_draft(draft_id, slot, archetype)
-        print(f"Created draft: {draft_id}")
+        print(f"Created draft: {draft_id}", flush=True)
 
-    print(f"Slot: {slot}, Archetype: {archetype}")
+    print(f"Slot: {slot}, Archetype: {archetype}", flush=True)
+    print("\nExtension setup: paste draft ID into extension/bbm-copilot popup", flush=True)
+    print(f"  draft_id = {draft_id}", flush=True)
+    print(f"  api_base = http://{args.host}:{args.port}\n", flush=True)
 
     # Run server until Ctrl+C
-    run_server(
-        host=args.host,
-        port=args.port,
-        draft_id=draft_id,
-        slot=slot,
-        archetype=archetype,
-    )
+    try:
+        run_server(
+            host=args.host,
+            port=args.port,
+            draft_id=draft_id,
+            slot=slot,
+            archetype=archetype,
+        )
+    except OSError as exc:
+        if exc.errno in (48, 98) or "Address already in use" in str(exc):
+            print(
+                f"Error: port {args.port} already in use. "
+                f"Stop the other serve process or use --port {args.port + 1}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 1
+        raise
 
     return 0
