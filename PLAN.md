@@ -111,6 +111,15 @@ Shipped 2026-06-24 as optional `[bbm]` extra. Separate from weekly DFS pipeline.
 
 Operator guide: [docs/BBM.md](docs/BBM.md). Implementation brief: `briefs/2026-06-24_bbm7-draft-copilot-implementation-brief.md`.
 
+### K129 — Sleeper sentiment + luck metrics ✅
+
+| Track | Deliverable |
+|-------|-------------|
+| K129-A | `ROADMAP.md` + `docs/sleeper-sentiment-eval.md` |
+| K129-B | `data/sleeper.py` + `models/buzz_signal.py` + config `buzz_signal` |
+| K129-C | `pipeline/luck_metrics.py` + `ceminidfs luck-metrics` |
+| K129-D | CLI `ceminidfs sleeper trending`; wire buzz into `project_week` |
+
 ## Canonical CSV schema
 
 From `@gambling-wiki/concepts/dfs-pipeline-integration-spec.md`:
@@ -131,6 +140,7 @@ From `@gambling-wiki/concepts/dfs-pipeline-integration-spec.md`:
 ```text
 CeminiDFS/
 ├── PLAN.md
+├── ROADMAP.md
 ├── README.md
 ├── docs/ARCHITECTURE.md
 ├── docs/BBM.md              # Best Ball operator guide
@@ -166,6 +176,7 @@ CeminiDFS/
 | Salaries | **Manual** FD/DK export |
 | Stokastic / FantasyLabs | **Benchmark** (manual CSV) |
 | BBTB / Underdog exports | **Manual** ADP + exposure CSV for BBM |
+| Sleeper public API | **Optional** trending buzz (K129) — not projections |
 
 ## Cross-wiki references
 
@@ -180,6 +191,7 @@ CeminiDFS/
 | Pipeline DAG | `@ccc-wiki/concepts/plan-then-execute-topological-orchestration.md` |
 | NGS/Participation | `docs/ngs-participation-eval.md` (K127 P2 reference) |
 | SportsDataVerse | `docs/sportsdataverse-eval.md` (K127 evaluation) |
+| Sleeper buzz | `docs/sleeper-sentiment-eval.md` (K129 optional sentiment) |
 
 ## Future backlog (not started)
 

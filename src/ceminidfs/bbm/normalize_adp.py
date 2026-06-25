@@ -75,6 +75,20 @@ def _coerce_float(value: str | None) -> float | None:
         return None
 
 
+def _tier_from_adp(adp: float) -> str:
+    """Map an ADP band to a registry tier."""
+
+    if adp <= 20:
+        return "elite"
+    if adp <= 60:
+        return "stack_core"
+    if adp <= 120:
+        return "mid_target"
+    if adp <= 180:
+        return "late_lottery"
+    return "single_dart"
+
+
 def load_nflverse_index(path: Path | str) -> dict[str, MatchResult]:
     """Build a normalized lookup from an nflverse-style player export."""
 
@@ -213,11 +227,17 @@ class AdpMergeResult:
     matched: int
     exact_matched: int
     fuzzy_matched: int
+    added: int
     unmatched: list[str]
     ambiguous: list[str] = field(default_factory=list)
 
 
-def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeResult:
+def merge_adp_csv(
+    csv_path: Path | str,
+    registry: dict[str, Any],
+    *,
+    add_unmatched: bool = True,
+) -> AdpMergeResult:
     """Update registry ADP values from a BBTB-style CSV (name + adp columns)."""
 
     rows = _read_csv_rows(csv_path)
@@ -229,6 +249,7 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
     matched = 0
     exact_matched = 0
     fuzzy_matched = 0
+    added = 0
     unmatched: list[str] = []
     ambiguous: list[str] = []
 
@@ -254,6 +275,33 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
                 if fuzzy[1] < 95:
                     ambiguous.append(raw_name)
             else:
+                if add_unmatched:
+                    position = _pick(row, ("pos", "position")).upper()
+                    new_player = {
+                        "player_id": f"bbm:{merge_name.replace(' ', '-')}",
+                        "name": raw_name.strip(),
+                        "merge_name": merge_name,
+                        "position": position,
+                        "team": "FA",
+                        "bye_week": 0,
+                        "adp": adp_val,
+                        "strategy_rank": int(adp_val),
+                        "projection_pts": 100.0,
+                        "signal": "NEUTRAL",
+                        "tier": _tier_from_adp(adp_val),
+                        "exposure_cap_pct": 0.20,
+                        "drift_coeff": 0.0,
+                        "injury_fade": False,
+                        "notes": "",
+                        "fade_rounds": None,
+                    }
+                    players.append(new_player)
+                    by_merge[merge_name] = new_player
+                    candidate_names.append(merge_name)
+                    matched += 1
+                    added += 1
+                    continue
+
                 unmatched.append(raw_name)
                 continue
         else:
@@ -265,10 +313,14 @@ def merge_adp_csv(csv_path: Path | str, registry: dict[str, Any]) -> AdpMergeRes
 
     registry.setdefault("meta", {})["updated"] = date.today().isoformat()
     registry["meta"]["adp_source"] = Path(csv_path).name
+    registry["meta"]["player_count"] = len(players)
+    if added:
+        players.sort(key=lambda p: (float(p.get("adp", 9999)), str(p.get("name", ""))))
     return AdpMergeResult(
         matched=matched,
         exact_matched=exact_matched,
         fuzzy_matched=fuzzy_matched,
+        added=added,
         unmatched=unmatched,
         ambiguous=ambiguous,
     )

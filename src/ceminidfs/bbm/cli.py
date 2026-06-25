@@ -10,7 +10,13 @@ from typing import Any
 
 from ceminidfs.bbm.archetype import assign_archetype
 from ceminidfs.bbm.audit import audit_draft, format_audit_report
-from ceminidfs.bbm.backtest import run_backtest, write_backtest_report
+from ceminidfs.bbm.backtest import (
+    BBM3_DOWNLOAD_URL,
+    BBM3_EXPECTED_PATH,
+    run_backtest,
+    validate_backtest_readiness,
+    write_backtest_report,
+)
 from ceminidfs.bbm.draft_card import write_draft_card
 from ceminidfs.bbm.ledger import (
     complete_draft,
@@ -34,11 +40,13 @@ from ceminidfs.bbm.registry import check_registry_coverage, load_registry, save_
 from ceminidfs.bbm.session import (
     archetype_header,
     ensure_initialized,
+    get_pivot_message,
     get_recommendations,
     player_from_row,
 )
 from ceminidfs.bbm.ledger import sync_players_from_registry
 from ceminidfs.bbm.api_server import run_server
+from ceminidfs.bbm import practice
 
 
 def handle_bbm_command(args: argparse.Namespace) -> int:
@@ -47,15 +55,17 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
     if not hasattr(args, "bbm_command") or args.bbm_command is None:
         print("Error: No BBM subcommand specified", file=sys.stderr)
         print(
-            "Available: draft, serve, refresh-adp, refresh-weekly, draft-card, audit, reconcile, backtest"
+            "Available: draft, serve, refresh-adp, refresh-weekly, fetch-bbm3, draft-card, audit, reconcile, backtest"
         )
         return 2
 
     handler_map = {
         "draft": _cmd_draft,
         "serve": _cmd_serve,
+        "practice": _cmd_practice,
         "refresh-adp": _cmd_refresh_adp,
         "refresh-weekly": _cmd_refresh_weekly,
+        "fetch-bbm3": _cmd_fetch_bbm3,
         "draft-card": _cmd_draft_card,
         "audit": _cmd_audit,
         "reconcile": _cmd_reconcile,
@@ -98,6 +108,11 @@ def build_bbm_parser(subparsers: Any) -> None:
         help="Optional path to projections CSV",
     )
 
+    subparsers.add_parser(
+        "fetch-bbm3",
+        help="Print BBM III download details and readiness",
+    )
+
     card_parser = subparsers.add_parser("draft-card", help="Generate markdown draft card")
     card_parser.add_argument("--out", type=Path, required=True)
     audit = subparsers.add_parser("audit", help="Audit a completed draft")
@@ -109,6 +124,12 @@ def build_bbm_parser(subparsers: Any) -> None:
     bt.add_argument("--csv", type=Path, default=None, help="Path to custom pick data CSV")
     bt.add_argument("--fixture", type=Path, default=None, help="Path to fixture CSV for testing")
     bt.add_argument("--out", type=Path, default=Path("reports/bbm_backtest.json"), help="Output path for JSON report")
+
+    practice = subparsers.add_parser("practice", help="Practice draft with auto-pick opponents")
+    practice.add_argument("--slot", type=int, required=True, help="Draft slot (1-12)")
+    practice.add_argument("--archetype", type=str, default=None, help="Archetype A-E")
+    practice.add_argument("--rounds", type=int, default=18, help="Number of rounds (default: 18)")
+    practice.add_argument("--draft-id", type=str, default=None, help="Resume existing practice draft")
 
 
 def _cmd_draft(args: argparse.Namespace) -> int:
@@ -129,6 +150,11 @@ def _cmd_draft(args: argparse.Namespace) -> int:
         archetype = args.archetype or state.archetype
         current_round = state.current_round
         print(f"Resumed draft: {draft_id}")
+
+        # Show pivot warning on resume (P4-4)
+        pivot_msg = get_pivot_message(draft_id)
+        if pivot_msg:
+            print(f"[!] {pivot_msg}")
 
         # Show room taken info on resume (P1-4)
         taken_count = count_room_taken(draft_id)
@@ -388,7 +414,7 @@ def _refresh_registry(
 def _print_refresh_summary(adp_result: Any, projection_result: Any | None, synced_count: int) -> None:
     print(
         f"ADP updated {adp_result.matched} (exact {adp_result.exact_matched}, "
-        f"fuzzy {adp_result.fuzzy_matched}, unmatched {len(adp_result.unmatched)})"
+        f"fuzzy {adp_result.fuzzy_matched}, added {adp_result.added}, unmatched {len(adp_result.unmatched)})"
     )
     if adp_result.unmatched:
         print(f"  ADP unmatched ({len(adp_result.unmatched)}): {', '.join(adp_result.unmatched[:10])}")
@@ -411,6 +437,15 @@ def _print_refresh_summary(adp_result: Any, projection_result: Any | None, synce
                 print(f"    ... and {len(projection_result.unmatched) - 10} more")
 
     print(f"Registry synced: {synced_count} players")
+
+
+def _cmd_fetch_bbm3(args: argparse.Namespace) -> int:
+    del args
+    print(f"Download URL: {BBM3_DOWNLOAD_URL}")
+    print(f"Expected path: {BBM3_EXPECTED_PATH}")
+    ready, message = validate_backtest_readiness()
+    print(f"Readiness: {message}")
+    return 0 if ready else 1
 
 
 def _cmd_draft_card(args: argparse.Namespace) -> int:
@@ -523,6 +558,32 @@ def _cmd_backtest(args: argparse.Namespace) -> int:
         return 1
 
 
+def _cmd_practice(args: argparse.Namespace) -> int:
+    """Run practice draft with auto-pick opponents."""
+    ensure_initialized()
+
+    slot = args.slot
+    if slot < 1 or slot > 12:
+        print("Error: --slot must be 1-12", file=sys.stderr)
+        return 1
+
+    archetype = args.archetype or _suggest_archetype()
+    rounds = args.rounds
+    draft_id = args.draft_id
+
+    try:
+        practice.run_practice_draft(
+            slot=slot,
+            archetype=archetype,
+            rounds=rounds,
+            draft_id=draft_id,
+        )
+        return 0
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the local API server for Chrome extension integration."""
     print("CeminiBBM serve — starting…", flush=True)
@@ -547,6 +608,11 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         slot = slot or state.slot
         archetype = archetype or state.archetype
         print(f"Resuming draft: {draft_id}", flush=True)
+
+        # Show pivot warning on resume (P4-4)
+        pivot_msg = get_pivot_message(draft_id)
+        if pivot_msg:
+            print(f"[!] {pivot_msg}", flush=True)
     else:
         # Create new draft if slot provided
         if slot is None:

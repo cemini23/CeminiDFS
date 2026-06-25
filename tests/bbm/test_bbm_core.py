@@ -7,12 +7,14 @@ import sqlite3
 import threading
 import time
 import urllib.request
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
 from ceminidfs.bbm import backtest as bbm_backtest
 from ceminidfs.bbm import board_parse
+from ceminidfs.bbm.cli import _cmd_fetch_bbm3
 from ceminidfs.bbm.api_server import create_server
 from ceminidfs.bbm.config import get_bye_week
 from ceminidfs.bbm.draft_card import build_draft_card
@@ -31,7 +33,9 @@ from ceminidfs.bbm.ledger import (
 )
 from ceminidfs.bbm.models import Archetype, DraftState, DraftStatus, Player, Roster
 from ceminidfs.bbm.normalize_adp import merge_adp_csv, merge_projections_csv, normalize_name
+from ceminidfs.bbm.practice import _whose_pick, _pick_num_for
 from ceminidfs.bbm.registry import build_seed_registry, check_registry_coverage
+from ceminidfs.bbm.recommender import _sort_key, ScoreComponents, score_player
 from ceminidfs.bbm.session import get_recommendations
 from ceminidfs.bbm.validator import validate_pick
 from ceminidfs.models.scoring import score_half_ppr_season
@@ -134,6 +138,40 @@ def test_refresh_adp_merge_stats(tmp_path: Path):
     assert result.exact_matched == 1
     assert result.fuzzy_matched == 0
     assert result.unmatched == []
+
+
+def test_merge_adds_unmatched_players(tmp_path: Path):
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text(
+        "name,adp,pos\nTest Prospect,145.0,WR\n",
+        encoding="utf-8",
+    )
+    registry = build_seed_registry()
+
+    result = merge_adp_csv(csv_path, registry)
+
+    assert result.matched == 1
+    assert result.added == 1
+    assert result.unmatched == []
+    added_player = next(p for p in registry["players"] if p["name"] == "Test Prospect")
+    assert added_player["signal"] == "NEUTRAL"
+    assert added_player["team"] == "FA"
+    assert added_player["position"] == "WR"
+    assert added_player["tier"] == "late_lottery"
+
+
+def test_fetch_bbm3_readiness_messages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    data_path = tmp_path / "bbm3_picks.csv"
+    data_path.write_bytes(b"x" * (1024 * 1024 + 1))
+    monkeypatch.setattr("ceminidfs.bbm.backtest._get_bbm3_data_path", lambda: data_path)
+
+    exit_code = _cmd_fetch_bbm3(Namespace())
+    captured = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Download URL:" in captured
+    assert "Expected path: data/bbm/bbm3_historical/" in captured
+    assert "Readiness: Ready:" in captured
 
 
 def test_connect_db_wal_mode(tmp_path: Path):
@@ -429,3 +467,204 @@ def test_api_health(bbm_db: Path, monkeypatch: pytest.MonkeyPatch):
             assert data.get("pick_num") == 4  # (1-1)*12 + 4
     finally:
         server.shutdown()
+
+
+def test_practice_pick_order_slot_4():
+    """Verify user pick numbers in round 1 are pick 4, then round 2 pick 21 for slot 4."""
+    slot = 4
+    # Round 1 (odd): picks 1-12 in ascending order
+    # Slot 4 in round 1 = pick 4
+    assert _pick_num_for(slot, 1, total_teams=12) == 4
+
+    # Round 2 (even): picks 13-24 in descending order
+    # Slot 4 in round 2 = pick 21 (12 picks + 12-4+1 = 12 + 9 = 21, wait: 12*2 - 4 + 1 = 24-4+1=21)
+    assert _pick_num_for(slot, 2, total_teams=12) == 21
+
+    # Verify using _whose_pick reverse mapping
+    assert _whose_pick(4, total_teams=12) == 4  # Pick 4 is slot 4's pick in round 1
+    assert _whose_pick(21, total_teams=12) == 4  # Pick 21 is slot 4's pick in round 2
+
+    # Also verify round 1 for other slots to ensure pattern is correct
+    assert _pick_num_for(1, 1, total_teams=12) == 1
+    assert _pick_num_for(12, 1, total_teams=12) == 12
+    assert _whose_pick(1, total_teams=12) == 1
+    assert _whose_pick(12, total_teams=12) == 12
+
+    # Round 2 is reversed
+    assert _pick_num_for(12, 2, total_teams=12) == 13  # Last slot gets first pick of even round
+    assert _pick_num_for(1, 2, total_teams=12) == 24  # First slot gets last pick of even round
+    assert _whose_pick(13, total_teams=12) == 12
+    assert _whose_pick(24, total_teams=12) == 1
+
+
+def test_should_force_archetype_boost():
+    """Test that forced archetype pick applies +0.15 boost and STRUCT warning."""
+    from datetime import datetime
+
+    # Create roster with only 1 RB for Archetype A (RB-forward)
+    # In r1_2 band, should_force_archetype_pick should return "RB" since we need 2
+    roster = Roster(
+        players=[
+            Player(
+                player_id="rb1",
+                name="RB1",
+                merge_name="rb1",
+                position="RB",
+                team="KC",
+                bye_week=5,
+                adp=10,
+            ),
+        ],
+        draft_position=4,
+        current_round=1,
+    )
+
+    # Target RB with matching forced position
+    target_rb = Player(
+        player_id="rb2",
+        name="RB2",
+        merge_name="rb2",
+        position="RB",
+        team="DEN",
+        bye_week=6,
+        adp=20,
+        projection_pts=200.0,
+    )
+
+    # Non-matching position player (WR)
+    target_wr = Player(
+        player_id="wr1",
+        name="WR1",
+        merge_name="wr1",
+        position="WR",
+        team="CIN",
+        bye_week=7,
+        adp=20,
+        projection_pts=200.0,
+    )
+
+    draft_state = DraftState(
+        draft_id="test-struct",
+        slot=4,
+        archetype=Archetype.A,
+        status=DraftStatus.IN_PROGRESS,
+        roster=roster,
+        taken_players=set(),
+        draft_date=datetime.now(),
+    )
+
+    # Mock exposure function
+    def exposure_fn(pid: str) -> float:
+        return 0.05
+
+    # Score the RB (forced position match)
+    score_rb, comp_rb, warnings_rb = score_player(
+        target_rb, draft_state, roster, Archetype.A, exposure_fn
+    )
+
+    # Score the WR (no forced position match)
+    score_wr, comp_wr, warnings_wr = score_player(
+        target_wr, draft_state, roster, Archetype.A, exposure_fn
+    )
+
+    # RB should have archetype_mult + 0.15 boost compared to WR
+    assert comp_rb.archetype_mult == comp_wr.archetype_mult + 0.15, \
+        f"RB archetype_mult {comp_rb.archetype_mult} should be WR {comp_wr.archetype_mult} + 0.15"
+
+    # RB should have STRUCT warning
+    assert any("STRUCT: need RB" in w for w in warnings_rb), \
+        f"Expected STRUCT warning in {warnings_rb}"
+
+    # WR should not have STRUCT warning
+    assert not any("STRUCT:" in w for w in warnings_wr), \
+        f"WR should not have STRUCT warning, got {warnings_wr}"
+
+
+def test_tiebreak_sort_order():
+    """Test that _sort_key produces correct tie-breaker ordering."""
+    from datetime import datetime
+
+    # Create a roster with a QB for stack testing
+    roster = Roster(
+        players=[
+            Player(
+                player_id="qb1",
+                name="QB1",
+                merge_name="qb1",
+                position="QB",
+                team="KC",
+                bye_week=5,
+                adp=15,
+            ),
+        ],
+        draft_position=4,
+        current_round=1,
+    )
+
+    draft_state = DraftState(
+        draft_id="test-tiebreak",
+        slot=4,
+        archetype=Archetype.B,
+        status=DraftStatus.IN_PROGRESS,
+        roster=roster,
+        taken_players=set(),
+        draft_date=datetime(2025, 6, 15),  # June (month=6 for drift testing)
+    )
+
+    # Mock exposure function
+    def exposure_fn(pid: str) -> float:
+        return 0.1
+
+    # Player with stack (same team as roster QB)
+    stack_wr = Player(
+        player_id="wr_kc",
+        name="WR KC",
+        merge_name="wr kc",
+        position="WR",
+        team="KC",  # Same team as QB - creates stack
+        bye_week=5,
+        adp=10,  # pick 5 - adp 10 = clv_delta -5 (< 3)
+        drift_coeff=0.5,  # Positive drift in June
+        exposure_cap_pct=0.30,
+    )
+
+    # Player without stack (different team)
+    no_stack_wr = Player(
+        player_id="wr_den",
+        name="WR DEN",
+        merge_name="wr den",
+        position="WR",
+        team="DEN",  # Different team - no stack
+        bye_week=6,
+        adp=10,
+        drift_coeff=0.5,
+        exposure_cap_pct=0.30,
+    )
+
+    # Both have same score
+    score_val = 100.0
+    components = ScoreComponents(
+        projection=50.0,
+        clv_delta=0.0,
+        clv_bonus=0.0,
+        base_score=50.0,
+        stack_mult=1.0,
+        archetype_mult=1.0,
+        exposure_mult=1.0,
+        final_score=score_val,
+    )
+
+    # Get sort keys
+    key_stack = _sort_key(stack_wr, score_val, components, exposure_fn, draft_state)
+    key_no_stack = _sort_key(no_stack_wr, score_val, components, exposure_fn, draft_state)
+
+    # Both should have same score (first element)
+    assert key_stack[0] == key_no_stack[0] == score_val
+
+    # Stack player should have higher tie-breaker 1 (stack_w17)
+    assert key_stack[1] > key_no_stack[1], \
+        f"Stack player tie-breaker 1 should be higher: {key_stack[1]} vs {key_no_stack[1]}"
+
+    # Overall, stack player sort key should be greater (since descending sort)
+    assert key_stack > key_no_stack, \
+        f"Stack player should sort higher: {key_stack} vs {key_no_stack}"

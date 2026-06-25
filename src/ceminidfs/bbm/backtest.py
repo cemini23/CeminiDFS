@@ -19,6 +19,14 @@ from ceminidfs.bbm.registry import load_registry, build_seed_registry
 from ceminidfs.bbm.config import get_bye_week
 
 
+BBM3_DOWNLOAD_URL = (
+    "https://underdognetwork.com/football/best-ball-research/"
+    "best-ball-mania-iii-downloadable-pick-by-pick-data"
+)
+BBM3_EXPECTED_DIR = Path("data/bbm/bbm3_historical")
+BBM3_EXPECTED_PATH = "data/bbm/bbm3_historical/"
+
+
 @dataclass
 class BacktestMetrics:
     """Metrics from backtest run."""
@@ -399,14 +407,13 @@ def run_backtest(
                 "1. Provide --csv <path> to custom pick data, or\n"
                 "2. Provide --fixture <path> to fixture file, or\n"
                 "3. Download BBM III pick-by-pick data from:\n"
-                "   https://underdognetwork.com/football/best-ball-research/\n"
-                "   best-ball-mania-iii-downloadable-pick-by-pick-data\n"
-                "4. Place in data/bbm/bbm3_historical/ directory\n"
+                f"   {BBM3_DOWNLOAD_URL}\n"
+                f"4. Place in {BBM3_EXPECTED_PATH} directory\n"
                 "5. Re-run: ceminidfs bbm backtest --sample 100"
             ),
             details={
                 "required_data": "pick-by-pick CSV",
-                "expected_location": "data/bbm/bbm3_historical/",
+                "expected_location": BBM3_EXPECTED_PATH,
                 "sample_requested": sample,
             }
         )
@@ -555,9 +562,9 @@ def write_backtest_report(result: BacktestResult, path: Path | str) -> Path:
 def _get_bbm3_data_path() -> Optional[Path]:
     """Check for BBM III data file in expected locations."""
     search_paths = [
-        Path("data/bbm/bbm3_historical/bbm3_picks.csv"),
-        Path("data/bbm/bbm3_historical/bbm3_pick_data.csv"),
-        Path("data/bbm/bbm3_historical/pick_by_pick.csv"),
+        BBM3_EXPECTED_DIR / "bbm3_picks.csv",
+        BBM3_EXPECTED_DIR / "bbm3_pick_data.csv",
+        BBM3_EXPECTED_DIR / "pick_by_pick.csv",
     ]
 
     for path in search_paths:

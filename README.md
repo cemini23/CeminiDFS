@@ -22,7 +22,7 @@ The **weekly DFS pipeline** (phases 0–5) is **complete** — ready for histori
 | **5** | Simulation, ownership, late-swap, copula, sim rerank | Complete |
 | **BBM** | Underdog best-ball draft copilot — REPL, exposure ledger, recommender, audit | Complete |
 
-See [PLAN.md](PLAN.md) for the execution history, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping, and [docs/BBM.md](docs/BBM.md) for the best-ball operator guide.
+See [PLAN.md](PLAN.md) for the execution history, [ROADMAP.md](ROADMAP.md) for data-source posture, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping, and [docs/BBM.md](docs/BBM.md) for the best-ball operator guide.
 
 ## Quick start
 
@@ -92,6 +92,8 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs benchmark load` | Parse Stokastic/Labs export → versioned JSON snapshot |
 | `ceminidfs benchmark compare` | Paid export vs actuals (+ DIY side-by-side) |
 | `ceminidfs calibrate` | Wiki-ready calibration brief (Markdown + JSON) |
+| `ceminidfs sleeper trending` | Sleeper add/drop buzz (K129 optional sentiment) |
+| `ceminidfs luck-metrics` | Team Pythagorean expected wins vs actual |
 | `ceminidfs regression` | One command: optional prepare + backtest + calibrate + lineup backtest |
 | `ceminidfs lineup-backtest` | Synthetic slate → pydfs optimize → score vs actuals |
 | `ceminidfs benchmark replay` | Replay every paid CSV in a folder across weeks |

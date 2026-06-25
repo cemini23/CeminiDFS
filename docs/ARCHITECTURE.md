@@ -103,6 +103,8 @@ Runtime artifacts: `data/bbm/bbm7.db`, `data/bbm/player_registry.json` (gitignor
 | Benchmark | `data.benchmark`, `pipeline.benchmark_compare` | Stokastic/Labs CSV |
 | Calibration | `pipeline.calibration` | Wiki brief + JSON |
 | Orchestration | `orchestrator.run`, `orchestrator.validate` | Stage DAG, manifest, lineup QA |
+| Sleeper buzz (K129) | `data.sleeper`, `models.buzz_signal` | Optional stage-0 trending sentiment |
+| Luck metrics (K129) | `pipeline.luck_metrics` | Pythagorean expected wins for calibration context |
 
 ## Projection engine (Phase 2)
 
@@ -143,6 +145,16 @@ K126 is **on by default** (`coherence_risk.enabled: true`). It sits between usag
 - `models.simulate` widens player CVs when high-risk coherence flags are present
 
 See [coherence-risk-audit.md](coherence-risk-audit.md) for the full 10-signal gap table and clean-room posture.
+
+## Sleeper sentiment layer (K129)
+
+Optional **stage-0 buzz** from Sleeper public API — does not alter DIY projections.
+
+- `data.sleeper` — stdlib HTTP client for trending add/drop + cached player index
+- `models.buzz_signal` — match buzz to slate rows; capped ownership nudge when enabled
+- `pipeline.luck_metrics` — team Pythagorean expected wins vs actual (MME calibration context)
+
+See [sleeper-sentiment-eval.md](sleeper-sentiment-eval.md) and [ROADMAP.md](../ROADMAP.md).
 
 ## Distribution layer (Phase 5)
 

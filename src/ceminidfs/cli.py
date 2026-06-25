@@ -136,6 +136,18 @@ try:
 except ImportError:  # pragma: no cover - defensive for partial installs
     late_swap_lineups = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.data.sleeper import fetch_trending_players, trending_with_names
+except ImportError:  # pragma: no cover - defensive for partial installs
+    fetch_trending_players = None  # type: ignore[assignment]
+    trending_with_names = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.luck_metrics import compute_team_luck_table, summarize_luck_metrics
+except ImportError:  # pragma: no cover - defensive for partial installs
+    compute_team_luck_table = None  # type: ignore[assignment]
+    summarize_luck_metrics = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -450,6 +462,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Week for benchmark CSV (default: end-week)",
     )
     calibrate.set_defaults(handler=_cmd_calibrate)
+
+    sleeper = subparsers.add_parser("sleeper", help="Sleeper public API tools (K129 buzz)")
+    sleeper_sub = sleeper.add_subparsers(dest="sleeper_command")
+
+    sleeper_trending = sleeper_sub.add_parser(
+        "trending",
+        help="Fetch trending add/drop players from Sleeper",
+    )
+    sleeper_trending.add_argument(
+        "--direction",
+        choices=("add", "drop", "both"),
+        default="both",
+        help="Trending direction (default: both)",
+    )
+    sleeper_trending.add_argument("--lookback-hours", type=int, default=24)
+    sleeper_trending.add_argument("--limit", type=int, default=25)
+    sleeper_trending.add_argument("--json-out", type=Path, help="Write JSON output to path")
+    sleeper_trending.set_defaults(handler=_cmd_sleeper_trending)
+
+    luck_metrics = subparsers.add_parser(
+        "luck-metrics",
+        help="Team Pythagorean expected wins and luck table",
+    )
+    luck_metrics.add_argument("--season", type=int, required=True)
+    luck_metrics.add_argument("--through-week", type=int, required=True)
+    luck_metrics.add_argument("--json-out", type=Path, help="Write JSON summary to path")
+    _add_profile_argument(luck_metrics)
+    luck_metrics.set_defaults(handler=_cmd_luck_metrics)
 
     # BBM (Best Ball Mania) draft copilot
     bbm_parser = subparsers.add_parser("bbm", help="Best Ball Mania draft copilot")
@@ -822,6 +862,90 @@ def _cmd_regression(args: argparse.Namespace) -> int:
         gates=gates,
     )
     print("\n" + format_regression_result(result))
+    return 0
+
+
+def _cmd_sleeper_trending(args: argparse.Namespace) -> int:
+    if trending_with_names is None or fetch_trending_players is None:
+        raise RuntimeError("Sleeper tools unavailable: ceminidfs.data.sleeper import failed")
+
+    if args.direction == "both":
+        frame = trending_with_names(
+            lookback_hours=args.lookback_hours,
+            limit=args.limit,
+        )
+        payload = frame.to_dict(orient="records") if not frame.empty else []
+    else:
+        trending = fetch_trending_players(
+            direction=args.direction,
+            lookback_hours=args.lookback_hours,
+            limit=args.limit,
+        )
+        payload = [
+            {
+                "player_id": item.player_id,
+                "count": item.count,
+                "direction": item.direction,
+            }
+            for item in trending
+        ]
+
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(args.json_out)
+        return 0
+
+    if not payload:
+        print("No trending players returned.")
+        return 0
+
+    if isinstance(payload[0], dict) and "name" in payload[0]:
+        for row in payload:
+            print(
+                f"{row.get('direction', ''):>4}  {int(row.get('count', 0)):>6}  "
+                f"{row.get('name', '')} ({row.get('team', '')}, {row.get('position', '')})"
+            )
+    else:
+        for row in payload:
+            print(
+                f"{row['direction']:>4}  {row['count']:>6}  player_id={row['player_id']}"
+            )
+    return 0
+
+
+def _cmd_luck_metrics(args: argparse.Namespace) -> int:
+    if summarize_luck_metrics is None or compute_team_luck_table is None:
+        raise RuntimeError("Luck metrics unavailable: ceminidfs.pipeline.luck_metrics import failed")
+
+    config = runtime_config(profile=args.profile)
+    summary = summarize_luck_metrics(
+        args.season,
+        args.through_week,
+        config=config,
+    )
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(args.json_out)
+        return 0
+
+    table = compute_team_luck_table(args.season, args.through_week)
+    if table.empty:
+        print(
+            f"No completed games through week {args.through_week} for season {args.season}. "
+            "Run fetch first."
+        )
+        return 1
+
+    print(f"Luck metrics — season {args.season}, through week {args.through_week}")
+    print(f"{'team':<5} {'g':>3} {'w':>3} {'pf':>5} {'pa':>5} {'xW':>5} {'luck':>6}")
+    for _, row in table.iterrows():
+        print(
+            f"{row['team']:<5} {int(row['games']):>3} {int(row['wins']):>3} "
+            f"{int(row['points_for']):>5} {int(row['points_against']):>5} "
+            f"{row['expected_wins']:>5.1f} {row['luck']:>+6.2f}"
+        )
     return 0
 
 

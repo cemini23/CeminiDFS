@@ -50,6 +50,8 @@ OPTIONAL_PASS_THROUGH_FIELDS = [
     "projection_source",
     "coherence_risk_flag",
     "pass_protection_stress",
+    "sleeper_buzz_add",
+    "sleeper_buzz_drop",
 ]
 
 

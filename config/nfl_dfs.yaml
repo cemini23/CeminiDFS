@@ -53,6 +53,14 @@ regression:
 ownership:
   enabled: false
   calibration_path: null
+buzz_signal:
+  enabled: false
+  lookback_hours: 24
+  limit: 25
+  ownership_boost_per_1k: 0.5
+  max_ownership_boost: 8.0
+luck_metrics:
+  pyth_exponent: 2.37
 stats:
   shrinkage:
     ypa: 250

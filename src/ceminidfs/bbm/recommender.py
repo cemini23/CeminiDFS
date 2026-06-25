@@ -23,7 +23,7 @@ from ceminidfs.bbm.config import (
     clv_weight,
 )
 from ceminidfs.bbm.models import Player, Roster, DraftState, Archetype, Recommendation
-from ceminidfs.bbm.archetype import archetype_mult
+from ceminidfs.bbm.archetype import archetype_mult, should_force_archetype_pick
 from ceminidfs.bbm.validator import validate_pick, get_violation_severity
 from ceminidfs.bbm.ledger import combo_pct
 
@@ -78,6 +78,12 @@ def score_player(
 
     # 3. Calculate archetype multiplier
     arch_mult = archetype_mult(archetype, roster.current_round)
+
+    # 3a. Apply forced archetype boost if needed
+    forced_pos = should_force_archetype_pick(archetype, roster, roster.current_round)
+    if forced_pos and player.position == forced_pos:
+        arch_mult += 0.15
+        warnings.append(f"STRUCT: need {forced_pos}")
 
     # 4. Calculate exposure multiplier
     exp_mult, exp_warning = _calculate_exposure_mult(
@@ -373,8 +379,11 @@ def recommend_top3(
 
         scored_players.append((player, score, components, warnings))
 
-    # Sort by score descending
-    scored_players.sort(key=lambda x: x[1], reverse=True)
+    # Sort using tie-breaker chain for stable ordering
+    scored_players.sort(
+        key=lambda x: _sort_key(x[0], x[1], x[2], exposure_pct_fn, draft_state),
+        reverse=True
+    )
 
     # Build recommendations
     recommendations: List[Recommendation] = []
@@ -477,3 +486,39 @@ def tiebreak_furthest_below_cap(player: Player, exposure_pct: float) -> float:
     """
     cap = player.exposure_cap_pct or _get_default_cap(player)
     return cap - exposure_pct
+
+
+def _sort_key(
+    player: Player,
+    score: float,
+    components: ScoreComponents,
+    exposure_pct_fn: Callable[[str], float],
+    draft_state: DraftState
+) -> tuple:
+    """Generate sort key tuple for stable tie-breaker sorting.
+
+    Tie-breaker chain (higher is better):
+    1. tiebreak_stack_w17 (bool -> int)
+    2. tiebreak_clv_delta (bool -> int)
+    3. tiebreak_positive_drift (bool -> int)
+    4. tiebreak_furthest_below_cap (float)
+
+    Returns tuple for descending sort.
+    """
+    pick_num = draft_state.current_pick_num
+    month = draft_state.draft_date.month if draft_state.draft_date else 7
+    exp_pct = exposure_pct_fn(player.player_id)
+
+    # Tie-breaker 1: stack / W17 bring-back
+    tb1 = int(tiebreak_stack_w17(player, draft_state.roster))
+
+    # Tie-breaker 2: clv_delta >= 3
+    tb2 = int(tiebreak_clv_delta(player, pick_num))
+
+    # Tie-breaker 3: positive drift (rookies in May-Jun)
+    tb3 = int(tiebreak_positive_drift(player, month))
+
+    # Tie-breaker 4: furthest below cap (float, higher = better)
+    tb4 = tiebreak_furthest_below_cap(player, exp_pct)
+
+    return (score, tb1, tb2, tb3, tb4)

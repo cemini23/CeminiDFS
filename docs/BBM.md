@@ -73,6 +73,8 @@ scripts/bbm_weekly_refresh.sh research/bbtb-adp.csv reports/projections.csv
 ceminidfs bbm reconcile --csv ~/Downloads/underdog_exposure.csv
 ```
 
+Exposure policy details: see [BBM-EXPOSURE.md](BBM-EXPOSURE.md).
+
 ## CLI reference
 
 | Command | Purpose |

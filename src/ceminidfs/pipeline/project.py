@@ -12,6 +12,7 @@ from ceminidfs.models.ownership import (
     load_ownership_calibration,
     project_ownership_calibrated,
 )
+from ceminidfs.models.buzz_signal import apply_buzz_signal
 from ceminidfs.models.dst import apply_dst_projections
 from ceminidfs.pipeline.engine import build_diy_projections, load_week_artifacts, merge_projections_into_canonical
 
@@ -63,8 +64,18 @@ def project_week(
     if _ownership_enabled(cfg):
         rows = _add_ownership_to_rows(rows, cfg, site or _site_from_rows(rows))
 
+    if _buzz_enabled(cfg):
+        rows = apply_buzz_signal(rows, config=cfg)
+
     write_canonical_csv(rows, output_path)
     return output_path
+
+
+def _buzz_enabled(config: Mapping[str, Any]) -> bool:
+    buzz_cfg = config.get("buzz_signal", {})
+    if isinstance(buzz_cfg, Mapping):
+        return bool(buzz_cfg.get("enabled"))
+    return bool(config.get("buzz_signal_enabled"))
 
 
 def _ownership_enabled(config: Mapping[str, Any]) -> bool:
