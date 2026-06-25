@@ -408,6 +408,14 @@ def test_api_health(bbm_db: Path, monkeypatch: pytest.MonkeyPatch):
             data = json.loads(body)  # type: ignore
             assert data.get("ok") is True
 
+        req = urllib.request.Request("http://127.0.0.1:18765/api/status")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            assert response.status == 200
+            body = response.read().decode("utf-8")
+            data = json.loads(body)  # type: ignore
+            assert data.get("ok") is True
+            assert data.get("draft_id") == draft_id
+
         # Test state endpoint
         req = urllib.request.Request(f"http://127.0.0.1:18765/api/state?draft_id={draft_id}")
         with urllib.request.urlopen(req, timeout=5) as response:

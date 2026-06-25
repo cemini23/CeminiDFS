@@ -100,7 +100,9 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         params: dict[str, str] = {k: v[0] if v else "" for k, v in query_params.items()}
 
         try:
-            if path == "/health":
+            if path == "/" or path == "/api/status":
+                self._handle_status()
+            elif path == "/health":
                 self._handle_health()
             elif path == "/api/state":
                 self._handle_state(params)
@@ -137,6 +139,34 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
     def _handle_health(self) -> None:
         """GET /health -> {"ok": true}"""
         self._send_json_response({"ok": True})
+
+    def _handle_status(self) -> None:
+        """GET / or /api/status -> server + active draft metadata for extension auto-config."""
+        payload: dict[str, Any] = {
+            "ok": True,
+            "service": "ceminidfs-bbm",
+            "draft_id": self.config.draft_id,
+            "slot": self.config.slot,
+            "archetype": self.config.archetype,
+            "endpoints": {
+                "health": "/health",
+                "status": "/api/status",
+                "state": "/api/state?draft_id=<id>",
+                "recommendations": "/api/recommendations?draft_id=<id>",
+            },
+            "hint": (
+                "Browser: use /health or /api/status — not an error if you see JSON here. "
+                "Extension: set draft_id from this response if popup is empty."
+            ),
+        }
+        if self.config.draft_id:
+            ledger = _get_ledger()
+            state = ledger.get_draft_state(self.config.draft_id)
+            if state is not None:
+                payload["current_round"] = state.current_round
+                payload["pick_num"] = self._compute_pick_num(state.current_round, state.slot)
+                payload["status"] = state.status
+        self._send_json_response(payload)
 
     def _handle_state(self, params: dict[str, str]) -> None:
         """GET /api/state?draft_id= -> draft state with snake pick number."""
@@ -499,6 +529,7 @@ def run_server(
 
     print(f"BBM API server listening at http://{host}:{port}", flush=True)
     print("Endpoints:", flush=True)
+    print("  GET  / or /api/status      -> server status + draft_id", flush=True)
     print("  GET  /health               -> {\"ok\": true}", flush=True)
     print("  GET  /api/state?draft_id=  -> draft state", flush=True)
     print("  GET  /api/recommendations?draft_id= -> recommendations", flush=True)

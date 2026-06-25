@@ -10,11 +10,25 @@
   function loadConfig() {
     return new Promise((resolve) => {
       chrome.storage.local.get(['apiBase', 'draftId'], (result) => {
-        config.apiBase = result.apiBase || 'http://127.0.0.1:8765';
+        config.apiBase = (result.apiBase || 'http://127.0.0.1:8765').replace(/\/$/, '');
         config.draftId = result.draftId || '';
         resolve(config);
       });
     });
+  }
+
+  async function syncDraftIdFromServer() {
+    try {
+      const res = await fetch(`${config.apiBase}/api/status`);
+      const data = await res.json();
+      if (data.draft_id && !config.draftId) {
+        config.draftId = data.draft_id;
+        chrome.storage.local.set({ draftId: data.draft_id });
+      }
+      return data;
+    } catch (_e) {
+      return null;
+    }
   }
 
   function createPanel() {
@@ -89,15 +103,16 @@
 
   function extractPlayerNames() {
     const names = new Set();
-    const skipPatterns = /pick|draft|round|timer|clock|queue|my turn|best available/i;
+    const skipPatterns = /pick|draft|round|timer|clock|queue|my turn|best available|underdog|fantasy|settings|close|menu/i;
 
     document.querySelectorAll('[aria-label]').forEach(el => {
       const label = el.getAttribute('aria-label')?.trim();
       if (!label || skipPatterns.test(label)) return;
+      if (label.length < 4 || label.length > 50) return;
 
       const words = label.split(/\s+/);
       if (words.length >= 2 && /^[A-Za-z\-\'\.]+$/.test(words[0])) {
-        names.add(label);
+        names.add(label.replace(/\s+(WR|RB|QB|TE|FLEX)\b.*$/i, '').trim());
       }
     });
 
@@ -107,7 +122,7 @@
       if (skipPatterns.test(text)) return;
 
       const words = text.split(/\s+/);
-      if (words.length === 2 && /^[A-Z][a-z]+$/.test(words[0]) && /^[A-Z][a-z\-\'\.]+$/.test(words[1])) {
+      if (words.length >= 2 && /^[A-Z]/.test(words[0])) {
         names.add(text);
       }
     });
@@ -119,6 +134,9 @@
     const statusEl = panel.querySelector('#bbm-sync-status');
     statusEl.textContent = 'Scanning...';
 
+    if (!config.draftId) {
+      await syncDraftIdFromServer();
+    }
     if (!config.draftId) {
       statusEl.textContent = 'Set draft ID in popup';
       return;
@@ -138,26 +156,44 @@
       });
 
       const data = await res.json();
-      statusEl.textContent = `Synced ${data.count || names.length} players`;
-      setTimeout(() => statusEl.textContent = '', 3000);
-    } catch (e) {
-      statusEl.textContent = 'Sync failed';
-      setTimeout(() => statusEl.textContent = '', 3000);
+      if (!res.ok || data.error) {
+        statusEl.textContent = data.error || `Sync failed (${res.status})`;
+        return;
+      }
+      statusEl.textContent = `Synced ${data.synced_count ?? data.synced?.length ?? 0}`;
+      fetchRecommendations();
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } catch (_e) {
+      statusEl.textContent = 'API unreachable — is serve running?';
+      setTimeout(() => { statusEl.textContent = ''; }, 4000);
     }
   }
 
   async function fetchRecommendations() {
+    const recsEl = panel.querySelector('#bbm-recs');
+
     if (!config.draftId) {
-      panel.querySelector('#bbm-recs').innerHTML = '<div class="bbm-empty">Set draft ID in popup</div>';
+      await syncDraftIdFromServer();
+    }
+    if (!config.draftId) {
+      recsEl.innerHTML = '<div class="bbm-empty">Set draft ID in extension popup (or start serve)</div>';
       return;
     }
 
     try {
-      const res = await fetch(`${config.apiBase}/api/recommendations?draft_id=${encodeURIComponent(config.draftId)}`);
+      const url = `${config.apiBase}/api/recommendations?draft_id=${encodeURIComponent(config.draftId)}`;
+      const res = await fetch(url);
       const data = await res.json();
+
+      if (!res.ok || data.error) {
+        const msg = data.error || `HTTP ${res.status}`;
+        recsEl.innerHTML = `<div class="bbm-error">${escapeHtml(msg)}</div>`;
+        return;
+      }
+
       renderRecommendations(data.recommendations || []);
-    } catch (e) {
-      panel.querySelector('#bbm-recs').innerHTML = '<div class="bbm-error">API unreachable</div>';
+    } catch (_e) {
+      recsEl.innerHTML = '<div class="bbm-error">API unreachable — run: ceminidfs bbm serve --slot N</div>';
     }
   }
 
@@ -173,17 +209,24 @@
         <div class="bbm-rank">${i + 1}</div>
         <div class="bbm-info">
           <div class="bbm-name">${escapeHtml(r.name || 'Unknown')}</div>
-          <div class="bbm-meta">${escapeHtml(r.position || '')} ${escapeHtml(r.team || '')}</div>
+          <div class="bbm-meta">${escapeHtml(r.position || '')} ${escapeHtml(r.team || '')} ${escapeHtml(r.signal || '')}</div>
         </div>
-        <div class="bbm-score">${r.value || r.score || '-'}</div>
+        <div class="bbm-score">${typeof r.score === 'number' ? Math.round(r.score) : '-'}</div>
       </div>
     `).join('');
   }
 
   function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = String(text);
     return div.innerHTML;
+  }
+
+  function updateHint() {
+    const hint = panel.querySelector('#bbm-hint');
+    hint.textContent = config.draftId
+      ? `Draft: ${config.draftId}`
+      : 'No draft ID — click extension icon to configure';
   }
 
   function startPolling() {
@@ -198,20 +241,21 @@
     }
   }
 
-  function init() {
-    loadConfig().then(() => {
-      createPanel();
-      const hint = panel.querySelector('#bbm-hint');
-      hint.textContent = config.draftId ? `Draft: ${config.draftId}` : 'Draft ID not set';
-      fetchRecommendations();
-      startPolling();
-    });
+  async function init() {
+    await loadConfig();
+    await syncDraftIdFromServer();
+    createPanel();
+    updateHint();
+    fetchRecommendations();
+    startPolling();
 
     chrome.storage.onChanged.addListener((changes) => {
-      if (changes.apiBase) config.apiBase = changes.apiBase.newValue;
+      if (changes.apiBase) {
+        config.apiBase = (changes.apiBase.newValue || '').replace(/\/$/, '');
+      }
       if (changes.draftId) {
-        config.draftId = changes.draftId.newValue;
-        panel.querySelector('#bbm-hint').textContent = config.draftId ? `Draft: ${config.draftId}` : 'Draft ID not set';
+        config.draftId = changes.draftId.newValue || '';
+        updateHint();
         fetchRecommendations();
       }
     });

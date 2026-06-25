@@ -1,23 +1,23 @@
 {
   "manifest_version": 3,
   "name": "CeminiDFS BBM Copilot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Draggable panel for CeminiDFS BBM recommendations - read only, manual sync",
   "permissions": [
     "storage",
     "activeTab"
   ],
   "host_permissions": [
+    "*://underdogfantasy.com/*",
     "*://*.underdogfantasy.com/*",
-    "*://app.underdogfantasy.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://*.underdogfantasy.com/*",
-        "*://app.underdogfantasy.com/*"
+        "*://underdogfantasy.com/*",
+        "*://*.underdogfantasy.com/*"
       ],
       "js": ["content.js"],
       "css": ["styles.css"],
