@@ -4,13 +4,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-DIY **NFL DFS projection pipeline** (FanDuel-primary). Builds player projections from nflverse play-by-play, Vegas lines, and weather; exports canonical CSVs; normalizes for [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer); and generates MME lineup pools with optional simulation reranking.
+DIY **NFL DFS projection pipeline** (FanDuel-primary) plus a **Best Ball Mania draft copilot** for Underdog slow drafts. The core pipeline builds player projections from nflverse play-by-play, Vegas lines, and weather; exports canonical CSVs; normalizes for [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer); and generates MME lineup pools with optional simulation reranking. The BBM tool (`ceminidfs bbm`) tracks exposure across 150 entries and surfaces top-3 picks during live drafts.
 
 Architecture and research: [Gambling wiki — DIY NFL DFS model (K125)](https://github.com/cemini23/gambling-wiki/blob/main/wiki/concepts/diy-nfl-dfs-model-architecture.md).
 
 ## Status
 
-All implementation phases (0–5) are **complete**. The repo is ready for historical backtests and live-slate runs when you supply a FanDuel salary export and cached nflverse data.
+The **weekly DFS pipeline** (phases 0–5) is **complete** — ready for historical backtests and live-slate runs when you supply a FanDuel salary export and cached nflverse data. The **BBM draft copilot** (Best Ball Mania VII) ships as an optional `[bbm]` extra with its own CLI, ledger, and recommender.
 
 | Phase | Scope | State |
 |-------|--------|-------|
@@ -20,8 +20,9 @@ All implementation phases (0–5) are **complete**. The repo is ready for histor
 | **3** | End-to-end lineup generation on DIY projections | Complete |
 | **4** | Backtest + calibration vs paid benchmarks | Complete |
 | **5** | Simulation, ownership, late-swap, copula, sim rerank | Complete |
+| **BBM** | Underdog best-ball draft copilot — REPL, exposure ledger, recommender, audit | Complete |
 
-See [PLAN.md](PLAN.md) for the execution history and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping.
+See [PLAN.md](PLAN.md) for the execution history, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping, and [docs/BBM.md](docs/BBM.md) for the best-ball operator guide.
 
 ## Quick start
 
@@ -29,7 +30,8 @@ See [PLAN.md](PLAN.md) for the execution history and [docs/ARCHITECTURE.md](docs
 git clone https://github.com/cemini23/CeminiDFS.git
 cd CeminiDFS
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,data,optimize]"
+pip install -e ".[dev,data,optimize]"   # weekly DFS pipeline
+pip install -e ".[bbm,dev]"            # + Best Ball Mania draft copilot
 
 # Unit + integration tests (no network; e2e tests need pydfs)
 pytest
@@ -42,6 +44,18 @@ ceminidfs run --season 2024 --week 1 --salary path/to/fanduel_salaries.csv --sta
 ```
 
 Outputs land under `runs/{season}_week_{N}/` (canonical CSV, normalized pydfs CSV, lineups, manifest).
+
+### Best Ball Mania (optional)
+
+```bash
+pip install -e ".[bbm,dev]"
+
+ceminidfs bbm draft-card --out briefs/bbm7-draft-card-$(date +%F).md
+ceminidfs bbm draft --slot 4          # interactive REPL: p / t / undo / sync / exp
+ceminidfs bbm audit --draft-id <id>   # post-draft checklist
+```
+
+Full operator guide: [docs/BBM.md](docs/BBM.md).
 
 ## Pipeline
 
@@ -75,6 +89,20 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs lineup-backtest` | Synthetic slate → pydfs optimize → score vs actuals |
 | `ceminidfs benchmark replay` | Replay every paid CSV in a folder across weeks |
 | `ceminidfs ownership calibrate` | Fit ownership calibration from paid export labels |
+
+### Best Ball Mania (`ceminidfs bbm`)
+
+Requires `pip install -e ".[bbm]"`. See [docs/BBM.md](docs/BBM.md).
+
+| Command | Purpose |
+|---------|---------|
+| `ceminidfs bbm draft` | Live draft REPL with top-3 recommendations (`--slot`, `--draft-id`) |
+| `ceminidfs bbm draft-card` | Markdown cheat sheet (stacks, fades, exposure caps) |
+| `ceminidfs bbm refresh-adp` | Merge BBTB ADP CSV into local registry |
+| `ceminidfs bbm refresh-weekly` | ADP + optional projection CSV, sync to SQLite |
+| `ceminidfs bbm audit` | Post-draft structural + CLV audit |
+| `ceminidfs bbm reconcile` | Diff local exposure vs Underdog email CSV |
+| `ceminidfs bbm backtest` | Replay BBM III picks vs recommender (fixture or downloaded CSV) |
 
 ### Common invocations
 
@@ -214,36 +242,41 @@ Paid tools are **benchmark-only** — not a runtime dependency.
 
 ```text
 src/ceminidfs/
-  cli.py              # Command-line entrypoint
+  cli.py              # Command-line entrypoint (DFS + bbm subcommand)
   config.py           # YAML config loader
   manifest.py         # RunManifest + artifact tracking
+  bbm/                # Best Ball Mania draft copilot (optional [bbm] extra)
   data/               # fetch, vegas, weather, stadiums, salary, benchmark, ownership_labels
   models/             # volume, usage, stats, scoring, simulate, correlation, ownership
   pipeline/           # fetch, project, engine, backtest, calibration, metrics
   export/             # canonical, normalize, optimize, sim_rerank, late_swap
   orchestrator/       # stage DAG, validation
 config/nfl_dfs.yaml
-tests/                # unit + integration + e2e (103 tests)
+scripts/bbm_weekly_refresh.sh   # weekly ADP + projection wrapper
+tests/                # unit + integration + e2e + tests/bbm/
+data/bbm/             # gitignored — SQLite ledger, player registry
 artifacts/            # gitignored — parquet cache, reports
 runs/                 # gitignored — per-slate outputs + manifests
 reports/              # gitignored — backtest/calibration JSON and briefs
 prompts/              # Opus execution plans + audit prompts
+docs/BBM.md           # Best Ball operator guide
 ```
 
 ## Development
 
 ```bash
-pip install -e ".[dev,data,optimize]"
+pip install -e ".[dev,data,optimize,bbm]"
 pytest
 ruff check src tests
 ```
 
-CI (`.github/workflows/ci.yml`) runs pytest + ruff on Python 3.11 and 3.12 with `[dev,data,optimize]` installed.
+CI (`.github/workflows/ci.yml`) runs pytest + ruff on Python 3.11 and 3.12 with `[dev,data,optimize,bbm]` installed.
 
 ## Related
 
 - [PLAN.md](PLAN.md) — phased implementation record
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — wiki layer → module map
+- [docs/BBM.md](docs/BBM.md) — Best Ball Mania draft copilot guide
 - [K125 master research plan](https://github.com/cemini23/gambling-wiki/blob/main/wiki/sources/research-diy-dfs-model-master-plan-2026-06-20.md)
 
 ## License

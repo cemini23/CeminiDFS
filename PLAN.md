@@ -96,6 +96,20 @@ Volume → usage → stats → scoring → `pipeline/engine.py` DIY stack.
 | P5v2-B | Ownership calibration from paid labels |
 | P5v2-C | Sim rerank — 2000 candidates → top 150 |
 
+### BBM extension — Best Ball Mania copilot ✅
+
+Shipped 2026-06-24 as optional `[bbm]` extra. Separate from weekly DFS pipeline.
+
+| Track | Deliverable |
+|-------|-------------|
+| BBM-0 | Package scaffold, seed registry, draft card |
+| BBM-1a | SQLite ledger + draft REPL (`p` / `t` / `undo` / `sync`) |
+| BBM-1b | Validator, archetype router, recommender top-3 |
+| BBM-1c | Audit, reconcile, ADP normalize |
+| BBM-2 | Backtest replay, `refresh-weekly`, projection merge, WAL ledger |
+
+Operator guide: [docs/BBM.md](docs/BBM.md). Implementation brief: `briefs/2026-06-24_bbm7-draft-copilot-implementation-brief.md`.
+
 ## Canonical CSV schema
 
 From `@gambling-wiki/concepts/dfs-pipeline-integration-spec.md`:
@@ -118,17 +132,22 @@ CeminiDFS/
 ├── PLAN.md
 ├── README.md
 ├── docs/ARCHITECTURE.md
+├── docs/BBM.md              # Best Ball operator guide
 ├── config/nfl_dfs.yaml
+├── scripts/bbm_weekly_refresh.sh
 ├── prompts/                 # Opus plans, audit prompts
 ├── src/ceminidfs/
 │   ├── cli.py
+│   ├── bbm/                 # Best Ball draft copilot ([bbm] extra)
 │   ├── data/
 │   ├── models/
 │   ├── pipeline/
 │   ├── export/
 │   └── orchestrator/
 ├── tests/
-│   └── fixtures/            # synthetic slate + cache helpers
+│   ├── bbm/                 # BBM unit tests
+│   └── fixtures/            # synthetic slate + BBM draft fixture
+├── data/bbm/                # gitignored — ledger + registry
 ├── artifacts/               # gitignored
 ├── runs/                    # gitignored
 └── reports/                 # gitignored
@@ -145,6 +164,7 @@ CeminiDFS/
 | Projections + sim + ownership | **Build** |
 | Salaries | **Manual** FD/DK export |
 | Stokastic / FantasyLabs | **Benchmark** (manual CSV) |
+| BBTB / Underdog exports | **Manual** ADP + exposure CSV for BBM |
 
 ## Cross-wiki references
 
@@ -170,12 +190,13 @@ Operational and v3 enhancements — not blockers for live slate use:
 - Injury play-probability redistribution in usage model
 - NGS/participation data integration (K127 reference-only, see `docs/ngs-participation-eval.md`)
 - Automated GitHub release / PyPI publish
+- BBM browser overlay (MV3 read-only; Phase 3 in BBM brief)
 
 ## Session handoff
 
 **Workspace:** `/Users/claudiobarone/Projects/CeminiDFS`
 
-**State:** Phases 0–5 complete. **179 tests**, CI green on `main`.
+**State:** Phases 0–5 + BBM extension complete. **202 tests**, CI green on `main` (includes `[bbm]` extra).
 
 **Profiles:** Base `config/nfl_dfs.yaml` (conservative, backtest/research); GPP profile extends with `simulate`, `sim_rerank`, `ownership` enabled via `--profile gpp` CLI flag.
 
@@ -192,3 +213,11 @@ Operational and v3 enhancements — not blockers for live slate use:
 1. `ceminidfs backtest --season 2024 --start-week 5 --end-week 10`
 2. `ceminidfs calibrate ...` → paste brief into Gambling wiki
 3. `ceminidfs benchmark compare ...` when Stokastic/Labs export available
+
+**Typical BBM workflow:**
+
+1. `pip install -e ".[bbm,dev]"`
+2. `ceminidfs bbm draft-card --out briefs/bbm7-draft-card-$(date +%F).md`
+3. `ceminidfs bbm draft --slot N` during Underdog slow draft
+4. `ceminidfs bbm audit --draft-id <id>` after completion
+5. Weekly: `ceminidfs bbm refresh-weekly --adp …` + `ceminidfs bbm reconcile --csv …`

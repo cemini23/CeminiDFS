@@ -36,7 +36,48 @@ CeminiDFS is a **stat-first** NFL DFS pipeline. It ingests nflverse data and man
 
 Analytics (parallel): backtest · benchmark · calibrate
 Post-lock: late_swap
+
+BBM (optional): ceminidfs bbm — exposure ledger + live draft recommender
 ```
+
+## BBM (Best Ball Mania extension)
+
+Separate from the weekly DFS pipeline. Activated via `pip install -e ".[bbm]"` and `ceminidfs bbm …`. Operator guide: [BBM.md](BBM.md).
+
+```text
+player_registry.json + BBTB ADP CSV
+        │
+        ▼
+  normalize_adp / merge_projections
+        │
+        ▼
+  ledger (SQLite WAL) ── exposure across 150 entries
+        │
+        ▼
+  draft REPL ── session ── recommender (top-3)
+        │              │
+        │              ├── validator (hard constraints)
+        │              └── archetype router + pivot
+        ▼
+  audit / reconcile / backtest (BBM III replay)
+```
+
+| Component | Module | Role |
+|-----------|--------|------|
+| CLI + REPL | `ceminidfs.bbm.cli` | `draft`, `draft-card`, `refresh-adp`, `refresh-weekly`, `audit`, `reconcile`, `backtest` |
+| Session bridge | `ceminidfs.bbm.session` | Draft state, pivot wiring, recommendation bridge |
+| Recommender | `ceminidfs.bbm.recommender` | CLV + stack + archetype + exposure scoring |
+| Validator | `ceminidfs.bbm.validator` | Bye, roster limits, exposure caps |
+| Archetype | `ceminidfs.bbm.archetype` | Portfolio targets A–E, pivot state machine |
+| Ledger | `ceminidfs.bbm.ledger` | SQLite drafts, picks, room_taken, combo_pairs |
+| Registry | `ceminidfs.bbm.registry` | Seed BUY/FADE players, coverage preflight |
+| ADP merge | `ceminidfs.bbm.normalize_adp` | BBTB CSV → registry; projection column merge |
+| Reconcile | `ceminidfs.bbm.reconcile` | Underdog exposure CSV diff |
+| Audit | `ceminidfs.bbm.audit` | Post-draft checklist + CLV |
+| Backtest | `ceminidfs.bbm.backtest` | BBM III pick replay vs recommender |
+| Scoring reuse | `models.scoring.score_half_ppr_season` | Optional season half-PPR `projection_pts` |
+
+Runtime artifacts: `data/bbm/bbm7.db`, `data/bbm/player_registry.json` (gitignored).
 
 ## Wiki layer → module mapping
 
@@ -152,6 +193,7 @@ See [`config/nfl_dfs.yaml`](../config/nfl_dfs.yaml):
 | `pyarrow` | `[data]` | Parquet cache |
 | `pydfs-lineup-optimizer` | `[optimize]` | Lineup generation + late swap |
 | `pytest`, `ruff` | `[dev]` | CI |
+| `rapidfuzz`, `nflreadpy` | `[bbm]` | ADP name match; bye-week lookup for registry |
 
 ### Data fetch posture
 
