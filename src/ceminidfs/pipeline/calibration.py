@@ -22,6 +22,7 @@ from ceminidfs.pipeline.backtest import (
     _historical_pbp,
 )
 from ceminidfs.pipeline.engine import build_diy_projections_from_frames
+from ceminidfs.pipeline.luck_metrics import summarize_luck_metrics
 from ceminidfs.pipeline.metrics import accuracy_metrics
 
 POSITION_ORDER = ("QB", "RB", "WR", "TE", "DST", "K", "OTHER")
@@ -75,6 +76,7 @@ class CalibrationReport:
     models: list[ModelCalibration]
     benchmark_source: str | None = None
     benchmark_week: int | None = None
+    luck_metrics: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +86,7 @@ class CalibrationReport:
             "benchmark_source": self.benchmark_source,
             "benchmark_week": self.benchmark_week,
             "models": [model.to_dict() for model in self.models],
+            "luck_metrics": self.luck_metrics,
         }
 
 
@@ -131,6 +134,14 @@ def build_calibration_report(
         if not bench_frame.empty:
             models.append(_calibrate_model("benchmark", bench_frame))
 
+    luck_summary: dict[str, Any] | None = None
+    try:
+        luck_summary = summarize_luck_metrics(season, end_week, config=cfg)
+        if luck_summary.get("teams", 0) == 0:
+            luck_summary = None
+    except (FileNotFoundError, OSError, ValueError):
+        luck_summary = None
+
     return CalibrationReport(
         season=season,
         start_week=start_week,
@@ -138,6 +149,7 @@ def build_calibration_report(
         models=models,
         benchmark_source=benchmark_source,
         benchmark_week=benchmark_week_value if benchmark_csv is not None else None,
+        luck_metrics=luck_summary,
     )
 
 
@@ -359,6 +371,16 @@ def render_calibration_brief(report: CalibrationReport) -> str:
             ]
         )
 
+    if report.luck_metrics:
+        lines.extend(
+            [
+                "",
+                "## Team luck context (K129)",
+                "",
+                _luck_metrics_section(report),
+            ]
+        )
+
     lines.extend(
         [
             "",
@@ -528,6 +550,45 @@ def _benchmark_section(report: CalibrationReport) -> str:
             _position_table(report, model="benchmark"),
         ]
     )
+
+
+def _luck_metrics_section(report: CalibrationReport) -> str:
+    luck = report.luck_metrics or {}
+    lines = [
+        f"- Season {luck.get('season', report.season)} through week "
+        f"{luck.get('through_week', report.end_week)}",
+        f"- Teams tracked: {luck.get('teams', 0)}",
+    ]
+    mean_luck = luck.get("mean_luck")
+    if mean_luck is not None:
+        lines.append(f"- Mean luck (actual wins − Pythagorean expected): **{mean_luck:+.2f}**")
+
+    luckiest = luck.get("luckiest") or []
+    if luckiest:
+        lines.append("")
+        lines.append("**Luckiest (actual wins above expected):**")
+        for row in luckiest[:5]:
+            lines.append(
+                f"- {row.get('team', '?')}: luck **{float(row.get('luck', 0)):+.2f}** "
+                f"({int(row.get('wins', 0))}W vs {float(row.get('expected_wins', 0)):.1f} xW)"
+            )
+
+    unluckiest = luck.get("unluckiest") or []
+    if unluckiest:
+        lines.append("")
+        lines.append("**Unluckiest:**")
+        for row in unluckiest[:5]:
+            lines.append(
+                f"- {row.get('team', '?')}: luck **{float(row.get('luck', 0)):+.2f}** "
+                f"({int(row.get('wins', 0))}W vs {float(row.get('expected_wins', 0)):.1f} xW)"
+            )
+
+    lines.append("")
+    lines.append(
+        "_Pythagorean expected wins from nflverse schedules — MME game-script context only, "
+        "not a projection input._"
+    )
+    return "\n".join(lines)
 
 
 def _calibration_actions(report: CalibrationReport) -> list[str]:

@@ -439,43 +439,50 @@ Round 1, Pick 4 — top 3:
 ## 9. Implementation phases & acceptance criteria
 
 ### Phase 0 — Foundation
-- [ ] `src/ceminidfs/bbm/` package scaffold
-- [ ] `config.py` with all constants from §4
-- [ ] Seed `player_registry.json` top-240 from BUY/FADE tables
-- [ ] `draft_card.py` → markdown cheat sheet
-- [ ] `normalize_adp.py` spike + `player_overrides.csv` template
+- [x] `src/ceminidfs/bbm/` package scaffold
+- [x] `config.py` with all constants from §4
+- [x] Seed `player_registry.json` top-240 from BUY/FADE tables
+- [x] `draft_card.py` → markdown cheat sheet
+- [x] `normalize_adp.py` spike + `player_overrides.csv` template
 
 **Done when:** draft card generates; registry loads; Spike 1 <5% unmatched.
 
 ### Phase 1a — Ledger + REPL
-- [ ] SQLite schema + migrations
-- [ ] `cli.py` draft REPL (`p`, `t`, `undo`)
-- [ ] In-progress draft resume
+- [x] SQLite schema + migrations
+- [x] `cli.py` draft REPL (`p`, `t`, `undo`)
+- [x] In-progress draft resume
 
 **Done when:** complete mock 18-round draft logged locally.
 
 ### Phase 1b — Recommender
-- [ ] `validator.py` all hard constraints
-- [ ] `archetype.py` router + pivot
-- [ ] `recommender.py` scoring + top-3 output
-- [ ] Exposure pruning
+- [x] `validator.py` all hard constraints
+- [x] `archetype.py` router + pivot
+- [x] `recommender.py` scoring + top-3 output
+- [x] Exposure pruning
 
 **Done when:** each archetype mock draft produces sensible top-3; audit passes.
 
 ### Phase 1c — Audit + reconcile
-- [ ] `audit.py` post-draft checklist + CLV estimate
-- [ ] `reconcile.py` Underdog exposure CSV diff
+- [x] `audit.py` post-draft checklist + CLV estimate
+- [x] `reconcile.py` Underdog exposure CSV diff
 
 **Done when:** weekly CSV reconcile flags drift.
 
 ### Phase 2 — Data pipeline
-- [ ] Weekly `bbm refresh-adp` one-liner
-- [ ] Optional CeminiDFS projection merge column
-- [ ] `backtest.py` BBM III replay harness
+- [x] Weekly `bbm refresh-adp` one-liner
+- [x] Optional CeminiDFS projection merge column
+- [x] `backtest.py` BBM III replay harness
 
 ### Phase 3 — Extension (optional, post-July)
-- [ ] MV3 read-only overlay; manual trigger; aria-label DOM crawl
-- [ ] Fork pattern: [draft-co-pilot](https://github.com/howrealizdat/draft-co-pilot)
+- [x] MV3 read-only overlay; manual trigger; aria-label DOM crawl
+- [x] Fork pattern: [draft-co-pilot](https://github.com/howrealizdat/draft-co-pilot)
+
+### Phase 4 — Pre-entry prep (2026-06-25)
+- [x] `bbm practice` free mock draft (12-team snake, ADP opponents)
+- [x] Archetype force + tie-breakers in recommender
+- [x] ADP registry expand for unmatched players
+- [x] `docs/BBM-EXPOSURE.md` + `bbm fetch-bbm3`
+- [x] Extension record-pick via `/api/pick` (user-initiated)
 
 ---
 
@@ -518,8 +525,8 @@ ceminidfs bbm reconcile --csv ~/Downloads/underdog_exposure.csv
 | 1 | BBTB ADP → nflverse merge | <5% unmatched top-240 |
 | 2 | Underdog exposure CSV headers | Tolerant parser works |
 | 3 | Recommender stub latency | p99 <200ms |
-| 4 | Mock slow draft w/ draft card | Operator faster than gut |
-| 5 | Exposure policy | Hard 100%, soft 95–100% documented |
+| 4 | Mock slow draft w/ draft card | Operator faster than gut — use `bbm practice` |
+| 5 | Exposure policy | Hard 100%, soft 95–100% documented — `docs/BBM-EXPOSURE.md` |
 | 6 | Half-PPR projection column | Sanity vs Stokastic if available |
 
 ---

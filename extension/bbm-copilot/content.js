@@ -204,16 +204,64 @@
       return;
     }
 
-    container.innerHTML = recs.slice(0, 3).map((r, i) => `
+    const top = recs.slice(0, 3);
+    container.innerHTML = top.map((r, i) => `
       <div class="bbm-rec">
         <div class="bbm-rank">${i + 1}</div>
         <div class="bbm-info">
           <div class="bbm-name">${escapeHtml(r.name || 'Unknown')}</div>
           <div class="bbm-meta">${escapeHtml(r.position || '')} ${escapeHtml(r.team || '')} ${escapeHtml(r.signal || '')}</div>
         </div>
-        <div class="bbm-score">${typeof r.score === 'number' ? Math.round(r.score) : '-'}</div>
+        <div class="bbm-rec-actions">
+          <div class="bbm-score">${typeof r.score === 'number' ? Math.round(r.score) : '-'}</div>
+          <button class="bbm-btn bbm-btn-record" title="Record pick in ledger (you still draft manually on Underdog)">Rec</button>
+        </div>
       </div>
     `).join('');
+
+    container.querySelectorAll('.bbm-btn-record').forEach((btn, i) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        recordPick(top[i].name || '');
+      });
+    });
+  }
+
+  async function recordPick(name) {
+    const statusEl = panel.querySelector('#bbm-sync-status');
+    if (!name) return;
+
+    if (!config.draftId) {
+      await syncDraftIdFromServer();
+    }
+    if (!config.draftId) {
+      statusEl.textContent = 'Set draft ID in popup';
+      return;
+    }
+
+    statusEl.textContent = `Recording ${name}...`;
+
+    try {
+      const res = await fetch(`${config.apiBase}/api/pick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft_id: config.draftId, name })
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        statusEl.textContent = data.error || `Pick failed (${res.status})`;
+        setTimeout(() => { statusEl.textContent = ''; }, 4000);
+        return;
+      }
+
+      statusEl.textContent = `Recorded ${data.player?.name || name}`;
+      fetchRecommendations();
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } catch (_e) {
+      statusEl.textContent = 'API unreachable — is serve running?';
+      setTimeout(() => { statusEl.textContent = ''; }, 4000);
+    }
   }
 
   function escapeHtml(text) {

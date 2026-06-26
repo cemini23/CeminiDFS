@@ -32,6 +32,7 @@ Note: Icon files are transparent placeholders - replace with actual BBM-themed i
 - **Draggable panel** - grab the header to move anywhere
 - **Read-only** - no auto-picks, no clicks on Underdog
 - **Manual sync** - "Scan Board" button queries the DOM for player names
+- **Record pick** - "Rec" on each recommendation POSTs to `/api/pick` (ledger only; you still click Underdog)
 - **Auto-polling** - recommendations refresh every 3 seconds
 - **Dark compact UI** - matches draft assistant aesthetics
 

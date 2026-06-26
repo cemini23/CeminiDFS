@@ -90,7 +90,7 @@ Exposure policy details: see [BBM-EXPOSURE.md](BBM-EXPOSURE.md).
 
 ### Chrome extension (Phase 3)
 
-Optional MV3 overlay for Underdog draft rooms — **read-only** top-3 panel with **manual** board scan (no auto-pick, no continuous scraping).
+Optional MV3 overlay for Underdog draft rooms — top-3 panel with **manual** board scan and **Rec** button to log picks to the ledger (you still submit picks on Underdog; no auto-pick).
 
 ```bash
 # Terminal — local API (ledger remains source of truth)

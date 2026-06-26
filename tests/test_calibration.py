@@ -85,6 +85,33 @@ def test_write_calibration_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert "CeminiDFS calibration" in brief_path.read_text(encoding="utf-8")
 
 
+def test_calibration_report_includes_luck_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pbp = _season_pbp_with_week4()
+    week_dir = _write_week_cache(tmp_path)
+    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
+    monkeypatch.setattr(calibration, "load_season_pbp", lambda season: pbp)
+    monkeypatch.setattr(
+        calibration,
+        "summarize_luck_metrics",
+        lambda season, through_week, **kwargs: {
+            "season": season,
+            "through_week": through_week,
+            "teams": 2,
+            "mean_luck": 0.0,
+            "luckiest": [{"team": "KC", "wins": 3, "expected_wins": 2.5, "luck": 0.5}],
+            "unluckiest": [{"team": "BUF", "wins": 1, "expected_wins": 1.5, "luck": -0.5}],
+        },
+    )
+
+    report = calibration.build_calibration_report(2024, start_week=4, end_week=4)
+    brief = calibration.render_calibration_brief(report)
+
+    assert report.luck_metrics is not None
+    assert report.luck_metrics["teams"] == 2
+    assert "Team luck context" in brief
+    assert "KC" in brief
+
+
 def test_verdict_against_targets():
     assert calibration._verdict(6.0, 20, calibration.MAE_TARGETS["QB"]) == "very good"
     assert calibration._verdict(6.2, 20, calibration.MAE_TARGETS["QB"]) == "good"

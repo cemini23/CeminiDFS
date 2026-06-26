@@ -16,3 +16,9 @@ sim_rerank:
 ownership:
   enabled: true
   calibration_path: null
+buzz_signal:
+  enabled: true
+  lookback_hours: 24
+  limit: 25
+  ownership_boost_per_1k: 0.5
+  max_ownership_boost: 8.0
