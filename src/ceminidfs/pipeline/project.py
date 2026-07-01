@@ -12,6 +12,7 @@ from ceminidfs.models.ownership import (
     load_ownership_calibration,
     project_ownership_calibrated,
 )
+from ceminidfs.data.espn import apply_espn_injury_overlay
 from ceminidfs.models.buzz_signal import apply_buzz_signal
 from ceminidfs.models.dst import apply_dst_projections
 from ceminidfs.pipeline.engine import build_diy_projections, load_week_artifacts, merge_projections_into_canonical
@@ -67,8 +68,18 @@ def project_week(
     if _buzz_enabled(cfg):
         rows = apply_buzz_signal(rows, config=cfg)
 
+    if _espn_enabled(cfg):
+        rows = apply_espn_injury_overlay(rows, config=cfg)
+
     write_canonical_csv(rows, output_path)
     return output_path
+
+
+def _espn_enabled(config: Mapping[str, Any]) -> bool:
+    espn_cfg = config.get("espn_adjunct", {})
+    if isinstance(espn_cfg, Mapping):
+        return bool(espn_cfg.get("enabled"))
+    return bool(config.get("espn_adjunct_enabled"))
 
 
 def _buzz_enabled(config: Mapping[str, Any]) -> bool:

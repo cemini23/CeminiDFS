@@ -13,7 +13,7 @@ K128 **Tool Evaluation Analysis Metaplan** (81 URLs) delivers **zero Adopt rows 
 | Repo | License | Verdict | Rationale |
 |------|---------|---------|-----------|
 | chanzer0/NBA-DFS-Tools | MIT | **Reference-only** | NBA-specific; duplicate optimizer logic |
-| BenBrostoff/draftfast | MIT | **Reference-only** | DraftKings/NBA focus; overlaps pydfs |
+| BenBrostoff/draftfast | **Reject (K138)** | No LICENSE file on GitHub (2026-07-01); overlaps pydfs — reference-only |
 | WolverineSportsAnalytics/basketball | MIT | **Reference-only** | Basketball-specific; no NFL lineage |
 | davehensley/fanduel-nba-optimizer | MIT | **Reference-only** | NBA constraints; stale 2017 |
 | Setfive/fanduel-api | Apache-2.0 | **CCC-wiki** | WebSocket contest feed; not projection infra |

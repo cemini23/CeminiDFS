@@ -31,8 +31,9 @@ data = ["nflreadpy>=0.1.0", "pyarrow>=14.0"]
 eval = ["sportsdataverse>=0.0.60", "nflreadpy>=0.1.0", "pyarrow>=14.0"]
 optimize = ["pydfs-lineup-optimizer>=3.6"]
 bbm = ["rapidfuzz>=3.0", "nflreadpy>=0.1.0"]
+espn = ["espn_api>=0.36"]
 dev = ["pytest>=8.0", "ruff>=0.4"]
-all = ["ceminidfs[data,optimize,bbm,dev]"]
+all = ["ceminidfs[data,optimize,bbm,espn,dev]"]
 
 [project.scripts]
 ceminidfs = "ceminidfs.cli:main"

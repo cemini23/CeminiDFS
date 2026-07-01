@@ -14,6 +14,7 @@
 | The Odds API | Optional live Vegas | **Borrow** (`.env`) |
 | Stokastic / FantasyLabs | Accuracy + ownership benchmarks | **Manual CSV** |
 | Sleeper public API | Trending add/drop buzz | **Optional** — stage-0 sentiment only; not projections |
+| cwendt94/espn-api | Fantasy roster injury overlay | **Optional** — requires `league_id`; see `docs/espn-api-eval.md` |
 | sportsdataverse-py | Eval / benchmark | **Defer** — see `docs/sportsdataverse-eval.md` |
 
 ## Rejects (do not install)
@@ -21,6 +22,7 @@
 | Repo / pattern | Reason |
 |----------------|--------|
 | Underdog / Yahoo scrapers (no license) | Legal risk |
+| BenBrostoff/draftfast | No LICENSE file (K138); use pydfs only |
 | GPL Sleeper or fanduel-api forks | License incompatible with MIT sale |
 | Hugging Face coherence parquet in prod fetch | K126 clean-room only |
 | thiagocavaleiro PM sports bot | Out of scope |
@@ -34,6 +36,7 @@
 | K127 | sportsdataverse smoke + defer | `docs/sportsdataverse-eval.md` |
 | K128 | Duplicate DFS optimizers wiki-only | `briefs/2026-06-24_k128-metaplan-dfs-tools-reference.md` |
 | K129 | Sleeper buzz + luck metrics | `docs/sleeper-sentiment-eval.md` |
+| K138 | ESPN injury adjunct + draftfast reject | `docs/espn-api-eval.md` |
 | BBM7 | Best Ball draft copilot | `docs/BBM.md` |
 
 ## K129 — Sleeper sentiment (2026-06-25)
@@ -57,9 +60,24 @@ buzz_signal:
   max_ownership_boost: 8.0
 ```
 
+## K138 — ESPN adjunct (2026-07-01)
+
+Optional injury fill from MIT `espn_api` when operator configures a fantasy `league_id`.
+
+```yaml
+espn_adjunct:
+  enabled: false
+  league_id: null
+  year: null
+```
+
+```bash
+pip install -e ".[espn]"
+ceminidfs espn probe --league-id <id> --year 2025
+```
+
 ## Backlog
 
-- BBM extension write-back (record pick from Chrome panel)
 - Registry expansion toward top-240 via weekly ADP refresh
 - Setfive fanduel-api WebSocket → CCC-wiki (not this repo)
 - sportsdataverse adopt only if maintenance win is proven on 2025+ slates

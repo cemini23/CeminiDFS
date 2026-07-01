@@ -52,6 +52,7 @@ OPTIONAL_PASS_THROUGH_FIELDS = [
     "pass_protection_stress",
     "sleeper_buzz_add",
     "sleeper_buzz_drop",
+    "injury_source",
 ]
 
 

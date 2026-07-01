@@ -148,6 +148,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     compute_team_luck_table = None  # type: ignore[assignment]
     summarize_luck_metrics = None  # type: ignore[assignment]
 
+try:
+    from ceminidfs.data.espn import probe_league
+except ImportError:  # pragma: no cover - defensive for partial installs
+    probe_league = None  # type: ignore[assignment]
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -490,6 +495,15 @@ def build_parser() -> argparse.ArgumentParser:
     luck_metrics.add_argument("--json-out", type=Path, help="Write JSON summary to path")
     _add_profile_argument(luck_metrics)
     luck_metrics.set_defaults(handler=_cmd_luck_metrics)
+
+    espn = subparsers.add_parser("espn", help="ESPN fantasy adjunct tools (K138)")
+    espn_sub = espn.add_subparsers(dest="espn_command")
+
+    espn_probe = espn_sub.add_parser("probe", help="Test ESPN league connectivity and injury map")
+    espn_probe.add_argument("--league-id", type=int, required=True)
+    espn_probe.add_argument("--year", type=int, required=True)
+    espn_probe.add_argument("--json-out", type=Path, help="Write JSON output to path")
+    espn_probe.set_defaults(handler=_cmd_espn_probe)
 
     # BBM (Best Ball Mania) draft copilot
     bbm_parser = subparsers.add_parser("bbm", help="Best Ball Mania draft copilot")
@@ -946,6 +960,27 @@ def _cmd_luck_metrics(args: argparse.Namespace) -> int:
             f"{int(row['points_for']):>5} {int(row['points_against']):>5} "
             f"{row['expected_wins']:>5.1f} {row['luck']:>+6.2f}"
         )
+    return 0
+
+
+def _cmd_espn_probe(args: argparse.Namespace) -> int:
+    if probe_league is None:
+        raise RuntimeError("ESPN tools unavailable: ceminidfs.data.espn import failed")
+
+    summary = probe_league(args.league_id, args.year)
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(args.json_out)
+        return 0
+
+    print(f"ESPN league {summary['league_id']} ({summary['year']})")
+    print(f"  roster players: {summary['roster_players']}")
+    print(f"  injured/flagged: {summary['injured_or_flagged']}")
+    if summary.get("sample"):
+        print("  sample:")
+        for name, status in summary["sample"]:
+            print(f"    {name}: {status}")
     return 0
 
 

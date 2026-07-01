@@ -94,6 +94,7 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs calibrate` | Wiki-ready calibration brief (Markdown + JSON) |
 | `ceminidfs sleeper trending` | Sleeper add/drop buzz (K129 optional sentiment) |
 | `ceminidfs luck-metrics` | Team Pythagorean expected wins vs actual |
+| `ceminidfs espn probe` | ESPN fantasy league injury map smoke test (K138) |
 | `ceminidfs regression` | One command: optional prepare + backtest + calibrate + lineup backtest |
 | `ceminidfs lineup-backtest` | Synthetic slate → pydfs optimize → score vs actuals |
 | `ceminidfs benchmark replay` | Replay every paid CSV in a folder across weeks |

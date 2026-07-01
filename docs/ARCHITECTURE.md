@@ -105,6 +105,7 @@ Runtime artifacts: `data/bbm/bbm7.db`, `data/bbm/player_registry.json` (gitignor
 | Orchestration | `orchestrator.run`, `orchestrator.validate` | Stage DAG, manifest, lineup QA |
 | Sleeper buzz (K129) | `data.sleeper`, `models.buzz_signal` | Optional stage-0 trending sentiment |
 | Luck metrics (K129) | `pipeline.luck_metrics` | Pythagorean expected wins for calibration context |
+| ESPN adjunct (K138) | `data.espn` | Optional roster injury overlay when `league_id` set |
 
 ## Projection engine (Phase 2)
 
@@ -155,6 +156,12 @@ Optional **stage-0 buzz** from Sleeper public API — does not alter DIY project
 - `pipeline.luck_metrics` — team Pythagorean expected wins vs actual (MME calibration context)
 
 See [sleeper-sentiment-eval.md](sleeper-sentiment-eval.md) and [ROADMAP.md](../ROADMAP.md).
+
+## ESPN injury adjunct (K138)
+
+Optional roster injury tokens from ESPN fantasy API (`espn_api` MIT package) when `espn_adjunct.enabled` and `league_id` are set. Fills empty canonical `injury_status` fields only — nflverse remains primary.
+
+See [espn-api-eval.md](espn-api-eval.md).
 
 ## Distribution layer (Phase 5)
 

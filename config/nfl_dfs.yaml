@@ -61,6 +61,12 @@ buzz_signal:
   max_ownership_boost: 8.0
 luck_metrics:
   pyth_exponent: 2.37
+espn_adjunct:
+  enabled: false
+  league_id: null
+  year: null
+  espn_s2: null
+  swid: null
 stats:
   shrinkage:
     ypa: 250
