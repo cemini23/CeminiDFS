@@ -9,16 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from ceminidfs.bbm.config import (
-    BUY_QB,
-    BUY_RB_EARLY,
-    BUY_ROOKIE_WR_MAY_JUN,
-    BUY_TE_CLUSTER,
-    BUY_WR,
-    FADE_PLAYERS,
     FADE_ROUND_BANDS,
     TIER_EXPOSURE_CAPS,
     get_bye_week,
 )
+from ceminidfs.bbm.normalize_adp import normalize_name
 from ceminidfs.config import PROJECT_ROOT
 
 DATA_DIR_NAME = "bbm"
@@ -66,7 +61,7 @@ def _slug_id(name: str) -> str:
 
 
 def _normalize_merge(name: str) -> str:
-    return re.sub(r"\s+", " ", name.lower().replace("'", "").replace(".", " ")).strip()
+    return normalize_name(name)
 
 
 # Seed ADP / projection estimates for strategy players (refresh via refresh-adp weekly)
@@ -131,6 +126,11 @@ _SEED_PLAYERS: list[dict[str, Any]] = [
     {"name": "Brian Thomas Jr.", "position": "WR", "team": "JAX", "adp": 36.5, "tier": "stack_core", "signal": "BUY", "projection_pts": 185},
     {"name": "Malachi Corley", "position": "WR", "team": "NYJ", "adp": 178.2, "tier": "single_dart", "signal": "BUY", "projection_pts": 90, "drift_coeff": 0.15},
     {"name": "Pat Bryant", "position": "WR", "team": "DEN", "adp": 185.6, "tier": "single_dart", "signal": "BUY", "projection_pts": 88, "drift_coeff": 0.15},
+    # Additional seed players (A3 fix)
+    {"name": "Tetairoa McMillan", "position": "WR", "team": "CAR", "adp": 33.0, "tier": "stack_core", "signal": "BUY", "projection_pts": 186},
+    {"name": "Oronde Gadsden II", "position": "TE", "team": "LAC", "adp": 138.0, "tier": "mid_target", "signal": "BUY", "projection_pts": 112},
+    {"name": "Brenton Strange", "position": "TE", "team": "JAX", "adp": 142.0, "tier": "late_lottery", "signal": "BUY", "projection_pts": 106},
+    {"name": "Chig Okonkwo", "position": "TE", "team": "TEN", "adp": 150.0, "tier": "late_lottery", "signal": "BUY", "projection_pts": 104},
 ]
 
 
@@ -181,48 +181,6 @@ def build_seed_registry() -> dict[str, Any]:
 
     for row in _SEED_PLAYERS:
         add_player(row)
-
-    # Ensure named BUY lists appear even if not in _SEED_PLAYERS
-    buy_names = (
-        [(n, "TE", "mid_target") for n in BUY_TE_CLUSTER]
-        + [(n, "QB", "stack_core") for n in BUY_QB]
-        + [(n, "RB", "elite") for n in BUY_RB_EARLY]
-        + [(n, "WR", "stack_core") for n in BUY_WR]
-        + [(n, "WR", "single_dart") for n in BUY_ROOKIE_WR_MAY_JUN]
-    )
-    adp_cursor = 200.0
-    for name, pos, tier in buy_names:
-        merge = _normalize_merge(name)
-        if merge in seen:
-            continue
-        add_player(
-            {
-                "name": name,
-                "position": pos,
-                "team": "FA",
-                "adp": adp_cursor,
-                "tier": tier,
-                "signal": "BUY",
-                "projection_pts": 85.0,
-            }
-        )
-        adp_cursor += 3.0
-
-    for fade_name in FADE_PLAYERS:
-        merge = _normalize_merge(fade_name)
-        if merge in seen:
-            continue
-        add_player(
-            {
-                "name": fade_name,
-                "position": "WR",
-                "team": "FA",
-                "adp": 180.0,
-                "tier": "late_lottery",
-                "signal": "FADE",
-                "projection_pts": 80.0,
-            }
-        )
 
     players.sort(key=lambda p: p["adp"])
     return {

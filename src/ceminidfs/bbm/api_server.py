@@ -38,6 +38,7 @@ class ServerConfig:
     draft_id: Optional[str] = None
     slot: Optional[int] = None
     archetype: Optional[str] = None
+    token: Optional[str] = None
 
 
 class CorsRequestHandler(BaseHTTPRequestHandler):
@@ -57,7 +58,7 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         """Add CORS headers to allow Chrome extension access."""
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-BBM-Token")
         self.send_header("Content-Type", "application/json")
 
     def _send_json_response(self, data: dict[str, Any], status: int = 200) -> None:
@@ -118,6 +119,11 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        if self.config.token:
+            if self.headers.get("X-BBM-Token") != self.config.token:
+                self._send_error("Unauthorized", status=401)
+                return
+
         try:
             body = self._parse_json_body()
         except ValueError as e:
@@ -131,6 +137,10 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
                 self._handle_pick(body)
             elif path == "/api/taken":
                 self._handle_taken(body)
+            elif path == "/api/undo":
+                self._handle_undo(body)
+            elif path == "/api/pivot":
+                self._handle_pivot(body)
             else:
                 self._send_error("Not found", status=404)
         except Exception as e:
@@ -220,8 +230,7 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         pick_num = self._compute_pick_num(current_round, state.slot)
         archetype = params.get("archetype") or state.archetype
 
-        # Get recommendations
-        recs = session.get_recommendations(
+        meta = session.get_recommendations_meta(
             round_num=current_round,
             pick_num=pick_num,
             archetype_str=archetype,
@@ -231,7 +240,7 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
 
         # Format response
         formatted_recs: list[dict[str, Any]] = []
-        for i, rec in enumerate(recs, 1):
+        for i, rec in enumerate(meta["recommendations"], 1):
             formatted_recs.append({
                 "rank": i,
                 "player_id": rec.get("player_id"),
@@ -251,23 +260,36 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
             "round": current_round,
             "pick_num": pick_num,
             "archetype": archetype,
+            "pivot_warning": meta["pivot_warning"],
+            "pivot_to": meta["pivot_to"],
             "recommendations": formatted_recs,
         })
 
     def _handle_sync(self, body: dict[str, Any]) -> None:
-        """POST /api/sync JSON {draft_id, names: string[]} -> sync players."""
+        """POST /api/sync JSON {draft_id, names?: string[], labels?: string[]} -> sync players."""
         draft_id = body.get("draft_id") or self.config.draft_id
         names = body.get("names", [])
+        labels = body.get("labels", [])
 
         if not draft_id:
             self._send_error("Missing draft_id", status=400)
             return
 
-        if not isinstance(names, list):
-            self._send_error("names must be an array", status=400)
+        if not isinstance(names, list) or not isinstance(labels, list):
+            self._send_error("names/labels must be arrays", status=400)
             return
 
+        if labels:
+            board_parse = _get_board_parse()
+            parsed_names = board_parse.extract_names_from_aria_labels(
+                [label for label in labels if isinstance(label, str)]
+            )
+            names = list(names) + board_parse.filter_draft_board_names(parsed_names)
+
+        names = names[:200]
+
         ledger = _get_ledger()
+        session = _get_session()
 
         # Get state for current round/pick
         state = ledger.get_draft_state(draft_id)
@@ -278,7 +300,9 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         current_round = state.current_round
         pick_num = self._compute_pick_num(current_round, state.slot)
 
+        already_recorded = session.get_taken_player_ids(draft_id)
         synced: list[dict[str, Any]] = []
+        skipped_existing: list[str] = []
         unmatched: list[str] = []
         ambiguous: list[dict[str, Any]] = []
 
@@ -296,19 +320,26 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
                         "query": name,
                         "matches": [
                             {
+                                "player_id": m.get("player_id"),
                                 "name": m.get("name"),
                                 "position": m.get("position"),
                                 "team": m.get("team"),
+                                "index": i + 1,
                             }
-                            for m in last_ambiguous
+                            for i, m in enumerate(last_ambiguous)
                         ],
                     })
                 else:
                     unmatched.append(name)
                 continue
 
+            if player["player_id"] in already_recorded:
+                skipped_existing.append(player["name"])
+                continue
+
             # Record as taken
             ledger.record_taken(draft_id, current_round, pick_num, player["player_id"])
+            already_recorded.add(player["player_id"])
             synced.append({
                 "name": player["name"],
                 "player_id": player["player_id"],
@@ -320,6 +351,8 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
             "draft_id": draft_id,
             "synced": synced,
             "synced_count": len(synced),
+            "skipped_existing": skipped_existing,
+            "skipped_count": len(skipped_existing),
             "unmatched": unmatched,
             "unmatched_count": len(unmatched),
             "ambiguous": ambiguous,
@@ -327,15 +360,20 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_pick(self, body: dict[str, Any]) -> None:
-        """POST /api/pick JSON {draft_id, name} -> resolve and record pick."""
+        """POST /api/pick JSON {draft_id, name? player_id?} -> resolve and record pick."""
         draft_id = body.get("draft_id") or self.config.draft_id
         name = body.get("name")
+        player_id = body.get("player_id")
 
         if not draft_id:
             self._send_error("Missing draft_id", status=400)
             return
 
-        if not name or not isinstance(name, str):
+        if player_id is not None and not isinstance(player_id, str):
+            self._send_error("Invalid player_id", status=400)
+            return
+
+        if not player_id and (not name or not isinstance(name, str)):
             self._send_error("Missing or invalid name", status=400)
             return
 
@@ -350,28 +388,35 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         current_round = state.current_round
         pick_num = self._compute_pick_num(current_round, state.slot)
 
-        # Resolve player
-        player = ledger.resolve_player_query(name)
-        if player is None:
-            last_ambiguous = ledger.get_last_ambiguous_matches()
-            if last_ambiguous and len(last_ambiguous) > 1:
-                self._send_json_response({
-                    "draft_id": draft_id,
-                    "ambiguous": True,
-                    "query": name,
-                    "matches": [
-                        {
-                            "name": m.get("name"),
-                            "position": m.get("position"),
-                            "team": m.get("team"),
-                            "index": i + 1,
-                        }
-                        for i, m in enumerate(last_ambiguous)
-                    ],
-                })
+        if player_id:
+            player = ledger.get_player_by_id(player_id)
+            if player is None:
+                self._send_error(f"Player not found: {player_id}", status=404)
                 return
-            self._send_error(f"Player not found: {name}", status=404)
-            return
+        else:
+            # Picks are strict: unknown names return 404 and never create stubs.
+            player = ledger.resolve_player_query(name)
+            if player is None:
+                last_ambiguous = ledger.get_last_ambiguous_matches()
+                if last_ambiguous and len(last_ambiguous) > 1:
+                    self._send_json_response({
+                        "draft_id": draft_id,
+                        "ambiguous": True,
+                        "query": name,
+                        "matches": [
+                            {
+                                "player_id": m.get("player_id"),
+                                "name": m.get("name"),
+                                "position": m.get("position"),
+                                "team": m.get("team"),
+                                "index": i + 1,
+                            }
+                            for i, m in enumerate(last_ambiguous)
+                        ],
+                    })
+                    return
+                self._send_error(f"Player not found: {name}", status=404)
+                return
 
         # Record pick
         result = ledger.record_pick(draft_id, current_round, pick_num, player["player_id"], is_mine=True)
@@ -390,15 +435,23 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_taken(self, body: dict[str, Any]) -> None:
-        """POST /api/taken JSON {draft_id, name} -> resolve or stub and record taken."""
+        """POST /api/taken JSON {draft_id, name? player_id?} -> resolve or stub and record taken.
+
+        player_id path never stubs — stubs are only a name-path fallback.
+        """
         draft_id = body.get("draft_id") or self.config.draft_id
         name = body.get("name")
+        player_id = body.get("player_id")
 
         if not draft_id:
             self._send_error("Missing draft_id", status=400)
             return
 
-        if not name or not isinstance(name, str):
+        if player_id is not None and not isinstance(player_id, str):
+            self._send_error("Invalid player_id", status=400)
+            return
+
+        if not player_id and (not name or not isinstance(name, str)):
             self._send_error("Missing or invalid name", status=400)
             return
 
@@ -413,38 +466,45 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
         current_round = state.current_round
         pick_num = self._compute_pick_num(current_round, state.slot)
 
-        # Try to resolve player
-        player = ledger.resolve_player_query(name)
         is_stub = False
 
-        if player is None:
-            # Check if ambiguous
-            last_ambiguous = ledger.get_last_ambiguous_matches()
-            if last_ambiguous and len(last_ambiguous) > 1:
-                self._send_json_response({
-                    "draft_id": draft_id,
-                    "ambiguous": True,
-                    "query": name,
-                    "matches": [
-                        {
-                            "name": m.get("name"),
-                            "position": m.get("position"),
-                            "team": m.get("team"),
-                            "index": i + 1,
-                        }
-                        for i, m in enumerate(last_ambiguous)
-                    ],
-                })
+        if player_id:
+            player = ledger.get_player_by_id(player_id)
+            if player is None:
+                self._send_error(f"Player not found: {player_id}", status=404)
                 return
+        else:
+            # Try to resolve player
+            player = ledger.resolve_player_query(name)
+            if player is None:
+                # Check if ambiguous
+                last_ambiguous = ledger.get_last_ambiguous_matches()
+                if last_ambiguous and len(last_ambiguous) > 1:
+                    self._send_json_response({
+                        "draft_id": draft_id,
+                        "ambiguous": True,
+                        "query": name,
+                        "matches": [
+                            {
+                                "player_id": m.get("player_id"),
+                                "name": m.get("name"),
+                                "position": m.get("position"),
+                                "team": m.get("team"),
+                                "index": i + 1,
+                            }
+                            for i, m in enumerate(last_ambiguous)
+                        ],
+                    })
+                    return
 
-            # Create stub
-            player = ledger.ensure_player_stub(name)
-            is_stub = True
+                # Create stub
+                player = ledger.ensure_player_stub(name)
+                is_stub = True
 
         # Record as taken
         ledger.record_taken(draft_id, current_round, pick_num, player["player_id"])
 
-        self._send_json_response({
+        response = {
             "draft_id": draft_id,
             "player": {
                 "player_id": player["player_id"],
@@ -455,7 +515,35 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
             "round": current_round,
             "pick_num": pick_num,
             "is_stub": is_stub,
-        })
+        }
+        if is_stub:
+            response["warning"] = f"Unknown player '{name}' recorded as stub — verify spelling"
+        self._send_json_response(response)
+
+    def _handle_undo(self, body: dict[str, Any]) -> None:
+        """POST /api/undo JSON {draft_id} -> undo last pick/taken action."""
+        draft_id = body.get("draft_id") or self.config.draft_id
+        if not draft_id:
+            self._send_error("Missing draft_id", status=400)
+            return
+        result = _get_ledger().undo_last_action(draft_id)
+        if result is None:
+            self._send_error("Nothing to undo", status=404)
+            return
+        self._send_json_response({"draft_id": draft_id, **result})
+
+    def _handle_pivot(self, body: dict[str, Any]) -> None:
+        """POST /api/pivot JSON {draft_id, archetype} -> explicitly apply archetype pivot."""
+        draft_id = body.get("draft_id") or self.config.draft_id
+        archetype = str(body.get("archetype", "")).upper()
+        if not draft_id:
+            self._send_error("Missing draft_id", status=400)
+            return
+        if archetype not in ("A", "B", "C", "D", "E"):
+            self._send_error("archetype must be A-E", status=400)
+            return
+        result = _get_ledger().apply_pivot(draft_id, archetype, f"manual pivot to {archetype}")
+        self._send_json_response(result)
 
     def _compute_pick_num(self, round_num: int, slot: int) -> int:
         """Compute pick number using snake draft logic.
@@ -483,6 +571,7 @@ def create_server(
     draft_id: Optional[str] = None,
     slot: Optional[int] = None,
     archetype: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> HTTPServer:
     """Create an HTTP server instance.
 
@@ -492,6 +581,7 @@ def create_server(
         draft_id: Optional default draft ID.
         slot: Optional default draft slot.
         archetype: Optional default archetype.
+        token: Optional static token for POST auth (X-BBM-Token).
 
     Returns:
         Configured HTTPServer instance.
@@ -502,6 +592,7 @@ def create_server(
         draft_id=draft_id,
         slot=slot,
         archetype=archetype,
+        token=token,
     )
     handler_class = BBMAPIRequestHandler(config)
     return HTTPServer((host, port), handler_class)
@@ -513,6 +604,7 @@ def run_server(
     draft_id: Optional[str] = None,
     slot: Optional[int] = None,
     archetype: Optional[str] = None,
+    token: Optional[str] = None,
     on_shutdown: Optional[Callable[[], None]] = None,
 ) -> None:
     """Run the API server until interrupted.
@@ -523,9 +615,10 @@ def run_server(
         draft_id: Optional default draft ID.
         slot: Optional default draft slot.
         archetype: Optional default archetype.
+        token: Optional static token for POST auth (X-BBM-Token).
         on_shutdown: Optional callback when server stops.
     """
-    server = create_server(host, port, draft_id, slot, archetype)
+    server = create_server(host, port, draft_id, slot, archetype, token)
 
     print(f"BBM API server listening at http://{host}:{port}", flush=True)
     print("Endpoints:", flush=True)
@@ -533,9 +626,13 @@ def run_server(
     print("  GET  /health               -> {\"ok\": true}", flush=True)
     print("  GET  /api/state?draft_id=  -> draft state", flush=True)
     print("  GET  /api/recommendations?draft_id= -> recommendations", flush=True)
-    print("  POST /api/sync             -> {draft_id, names: []}", flush=True)
+    print("  POST /api/sync             -> {draft_id, names?: [], labels?: []}", flush=True)
     print("  POST /api/pick             -> {draft_id, name}", flush=True)
     print("  POST /api/taken            -> {draft_id, name}", flush=True)
+    print("  POST /api/undo             -> {draft_id}", flush=True)
+    print("  POST /api/pivot            -> {draft_id, archetype}", flush=True)
+    if token:
+        print("  POST auth                  -> X-BBM-Token header required", flush=True)
     print("\nWaiting for Chrome extension (Ctrl+C to stop)", flush=True)
 
     try:
@@ -558,6 +655,7 @@ if __name__ == "__main__":
     parser.add_argument("--draft-id", help="Default draft ID")
     parser.add_argument("--slot", type=int, help="Default draft slot")
     parser.add_argument("--archetype", help="Default archetype")
+    parser.add_argument("--token", type=str, default=None, help="Optional static token required on POST endpoints (X-BBM-Token header)")
 
     args = parser.parse_args()
 
@@ -567,4 +665,5 @@ if __name__ == "__main__":
         draft_id=args.draft_id,
         slot=args.slot,
         archetype=args.archetype,
+        token=args.token,
     )

@@ -6,7 +6,7 @@ draft pivot logic when primary archetype is blocked.
 
 from __future__ import annotations
 
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Final
 from ceminidfs.bbm.config import (
     ARCHETYPE_TARGETS,
     ARCHETYPE_NAMES,
@@ -16,6 +16,19 @@ from ceminidfs.bbm.config import (
     archetype_mult as config_archetype_mult,
 )
 from ceminidfs.bbm.models import Archetype, Roster, Player, LedgerCounts, PivotResult
+from ceminidfs.bbm.normalize_adp import normalize_name
+
+# Exact normalized merge names — substring matching false-matched names like
+# "Tyler Taylor" (2026-07-02 audit). Refresh this list each season.
+ELITE_RB_MERGE_NAMES: Final[frozenset[str]] = frozenset({
+    "jahmyr gibbs",
+    "bijan robinson",
+    "jonathan taylor",
+    "derrick henry",
+    "chase brown",
+    "devon achane",
+    "ashton jeanty",
+})
 
 
 def assign_archetype(ledger_counts: LedgerCounts) -> Archetype:
@@ -128,22 +141,14 @@ def _get_fallback(primary: Archetype, fallback_index: int = 0) -> Optional[Arche
 
 
 def _is_elite_rb_tier_empty(board: List[Player]) -> bool:
-    """Check if elite RB tier is empty on board.
-
-    Elite RBs: Gibbs, Bijan, Taylor, Henry, Chase Brown, Achane, Jeanty
-    """
-    elite_rbs = {
-        "gibbs", "bijan", "taylor", "henry", "chase brown",
-        "achane", "jeanty"
-    }
-
+    """True when no elite-tier RB (exact merge_name match) remains on board."""
     for player in board:
-        if player.position == "RB":
-            name_lower = player.name.lower()
-            if any(elite in name_lower for elite in elite_rbs):
-                return False  # Found an elite RB
-
-    return True  # No elite RBs available
+        if player.position != "RB":
+            continue
+        merge = normalize_name(player.merge_name or player.name)
+        if merge in ELITE_RB_MERGE_NAMES:
+            return False
+    return True
 
 
 def _is_stack_anchor_gone(board: List[Player]) -> bool:
@@ -152,8 +157,6 @@ def _is_stack_anchor_gone(board: List[Player]) -> bool:
     Uses merge_name patterns from config for stack anchors (WR/TE portions).
     """
     from ceminidfs.bbm.config import STACK_PAIRS
-    from ceminidfs.bbm.normalize_adp import normalize_name
-
     # Extract WR/TE anchor names from STACK_PAIRS (second player in each pair)
     anchor_names = set()
     for _, wr_te_name in STACK_PAIRS:
@@ -198,11 +201,15 @@ def _is_stack_lane_dead(roster: Roster, board: List[Player]) -> bool:
 
 
 def _is_rb_run_happening(board: List[Player], round_num: int) -> bool:
-    """Check if an RB run is happening (multiple RBs going off board)."""
-    # In early rounds (R5), if we're seeing RBs fly off, it's an RB run
-    # This is contextual and would need historical board state
-    # Simplified: assume true if we're in R5+ and haven't taken a RB
-    return round_num >= 5
+    """RB run = RBs who should still be on the board (by ADP) are nearly exhausted.
+
+    picks_elapsed approximates total picks made so far in a 12-team room.
+    """
+    picks_elapsed = round_num * 12
+    remaining_early_rbs = [
+        player for player in board if player.position == "RB" and player.adp <= picks_elapsed
+    ]
+    return len(remaining_early_rbs) <= 2
 
 
 def get_archetype_description(archetype: Archetype) -> str:

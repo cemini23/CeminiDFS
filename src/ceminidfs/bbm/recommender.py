@@ -26,6 +26,7 @@ from ceminidfs.bbm.models import Player, Roster, DraftState, Archetype, Recommen
 from ceminidfs.bbm.archetype import archetype_mult, should_force_archetype_pick
 from ceminidfs.bbm.validator import validate_pick, get_violation_severity
 from ceminidfs.bbm.ledger import combo_pct
+from ceminidfs.bbm.schedule import are_opponents_week17
 
 
 @dataclass
@@ -164,42 +165,11 @@ def _calculate_stack_mult(
 
 def _is_w17_bringback(player: Player, roster: Roster) -> bool:
     """Check if player is in a W17 bring-back matchup against roster."""
-    # W17 matchups - simplified lookup
-    # In reality this would be a full schedule lookup
-    w17_matchups = _get_w17_matchups()
-
-    player_week = 17  # W17
-
-    for roster_player in roster.players:
-        # Check if roster player is in W17
-        roster_player_week = 17  # Assume W17 for now
-
-        if roster_player_week == player_week == 17:
-            # Check if they're in the same game (opposing teams)
-            if _are_opponents(player.team, roster_player.team, w17_matchups):
-                return True
-
-    return False
-
-
-def _get_w17_matchups() -> List[Tuple[str, str]]:
-    """Get W17 matchup pairs."""
-    # Simplified W17 matchups - would come from schedule module
-    # Format: list of (team_a, team_b) pairs playing each other
-    return [
-        ("KC", "DEN"), ("CAR", "TB"), ("CIN", "PIT"), ("MIA", "NYJ"),
-        ("DET", "SF"), ("MIN", "GB"), ("BUF", "NE"), ("LAC", "LV"),
-        ("WAS", "DAL"), ("JAX", "TEN"), ("NYG", "IND"), ("NO", "ARI"),
-        ("HOU", "BAL"), ("CHI", "SEA"), ("PHI", "ATL"), ("CLE", "LAR"),
-    ]
-
-
-def _are_opponents(team_a: str, team_b: str, matchups: List[Tuple[str, str]]) -> bool:
-    """Check if two teams are opponents in a given matchup list."""
-    for t1, t2 in matchups:
-        if (team_a == t1 and team_b == t2) or (team_a == t2 and team_b == t1):
-            return True
-    return False
+    return any(
+        are_opponents_week17(player.team, roster_player.team)
+        for roster_player in roster.players
+        if roster_player.team and player.team
+    )
 
 
 def _calculate_exposure_mult(
@@ -297,8 +267,10 @@ def _prefilter_candidates(
     current_round = roster.current_round
 
     for player in players:
-        # Skip stub players (unknown players that were added as stubs)
+        # Skip stubs and team-less FA rows (cannot validate constraints with no real team/bye)
         if player.player_id.startswith("stub:"):
+            continue
+        if not player.team or player.team == "FA":
             continue
 
         # Exclude faded players (use round-specific fade check)

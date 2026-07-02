@@ -420,7 +420,7 @@ def reconcile_from_csv(csv_path: str | Path) -> ReconcileResult:
         FROM picks p
         JOIN drafts d ON p.draft_id = d.draft_id
         JOIN players_dim pd ON p.player_id = pd.player_id
-        WHERE p.is_mine = 1 AND d.status = 'complete'
+        WHERE p.is_mine = 1 AND d.status = 'complete' AND d.is_practice = 0
         GROUP BY p.player_id, pd.name, pd.position
         """
     )

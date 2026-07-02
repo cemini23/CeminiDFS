@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CeminiDFS BBM Copilot",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "Draggable panel for CeminiDFS BBM recommendations - read only, manual sync",
   "permissions": [
     "storage",

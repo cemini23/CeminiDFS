@@ -236,9 +236,13 @@ def merge_adp_csv(
     csv_path: Path | str,
     registry: dict[str, Any],
     *,
-    add_unmatched: bool = True,
+    add_unmatched: bool = False,
 ) -> AdpMergeResult:
-    """Update registry ADP values from a BBTB-style CSV (name + adp columns)."""
+    """Update registry ADP values from a BBTB-style CSV (name + adp columns).
+
+    Unmatched names are reported, never added, unless add_unmatched=True is
+    passed explicitly — auto-adding created junk team="FA" rows (2026-07-02 audit).
+    """
 
     rows = _read_csv_rows(csv_path)
     players = registry.setdefault("players", [])

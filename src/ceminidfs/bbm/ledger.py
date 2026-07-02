@@ -109,6 +109,16 @@ def init_db(path: Optional[Path | str] = None) -> Path:
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # Add is_practice column if it doesn't exist (ALTER-safe for existing databases)
+    try:
+        cursor.execute("ALTER TABLE drafts ADD COLUMN is_practice INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    cursor.execute(
+        "UPDATE drafts SET is_practice = 1 "
+        "WHERE draft_id LIKE 'practice-%' AND (is_practice IS NULL OR is_practice = 0)"
+    )
+
     # Picks table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS picks (
@@ -298,21 +308,21 @@ def exposure_pct(player_id: str, db_path: Optional[Path] = None) -> dict[str, fl
     row = cursor.fetchone()
     cap = row[0] if row else 0.35  # Default 35% cap
 
-    # Count complete drafts
+    # Count complete drafts (excluding practice drafts)
     cursor.execute("""
         SELECT COUNT(DISTINCT d.draft_id)
         FROM drafts d
         JOIN picks p ON d.draft_id = p.draft_id
-        WHERE p.player_id = ? AND d.status = 'complete'
+        WHERE p.player_id = ? AND d.status = 'complete' AND d.is_practice = 0
     """, (player_id,))
     complete_count = cursor.fetchone()[0] or 0
 
-    # Count in_progress drafts at 50% weight
+    # Count in_progress drafts at 50% weight (excluding practice drafts)
     cursor.execute("""
         SELECT COUNT(DISTINCT d.draft_id)
         FROM drafts d
         JOIN picks p ON d.draft_id = p.draft_id
-        WHERE p.player_id = ? AND d.status = 'in_progress'
+        WHERE p.player_id = ? AND d.status = 'in_progress' AND d.is_practice = 0
     """, (player_id,))
     in_progress_count = cursor.fetchone()[0] or 0
 
@@ -333,6 +343,7 @@ def combo_pct(player_a: str, player_b: str, db_path: Optional[Path] = None) -> d
     """
     Calculate combo pair exposure (e.g., QB-WR stacks).
     Denominator is TOTAL_ENTRIES (150) from config.
+    Complete drafts count at 100%, in_progress at 50% weight.
     Returns dict with 'current', 'cap', 'available'.
     """
     db = db_path or get_db_path()
@@ -348,26 +359,29 @@ def combo_pct(player_a: str, player_b: str, db_path: Optional[Path] = None) -> d
     row = cursor.fetchone()
     cap = row[0] if row else 0.25  # Default 25% combo cap
 
-    # Count drafts where both players appear (complete only for combos)
+    # Count drafts where both players appear (excluding practice drafts, with in-progress weighting)
     cursor.execute("""
-        SELECT COUNT(DISTINCT p1.draft_id)
-        FROM picks p1
-        JOIN picks p2 ON p1.draft_id = p2.draft_id
-        JOIN drafts d ON p1.draft_id = d.draft_id
-        WHERE p1.player_id = ? AND p2.player_id = ? AND d.status = 'complete'
+        SELECT
+            COALESCE(SUM(CASE WHEN d.status = 'complete' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN d.status = 'in_progress' THEN 1 ELSE 0 END), 0)
+        FROM (
+            SELECT DISTINCT p1.draft_id AS draft_id
+            FROM picks p1
+            JOIN picks p2 ON p1.draft_id = p2.draft_id
+            WHERE p1.player_id = ? AND p2.player_id = ?
+        ) joint
+        JOIN drafts d ON joint.draft_id = d.draft_id
+        WHERE d.is_practice = 0
     """, (player_a, player_b))
-    combo_count = cursor.fetchone()[0] or 0
+    complete_count, in_progress_count = cursor.fetchone()
 
     conn.close()
 
     # Calculate exposure using TOTAL_ENTRIES as denominator
-    exposure = combo_count / TOTAL_ENTRIES
+    weighted = complete_count + (IN_PROGRESS_EXPOSURE_WEIGHT * in_progress_count)
+    exposure = weighted / TOTAL_ENTRIES
 
-    return {
-        "current": round(exposure, 3),
-        "cap": cap,
-        "available": round(cap - exposure, 3),
-    }
+    return {"current": exposure, "cap": cap, "available": cap - exposure}
 
 
 def create_draft(
@@ -376,21 +390,26 @@ def create_draft(
     archetype: str = "A",
     db_path: Optional[Path] = None,
     total_rounds: int = 18,
+    is_practice: bool = False,
 ) -> dict[str, Any]:
     """Create a new draft record."""
     db = db_path or get_db_path()
     conn = connect_db(db)
     cursor = conn.cursor()
 
+    # Force is_practice=1 for practice drafts
+    is_practice_flag = 1 if (is_practice or draft_id.startswith("practice-")) else 0
+
     cursor.execute("""
-        INSERT INTO drafts (draft_id, draft_date, slot, archetype, status, current_round, total_rounds)
-        VALUES (?, ?, ?, ?, 'in_progress', 1, ?)
+        INSERT INTO drafts (draft_id, draft_date, slot, archetype, status, current_round, total_rounds, is_practice)
+        VALUES (?, ?, ?, ?, 'in_progress', 1, ?, ?)
     """, (
         draft_id,
         datetime.now().isoformat(),
         slot,
         archetype,
         total_rounds,
+        is_practice_flag,
     ))
 
     conn.commit()
@@ -402,6 +421,7 @@ def create_draft(
         "archetype": archetype,
         "status": "in_progress",
         "current_round": 1,
+        "is_practice": bool(is_practice_flag),
     }
 
 
@@ -635,7 +655,7 @@ def list_in_progress_drafts(db_path: Optional[Path] = None) -> list[dict[str, An
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT draft_id, slot, archetype, current_round, total_rounds
+        SELECT draft_id, slot, archetype, current_round, total_rounds, is_practice
         FROM drafts WHERE status = 'in_progress'
         ORDER BY draft_date DESC
     """)
@@ -647,6 +667,7 @@ def list_in_progress_drafts(db_path: Optional[Path] = None) -> list[dict[str, An
             "archetype": r[2],
             "current_round": r[3],
             "total_rounds": r[4],
+            "is_practice": bool(r[5]),
         }
         for r in cursor.fetchall()
     ]
@@ -674,6 +695,53 @@ def complete_draft(draft_id: str, db_path: Optional[Path] = None) -> dict[str, A
     return {"draft_id": draft_id, "status": "complete"}
 
 
+def abandon_draft(
+    draft_id: str,
+    db_path: Optional[Path] = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Delete a stale draft and all its rows. Refuses complete drafts unless force."""
+    db = db_path or get_db_path()
+    conn = connect_db(db)
+    cursor = conn.cursor()
+
+    # Check draft exists and status
+    cursor.execute("SELECT status FROM drafts WHERE draft_id = ?", (draft_id,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f"Draft '{draft_id}' not found")
+
+    status = row[0]
+    if status == 'complete' and not force:
+        conn.close()
+        raise ValueError("Refusing to abandon a complete draft (use force=True)")
+
+    # Delete in order: picks, room_taken, action_log, drafts
+    cursor.execute("DELETE FROM picks WHERE draft_id = ?", (draft_id,))
+    picks_removed = cursor.rowcount
+
+    cursor.execute("DELETE FROM room_taken WHERE draft_id = ?", (draft_id,))
+    taken_removed = cursor.rowcount
+
+    cursor.execute("DELETE FROM action_log WHERE draft_id = ?", (draft_id,))
+    action_removed = cursor.rowcount
+
+    cursor.execute("DELETE FROM drafts WHERE draft_id = ?", (draft_id,))
+    drafts_removed = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "draft_id": draft_id,
+        "deleted": drafts_removed > 0,
+        "picks_removed": picks_removed,
+        "taken_removed": taken_removed,
+        "action_log_removed": action_removed,
+    }
+
+
 def update_draft_archetype(draft_id: str, archetype: str, db_path: Optional[Path] = None) -> dict[str, Any]:
     """Update the archetype for a draft."""
     db = db_path or get_db_path()
@@ -693,10 +761,13 @@ def update_draft_archetype(draft_id: str, archetype: str, db_path: Optional[Path
 
 def get_players_by_name(name: str, db_path: Optional[Path] = None) -> list[dict[str, Any]]:
     """Return matches by exact merge_name first, then partial matches."""
+    from ceminidfs.bbm.config import PLAYER_ALIASES
+
     db = db_path or get_db_path()
     conn = connect_db(db)
     cursor = conn.cursor()
     normalized = normalize_name(name)
+    normalized = PLAYER_ALIASES.get(normalized, normalized)
 
     cursor.execute(
         """
@@ -738,6 +809,36 @@ def get_players_by_name(name: str, db_path: Optional[Path] = None) -> list[dict[
         }
         for row in rows
     ]
+
+
+def get_player_by_id(player_id: str, db_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
+    """Fetch one players_dim row by exact player_id."""
+    db = db_path or get_db_path()
+    conn = connect_db(db)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT player_id, name, team, position, bye_week, tier, cap_pct, adp, signal, injury_fade
+        FROM players_dim WHERE player_id = ?
+        """,
+        (player_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return {
+        "player_id": row[0],
+        "name": row[1],
+        "team": row[2],
+        "position": row[3],
+        "bye_week": row[4],
+        "tier": row[5],
+        "cap_pct": row[6],
+        "adp": row[7],
+        "signal": row[8],
+        "injury_fade": bool(row[9]),
+    }
 
 
 def get_player_by_name(name: str, db_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
@@ -835,6 +936,8 @@ def resolve_player_query(
       If >1 match, store the list in _last_ambiguous_matches and return None.
 
     Returns player dict on success, None if ambiguous or not found.
+    Returns None if not found or ambiguous; never creates stubs.
+    Callers that allow stubs (explicit 'taken') must call ensure_player_stub themselves.
     """
     query = query.strip()
 
@@ -861,7 +964,7 @@ def resolve_player_query(
 
     if len(matches) == 0:
         _set_last_ambiguous_matches([])
-        return ensure_player_stub(query, db_path=db_path)
+        return None
 
     if len(matches) == 1:
         _set_last_ambiguous_matches([])

@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
+# Re-export schedule constants for backward compatibility
+from ceminidfs.bbm.schedule import BYE_WEEKS_2026 as BYE_WEEKS, get_bye_week  # noqa: F401
+
+# Query aliases: normalized query -> canonical merge_name (applied in ledger.get_players_by_name)
+PLAYER_ALIASES: Dict[str, str] = {
+    "jsn": "jaxon smith njigba",
+    "arsb": "amon ra st brown",
+}
+
 # Portfolio targets (150 entries)
 ARCHETYPE_TARGETS = {
     "A": 53,  # RB-forward (35%)
@@ -53,19 +62,6 @@ EXPOSURE_SOFT_BRAKE_PCT = 0.05
 
 # In-progress draft weight for exposure preview
 IN_PROGRESS_EXPOSURE_WEIGHT = 0.5
-
-# Bye week calendar 2026
-BYE_WEEKS: Dict[str, int] = {
-    "KC": 5, "CAR": 5,
-    "CIN": 6, "MIA": 6, "DET": 6, "MIN": 6,
-    "BUF": 7, "LAC": 7, "WAS": 7, "JAX": 7,
-    "SF": 8, "NYG": 8, "NO": 8, "HOU": 8,
-    "PIT": 9, "TEN": 9,
-    "CHI": 10, "DEN": 10, "TB": 10, "PHI": 10,
-    "CLE": 11, "ATL": 11, "GB": 11, "NE": 11, "LAR": 11, "SEA": 11,
-    "IND": 13, "NYJ": 13, "LV": 13, "BAL": 13,
-    "ARI": 14, "DAL": 14,
-}
 
 # Hard constraint limits
 MAX_SAME_BYE = 7          # ≤7 players same bye (teammates exempt)
@@ -315,8 +311,3 @@ def archetype_mult(archetype: str, round_num: int) -> float:
     """Return archetype multiplier for a given round."""
     band = get_round_band(round_num)
     return ARCHETYPE_ROUND_MULTS.get(archetype, {}).get(band, 1.0)
-
-
-def get_bye_week(team: str) -> int | None:
-    """Return bye week for a team abbreviation."""
-    return BYE_WEEKS.get(team.upper())

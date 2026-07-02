@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -66,13 +67,27 @@ def project_week(
         rows = _add_ownership_to_rows(rows, cfg, site or _site_from_rows(rows))
 
     if _buzz_enabled(cfg):
-        rows = apply_buzz_signal(rows, config=cfg)
+        rows = _apply_optional_overlay(rows, apply_buzz_signal, "buzz signal", cfg)
 
     if _espn_enabled(cfg):
-        rows = apply_espn_injury_overlay(rows, config=cfg)
+        rows = _apply_optional_overlay(rows, apply_espn_injury_overlay, "ESPN injury", cfg)
 
     write_canonical_csv(rows, output_path)
     return output_path
+
+
+def _apply_optional_overlay(
+    rows: list[dict[str, Any]],
+    overlay_fn: Any,
+    label: str,
+    config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Apply a network-backed overlay; on any failure warn and return rows unchanged."""
+    try:
+        return overlay_fn(rows, config=config)
+    except Exception as exc:
+        print(f"WARNING: {label} overlay failed; continuing without it: {exc}", file=sys.stderr)
+        return rows
 
 
 def _espn_enabled(config: Mapping[str, Any]) -> bool:

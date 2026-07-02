@@ -3,15 +3,30 @@
 
   let panel = null;
   let pollInterval = null;
-  let config = { apiBase: 'http://127.0.0.1:8765', draftId: '' };
+  let config = { apiBase: 'http://127.0.0.1:8765', draftId: '', token: '' };
 
   const ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`;
 
+  const BOARD_SELECTORS = [
+    '[class*="draft-board"]',
+    '[class*="DraftBoard"]',
+    '[class*="drafted"]',
+    '[class*="pick-list"]',
+    '[data-testid*="board"]',
+  ];
+
+  function buildPostHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (config.token) headers['X-BBM-Token'] = config.token;
+    return headers;
+  }
+
   function loadConfig() {
     return new Promise((resolve) => {
-      chrome.storage.local.get(['apiBase', 'draftId'], (result) => {
+      chrome.storage.local.get(['apiBase', 'draftId', 'token'], (result) => {
         config.apiBase = (result.apiBase || 'http://127.0.0.1:8765').replace(/\/$/, '');
         config.draftId = result.draftId || '';
+        config.token = result.token || '';
         resolve(config);
       });
     });
@@ -43,6 +58,7 @@
           <span>CeminiDFS BBM</span>
         </div>
         <div class="bbm-controls">
+          <button class="bbm-btn bbm-btn-icon" id="bbm-undo" title="Undo last recorded action">↶</button>
           <button class="bbm-btn bbm-btn-icon" id="bbm-refresh" title="Refresh recommendations">↻</button>
           <button class="bbm-btn bbm-btn-icon" id="bbm-toggle">−</button>
         </div>
@@ -97,37 +113,47 @@
 
     panel.querySelector('#bbm-refresh').addEventListener('click', fetchRecommendations);
     panel.querySelector('#bbm-scan').addEventListener('click', scanBoard);
+    panel.querySelector('#bbm-undo').addEventListener('click', undoLast);
 
     return panel;
   }
 
-  function extractPlayerNames() {
-    const names = new Set();
-    const skipPatterns = /pick|draft|round|timer|clock|queue|my turn|best available|underdog|fantasy|settings|close|menu/i;
-
-    document.querySelectorAll('[aria-label]').forEach(el => {
+  function collectBoardLabels() {
+    let root = null;
+    let usedSelector = null;
+    for (const sel of BOARD_SELECTORS) {
+      root = document.querySelector(sel);
+      if (root) { usedSelector = sel; break; }
+    }
+    if (!root) {
+      return { labels: [], warning: 'Board container not found — Underdog DOM may have changed' };
+    }
+    const labels = [];
+    root.querySelectorAll('[aria-label]').forEach((el) => {
       const label = el.getAttribute('aria-label')?.trim();
-      if (!label || skipPatterns.test(label)) return;
-      if (label.length < 4 || label.length > 50) return;
-
-      const words = label.split(/\s+/);
-      if (words.length >= 2 && /^[A-Za-z\-\'\.]+$/.test(words[0])) {
-        names.add(label.replace(/\s+(WR|RB|QB|TE|FLEX)\b.*$/i, '').trim());
-      }
+      if (label && label.length >= 4 && label.length <= 60) labels.push(label);
     });
+    return { labels: labels.slice(0, 200), warning: null, selector: usedSelector };
+  }
 
-    document.querySelectorAll('button, div, span').forEach(el => {
-      const text = el.textContent?.trim();
-      if (!text || text.length < 3 || text.length > 40) return;
-      if (skipPatterns.test(text)) return;
-
-      const words = text.split(/\s+/);
-      if (words.length >= 2 && /^[A-Z]/.test(words[0])) {
-        names.add(text);
-      }
-    });
-
-    return Array.from(names).slice(0, 50);
+  async function undoLast() {
+    const statusEl = panel.querySelector('#bbm-sync-status');
+    if (!config.draftId) { statusEl.textContent = 'Set draft ID in popup'; return; }
+    try {
+      const res = await fetch(`${config.apiBase}/api/undo`, {
+        method: 'POST',
+        headers: buildPostHeaders(),
+        body: JSON.stringify({ draft_id: config.draftId }),
+      });
+      const data = await res.json();
+      statusEl.textContent = (!res.ok || data.error)
+        ? (data.error || `Undo failed (${res.status})`)
+        : `Undid ${data.undone} (round ${data.round})`;
+      fetchRecommendations();
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } catch (_e) {
+      statusEl.textContent = 'API unreachable — is serve running?';
+    }
   }
 
   async function scanBoard() {
@@ -142,8 +168,12 @@
       return;
     }
 
-    const names = extractPlayerNames();
-    if (names.length === 0) {
+    const { labels, warning } = collectBoardLabels();
+    if (warning) {
+      statusEl.textContent = warning;
+      return;
+    }
+    if (labels.length === 0) {
       statusEl.textContent = 'No players found';
       return;
     }
@@ -151,8 +181,8 @@
     try {
       const res = await fetch(`${config.apiBase}/api/sync`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ draft_id: config.draftId, names })
+        headers: buildPostHeaders(),
+        body: JSON.stringify({ draft_id: config.draftId, labels })
       });
 
       const data = await res.json();
@@ -160,9 +190,17 @@
         statusEl.textContent = data.error || `Sync failed (${res.status})`;
         return;
       }
-      statusEl.textContent = `Synced ${data.synced_count ?? data.synced?.length ?? 0}`;
+      const ambiguousCount = data.ambiguous_count ?? 0;
+      statusEl.textContent =
+        `Synced ${data.synced_count ?? 0} — ${data.skipped_count ?? 0} known — ` +
+        `${data.unmatched_count ?? 0} unmatched` +
+        (ambiguousCount ? ` — ${ambiguousCount} ambiguous` : '');
+      if (data.unmatched?.length) console.warn('BBM unmatched names:', data.unmatched);
+      (data.ambiguous || []).slice(0, 3).forEach((entry) => {
+        renderAmbiguous(entry.query, entry.matches, '/api/taken');
+      });
       fetchRecommendations();
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      if (!ambiguousCount) setTimeout(() => { statusEl.textContent = ''; }, 3000);
     } catch (_e) {
       statusEl.textContent = 'API unreachable — is serve running?';
       setTimeout(() => { statusEl.textContent = ''; }, 4000);
@@ -191,6 +229,7 @@
         return;
       }
 
+      renderPivotWarning(data.pivot_warning, data.pivot_to);
       renderRecommendations(data.recommendations || []);
     } catch (_e) {
       recsEl.innerHTML = '<div class="bbm-error">API unreachable — run: ceminidfs bbm serve --slot N</div>';
@@ -244,10 +283,16 @@
     try {
       const res = await fetch(`${config.apiBase}/api/pick`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildPostHeaders(),
         body: JSON.stringify({ draft_id: config.draftId, name })
       });
       const data = await res.json();
+
+      if (res.ok && data.ambiguous) {
+        statusEl.textContent = `Ambiguous: ${data.query}`;
+        renderAmbiguous(data.query, data.matches, '/api/pick');
+        return;
+      }
 
       if (!res.ok || data.error) {
         statusEl.textContent = data.error || `Pick failed (${res.status})`;
@@ -261,6 +306,95 @@
     } catch (_e) {
       statusEl.textContent = 'API unreachable — is serve running?';
       setTimeout(() => { statusEl.textContent = ''; }, 4000);
+    }
+  }
+
+  function renderPivotWarning(warning, pivotTo) {
+    let el = panel.querySelector('#bbm-pivot');
+    if (!warning) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'bbm-pivot';
+      el.className = 'bbm-pivot-warning';
+      const body = panel.querySelector('.bbm-body');
+      body.insertBefore(el, body.querySelector('.bbm-section'));
+    }
+    el.innerHTML = `<span>${escapeHtml(warning)}</span>` + (pivotTo
+      ? `<button class="bbm-btn bbm-btn-pivot" id="bbm-apply-pivot">Pivot → ${escapeHtml(pivotTo)}</button>`
+      : '');
+    const btn = el.querySelector('#bbm-apply-pivot');
+    if (btn) btn.addEventListener('click', () => applyPivot(pivotTo));
+  }
+
+  async function applyPivot(archetype) {
+    const statusEl = panel.querySelector('#bbm-sync-status');
+    try {
+      const res = await fetch(`${config.apiBase}/api/pivot`, {
+        method: 'POST',
+        headers: buildPostHeaders(),
+        body: JSON.stringify({ draft_id: config.draftId, archetype }),
+      });
+      const data = await res.json();
+      statusEl.textContent = (!res.ok || data.error)
+        ? (data.error || `Pivot failed (${res.status})`)
+        : `Pivoted to ${archetype}`;
+      fetchRecommendations();   // warning clears server-side (pivot_applied=1)
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } catch (_e) {
+      statusEl.textContent = 'API unreachable — is serve running?';
+    }
+  }
+
+  function renderAmbiguous(query, matches, endpoint) {
+    // endpoint: '/api/pick' (Rec button flow) or '/api/taken' (Scan Board flow)
+    let box = panel.querySelector('#bbm-ambiguous');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'bbm-ambiguous';
+      box.className = 'bbm-ambiguous';
+      panel.querySelector('.bbm-body').appendChild(box);
+    }
+    const row = document.createElement('div');
+    row.className = 'bbm-ambiguous-row';
+    row.innerHTML = `<div class="bbm-ambiguous-query">Which “${escapeHtml(query)}”?</div>`;
+    (matches || []).slice(0, 4).forEach((m) => {
+      const btn = document.createElement('button');
+      btn.className = 'bbm-btn bbm-ambiguous-btn';
+      btn.textContent = `${m.name} (${m.position || '?'} ${m.team || '?'})`;
+      btn.addEventListener('click', async () => {
+        await postResolved(endpoint, m.player_id);
+        row.remove();
+        if (!box.querySelector('.bbm-ambiguous-row')) box.remove();
+      });
+      row.appendChild(btn);
+    });
+    const dismiss = document.createElement('button');
+    dismiss.className = 'bbm-btn bbm-btn-icon bbm-ambiguous-dismiss';
+    dismiss.textContent = '✕';
+    dismiss.addEventListener('click', () => {
+      row.remove();
+      if (!box.querySelector('.bbm-ambiguous-row')) box.remove();
+    });
+    row.appendChild(dismiss);
+    box.appendChild(row);
+  }
+
+  async function postResolved(endpoint, playerId) {
+    const statusEl = panel.querySelector('#bbm-sync-status');
+    try {
+      const res = await fetch(`${config.apiBase}${endpoint}`, {
+        method: 'POST',
+        headers: buildPostHeaders(),
+        body: JSON.stringify({ draft_id: config.draftId, player_id: playerId }),
+      });
+      const data = await res.json();
+      statusEl.textContent = (!res.ok || data.error)
+        ? (data.error || `Failed (${res.status})`)
+        : `Recorded ${data.player?.name || playerId}`;
+      fetchRecommendations();
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } catch (_e) {
+      statusEl.textContent = 'API unreachable — is serve running?';
     }
   }
 
@@ -305,6 +439,9 @@
         config.draftId = changes.draftId.newValue || '';
         updateHint();
         fetchRecommendations();
+      }
+      if (changes.token) {
+        config.token = changes.token.newValue || '';
       }
     });
 

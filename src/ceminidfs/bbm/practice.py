@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from ceminidfs.bbm.ledger import (
+    count_room_taken,
     complete_draft,
     create_draft,
     get_draft_state,
@@ -20,7 +21,7 @@ from ceminidfs.bbm.ledger import (
 from ceminidfs.bbm.session import archetype_header, get_recommendations
 from ceminidfs.bbm.audit import audit_draft, PickAnalysis
 from ceminidfs.bbm.models import Draft, DraftStatus, Roster
-from ceminidfs.bbm.session import player_from_row
+from ceminidfs.bbm.session import get_taken_player_ids, player_from_row
 
 
 def _whose_pick(pick_num: int, total_teams: int = 12) -> int:
@@ -62,6 +63,19 @@ def _get_highest_adp_available(draft_id: str, taken_ids: set[str]) -> dict[str, 
     return available[0]
 
 
+def _resume_state(draft_id: str) -> tuple[int, set[str]]:
+    """Return (next overall pick number, taken player ids) for a resumed draft.
+
+    Picks consumed = my/recorded picks rows + room_taken rows (disjoint in practice flow).
+    """
+    state = get_draft_state(draft_id)
+    if state is None:
+        raise ValueError(f"Draft '{draft_id}' not found")
+    taken_ids = {pick["player_id"] for pick in state.all_picks} | get_taken_player_ids(draft_id)
+    picks_consumed = len(state.all_picks) + count_room_taken(draft_id)
+    return picks_consumed + 1, taken_ids
+
+
 def run_practice_draft(
     slot: int,
     archetype: str,
@@ -84,31 +98,21 @@ def run_practice_draft(
 
     # Create or resume draft
     if draft_id:
-        state = get_draft_state(draft_id)
-        if state is None:
-            raise ValueError(f"Draft '{draft_id}' not found")
+        current_pick_num, taken_ids = _resume_state(draft_id)
         print(f"Resumed practice draft: {draft_id}")
-        total_picks = len(state.my_picks) + len(state.all_picks) - len(state.my_picks)
     else:
         draft_id = f"practice-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        create_draft(draft_id, slot, archetype, total_rounds=rounds)
+        create_draft(draft_id, slot, archetype, total_rounds=rounds, is_practice=True)
         print(f"Created practice draft: {draft_id}")
-        total_picks = 0
+        current_pick_num = 1
+        taken_ids = set()
 
     print(f"\n{archetype_header(archetype)}")
     print("Practice mode: 12-team snake, you pick, opponents auto-pick")
     print("Commands: p <name> | t/taken <name> | undo | quit")
     print("=" * 60)
 
-    # Track all taken player IDs for auto-pick
-    taken_ids: set[str] = set()
-    state = get_draft_state(draft_id)
-    if state:
-        taken_ids = {p["player_id"] for p in state.all_picks}
-        taken_ids |= {p["player_id"] for p in state.my_picks}
-
     total_picks_needed = rounds * 12
-    current_pick_num = total_picks + 1
 
     while current_pick_num <= total_picks_needed:
         whose_turn = _whose_pick(current_pick_num, 12)
@@ -166,9 +170,7 @@ def run_practice_draft(
                         # Need to recalculate current position
                         state = get_draft_state(draft_id)
                         if state:
-                            taken_ids = {p["player_id"] for p in state.all_picks}
-                            taken_ids |= {p["player_id"] for p in state.my_picks}
-                            current_pick_num = len(state.all_picks) + 1
+                            current_pick_num, taken_ids = _resume_state(draft_id)
                         continue
                 else:
                     print("  -> Nothing to undo")
@@ -189,7 +191,7 @@ def run_practice_draft(
                     stub = ensure_player_stub(arg)
                     record_taken(draft_id, round_num, current_pick_num, stub["player_id"])
                     taken_ids.add(stub["player_id"])
-                    print(f"Created stub for: {arg}")
+                    print(f"  -> WARNING: unknown player — created stub for: {arg} (verify spelling)")
                 else:
                     record_taken(draft_id, round_num, current_pick_num, player["player_id"])
                     taken_ids.add(player["player_id"])

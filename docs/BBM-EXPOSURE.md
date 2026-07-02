@@ -7,6 +7,7 @@ This project tracks BBM exposure against a 150-entry portfolio.
 - Hard cap: `100%` of the entry budget.
 - Soft brake: start tapering at `95%` of cap, so the multiplier reaches zero at the cap.
 - Combo pair cap: `25%` for configured stack pairs.
+- Practice drafts (`is_practice = 1`, `draft_id` starting with `'practice-'`) are excluded from all exposure, combo, portfolio-gap, and reconcile math.
 
 The exposure ratio is always measured as weighted counts divided by `TOTAL_ENTRIES`.
 

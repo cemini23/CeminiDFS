@@ -148,7 +148,7 @@ def test_merge_adds_unmatched_players(tmp_path: Path):
     )
     registry = build_seed_registry()
 
-    result = merge_adp_csv(csv_path, registry)
+    result = merge_adp_csv(csv_path, registry, add_unmatched=True)
 
     assert result.matched == 1
     assert result.added == 1

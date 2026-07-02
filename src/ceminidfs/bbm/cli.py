@@ -19,6 +19,7 @@ from ceminidfs.bbm.backtest import (
 )
 from ceminidfs.bbm.draft_card import write_draft_card
 from ceminidfs.bbm.ledger import (
+    abandon_draft,
     complete_draft,
     count_room_taken,
     create_draft,
@@ -26,6 +27,7 @@ from ceminidfs.bbm.ledger import (
     exposure_pct,
     get_draft_state,
     get_last_ambiguous_matches,
+    list_in_progress_drafts,
     list_room_taken_names,
     record_pick,
     record_taken,
@@ -55,7 +57,7 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
     if not hasattr(args, "bbm_command") or args.bbm_command is None:
         print("Error: No BBM subcommand specified", file=sys.stderr)
         print(
-            "Available: draft, serve, refresh-adp, refresh-weekly, fetch-bbm3, draft-card, audit, reconcile, backtest"
+            "Available: draft, serve, practice, abandon, refresh-adp, refresh-weekly, refresh-schedule, fetch-bbm3, draft-card, audit, reconcile, backtest"
         )
         return 2
 
@@ -63,8 +65,10 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
         "draft": _cmd_draft,
         "serve": _cmd_serve,
         "practice": _cmd_practice,
+        "abandon": _cmd_abandon,
         "refresh-adp": _cmd_refresh_adp,
         "refresh-weekly": _cmd_refresh_weekly,
+        "refresh-schedule": _cmd_refresh_schedule,
         "fetch-bbm3": _cmd_fetch_bbm3,
         "draft-card": _cmd_draft_card,
         "audit": _cmd_audit,
@@ -92,9 +96,15 @@ def build_bbm_parser(subparsers: Any) -> None:
     serve_parser.add_argument("--archetype", type=str, default=None, help="Archetype A-E")
     serve_parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
     serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    serve_parser.add_argument("--token", type=str, default=None, help="Optional static token required on POST endpoints (X-BBM-Token header)")
 
     refresh_parser = subparsers.add_parser("refresh-adp", help="Refresh ADP from CSV")
     refresh_parser.add_argument("--csv", type=Path, required=True, help="Path to BBTB ADP CSV")
+    refresh_parser.add_argument(
+        "--add-unmatched",
+        action="store_true",
+        help="Insert unmatched CSV names as new team=FA registry rows (off by default)",
+    )
 
     weekly_parser = subparsers.add_parser(
         "refresh-weekly",
@@ -107,6 +117,16 @@ def build_bbm_parser(subparsers: Any) -> None:
         default=None,
         help="Optional path to projections CSV",
     )
+    weekly_parser.add_argument(
+        "--add-unmatched",
+        action="store_true",
+        help="Insert unmatched CSV names as new team=FA registry rows (off by default)",
+    )
+
+    schedule_parser = subparsers.add_parser(
+        "refresh-schedule", help="Fetch season byes + W17 matchups via nflreadpy"
+    )
+    schedule_parser.add_argument("--season", type=int, default=2026, help="Season year (default: 2026)")
 
     subparsers.add_parser(
         "fetch-bbm3",
@@ -130,6 +150,11 @@ def build_bbm_parser(subparsers: Any) -> None:
     practice.add_argument("--archetype", type=str, default=None, help="Archetype A-E")
     practice.add_argument("--rounds", type=int, default=18, help="Number of rounds (default: 18)")
     practice.add_argument("--draft-id", type=str, default=None, help="Resume existing practice draft")
+
+    abandon_parser = subparsers.add_parser("abandon", help="Delete a stale in-progress draft")
+    abandon_parser.add_argument("--draft-id", type=str, default=None, help="Draft to delete (omit to list)")
+    abandon_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    abandon_parser.add_argument("--force", action="store_true", help="Allow deleting a complete draft")
 
 
 def _cmd_draft(args: argparse.Namespace) -> int:
@@ -247,7 +272,7 @@ def _run_repl(draft_id: str, slot: int, archetype: str, start_round: int) -> int
                 # Not found and not ambiguous — create stub
                 stub = ensure_player_stub(arg)
                 record_taken(draft_id, current_round, pick_num, stub["player_id"])
-                print(f"Created stub for: {arg}")
+                print(f"  -> WARNING: unknown player — created stub for: {arg} (verify spelling)")
                 continue
             record_taken(draft_id, current_round, pick_num, player["player_id"])
             print(f"  -> Marked taken: {player['name']}")
@@ -364,7 +389,7 @@ def _suggest_archetype() -> str:
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT archetype, COUNT(*) FROM drafts WHERE status = 'complete' GROUP BY archetype"
+        "SELECT archetype, COUNT(*) FROM drafts WHERE status = 'complete' AND is_practice = 0 GROUP BY archetype"
     )
     counts = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
@@ -372,7 +397,7 @@ def _suggest_archetype() -> str:
 
 
 def _cmd_refresh_adp(args: argparse.Namespace) -> int:
-    refresh_summary = _refresh_registry(args.csv)
+    refresh_summary = _refresh_registry(args.csv, add_unmatched=args.add_unmatched)
     if refresh_summary is None:
         return 1
     adp_result, projection_result, synced_count = refresh_summary
@@ -381,7 +406,9 @@ def _cmd_refresh_adp(args: argparse.Namespace) -> int:
 
 
 def _cmd_refresh_weekly(args: argparse.Namespace) -> int:
-    refresh_summary = _refresh_registry(args.adp, args.projections)
+    refresh_summary = _refresh_registry(
+        args.adp, args.projections, add_unmatched=args.add_unmatched
+    )
     if refresh_summary is None:
         return 1
     adp_result, projection_result, synced_count = refresh_summary
@@ -389,9 +416,32 @@ def _cmd_refresh_weekly(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_refresh_schedule(args: argparse.Namespace) -> int:
+    from ceminidfs.bbm.schedule import (
+        clear_schedule_memo,
+        fetch_season_schedule,
+        save_schedule_cache,
+    )
+
+    try:
+        data = fetch_season_schedule(args.season)
+    except Exception as exc:  # ImportError, ValueError, network errors from nflreadpy
+        print(f"Error: {exc}", file=sys.stderr)
+        print("Hardcoded 2026 schedule fallback remains active.", file=sys.stderr)
+        return 1
+    path = save_schedule_cache(data)
+    clear_schedule_memo()
+    print(
+        f"Schedule cache written: {path} "
+        f"({len(data['bye_weeks'])} team byes, {len(data['week17_matchups'])} W17 games)"
+    )
+    return 0
+
+
 def _refresh_registry(
     adp_csv: Path,
     projections_csv: Path | None = None,
+    add_unmatched: bool = False,
 ) -> tuple[Any, Any | None, int] | None:
     ensure_initialized()
     if not adp_csv.exists():
@@ -402,7 +452,7 @@ def _refresh_registry(
         return None
 
     registry = load_registry()
-    adp_result = merge_adp_csv(adp_csv, registry)
+    adp_result = merge_adp_csv(adp_csv, registry, add_unmatched=add_unmatched)
     projection_result = (
         merge_projections_csv(projections_csv, registry) if projections_csv is not None else None
     )
@@ -632,6 +682,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     print("\nExtension setup: paste draft ID into extension/bbm-copilot popup", flush=True)
     print(f"  draft_id = {draft_id}", flush=True)
     print(f"  api_base = http://{args.host}:{args.port}\n", flush=True)
+    if args.token:
+        print(f"  token   = {args.token}  (set in extension popup)", flush=True)
 
     # Run server until Ctrl+C
     try:
@@ -641,6 +693,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             draft_id=draft_id,
             slot=slot,
             archetype=archetype,
+            token=args.token,
         )
     except OSError as exc:
         if exc.errno in (48, 98) or "Address already in use" in str(exc):
@@ -653,4 +706,36 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             return 1
         raise
 
+    return 0
+
+
+def _cmd_abandon(args: argparse.Namespace) -> int:
+    ensure_initialized()
+    if not args.draft_id:
+        drafts = list_in_progress_drafts()
+        if not drafts:
+            print("No in-progress drafts.")
+            return 0
+        for draft in drafts:
+            tag = " [practice]" if draft.get("is_practice") else ""
+            print(
+                f"  {draft['draft_id']}  slot {draft['slot']}  "
+                f"R{draft['current_round']}/{draft['total_rounds']}{tag}"
+            )
+        print("Re-run with --draft-id <id> to delete one.")
+        return 0
+
+    if not args.yes:
+        confirm = input(f"Delete draft {args.draft_id} and all its picks? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("Aborted.")
+            return 1
+
+    try:
+        result = abandon_draft(args.draft_id, force=args.force)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Deleted {args.draft_id} ({result['picks_removed']} picks, {result['taken_removed']} taken)")
     return 0

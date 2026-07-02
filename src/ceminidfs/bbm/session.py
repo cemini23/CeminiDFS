@@ -9,7 +9,6 @@ from typing import Any
 
 from ceminidfs.bbm.config import ARCHETYPE_NAMES, TOTAL_ENTRIES, get_bye_week
 from ceminidfs.bbm.ledger import (
-    apply_pivot,
     exposure_pct as ledger_exposure,
     get_db_path,
     get_draft_state,
@@ -169,39 +168,62 @@ def get_recommendations(
     draft_id: str,
     limit: int = 3,
 ) -> list[dict[str, Any]]:
-    """CLI bridge — return top-N recommendations as display dicts.
-    archetype_str overrides draft_state.archetype when valid.
-    Includes pivot warning if archetype pivot was triggered.
+    """CLI bridge — top-N display dicts; pivot warning attached to results[0]."""
+    meta = get_recommendations_meta(
+        round_num=round_num,
+        pick_num=pick_num,
+        archetype_str=archetype_str,
+        draft_id=draft_id,
+        limit=limit,
+    )
+    results = meta["recommendations"]
+    if meta["pivot_warning"] and results:
+        results[0]["pivot_warning"] = meta["pivot_warning"]
+    return results
+
+
+def get_recommendations_meta(
+    round_num: int,
+    pick_num: int,
+    archetype_str: str,
+    draft_id: str,
+    limit: int = 3,
+) -> dict[str, Any]:
+    """Top-N recommendations plus advisory pivot metadata.
+
+    Advisory pivots are surfaced as pivot_warning/pivot_to only — the scoring
+    archetype never changes until 'archetype X' / POST /api/pivot is confirmed.
+    GET paths never write the DB.
     """
 
+    del pick_num  # maintained for API compatibility
+    empty = {"recommendations": [], "pivot_warning": None, "pivot_to": None}
     draft_state = build_draft_state(draft_id, round_num)
     if draft_state is None:
-        return []
+        return empty
 
-    # Override archetype with archetype_str when valid
     if archetype_str:
         try:
             draft_state.archetype = Archetype(archetype_str)
         except ValueError:
-            pass  # Keep original archetype if invalid
+            pass
 
     available = get_available_models(draft_id)
-
-    # Check for archetype pivot before generating recommendations
     pivot_result = pivot_state_machine(
         primary=draft_state.archetype,
         roster=draft_state.roster,
         round_num=round_num,
-        board=available
+        board=available,
     )
 
     pivot_warning = None
+    pivot_to = None
     if pivot_result.new_archetype and not is_pivot_applied(draft_id):
-        # Apply the pivot
-        warning = pivot_result.warning or f"Pivot to {pivot_result.new_archetype.value}"
-        apply_pivot(draft_id, pivot_result.new_archetype.value, warning)
-        draft_state.archetype = pivot_result.new_archetype
-        pivot_warning = warning
+        pivot_to = pivot_result.new_archetype.value
+        pivot_warning = (
+            (pivot_result.warning or f"Pivot to {pivot_to}")
+            + f" — advisory only; confirm with 'archetype {pivot_to}' or POST /api/pivot"
+        )
 
     def exposure_fn(player_id: str) -> float:
         return ledger_exposure(player_id)["current"]
@@ -227,11 +249,11 @@ def get_recommendations(
             }
         )
 
-    # Add pivot warning to first result if present (for CLI display)
-    if pivot_warning and results:
-        results[0]["pivot_warning"] = pivot_warning
-
-    return results
+    return {
+        "recommendations": results,
+        "pivot_warning": pivot_warning,
+        "pivot_to": pivot_to,
+    }
 
 
 def get_pivot_message(draft_id: str) -> str | None:
@@ -247,7 +269,7 @@ def archetype_gap_pct(archetype: str) -> float:
     conn = sqlite3.connect(db)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT COUNT(*) FROM drafts WHERE archetype = ? AND status = 'complete'",
+        "SELECT COUNT(*) FROM drafts WHERE archetype = ? AND status = 'complete' AND is_practice = 0",
         (archetype,),
     )
     count = cursor.fetchone()[0] or 0

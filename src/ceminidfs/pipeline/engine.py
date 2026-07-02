@@ -55,7 +55,10 @@ def salary_rows_to_roster(rows: list[dict]) -> pd.DataFrame:
                 "injury_status": str(row.get("injury_status") or row.get("Injury Indicator") or ""),
             }
         )
-    return pd.DataFrame(roster_rows, columns=["player_id", "player_name", "team", "position"])
+    return pd.DataFrame(
+        roster_rows,
+        columns=["player_id", "player_name", "team", "position", "injury_status"],
+    )
 
 
 def normalize_join_key(name: Any, team: Any, position: Any) -> str:
