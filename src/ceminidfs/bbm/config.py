@@ -14,6 +14,8 @@ PLAYER_ALIASES: Dict[str, str] = {
 }
 
 # Portfolio targets (150 entries)
+REGISTRY_TARGET: int = 240  # ROADMAP: registry expansion toward top-240 via weekly ADP refresh
+
 ARCHETYPE_TARGETS = {
     "A": 53,  # RB-forward (35%)
     "B": 38,  # Hero RB + WR (25%)

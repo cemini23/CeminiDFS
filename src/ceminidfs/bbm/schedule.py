@@ -200,6 +200,11 @@ def _active_schedule() -> tuple[dict[str, int], tuple[tuple[str, str], ...], str
     return dict(BYE_WEEKS_2026), tuple(WEEK17_MATCHUPS_2026), "hardcoded"
 
 
+def get_schedule_source() -> str:
+    """'cache' when serving data/bbm/schedule_<season>.json, else 'hardcoded'."""
+    return _active_schedule()[2]
+
+
 def get_bye_week(team: str) -> int | None:
     """Return the 2026 bye week for a team abbreviation."""
     return _active_schedule()[0].get(team.strip().upper())

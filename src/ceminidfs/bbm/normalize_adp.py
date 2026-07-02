@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from datetime import date
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Final, Iterable
 
 try:  # pragma: no cover - optional dependency
     from rapidfuzz import fuzz, process
@@ -16,9 +16,15 @@ except ImportError:  # pragma: no cover - fallback path
     fuzz = None
     process = None
 
+from ceminidfs.bbm.config import TIER_EXPOSURE_CAPS, get_bye_week
+
 SUFFIX_RE = re.compile(r"\b(jr|sr|ii|iii|iv|v)\b", re.IGNORECASE)
 NON_ALNUM_RE = re.compile(r"[^a-z0-9 ]+")
 SPACE_RE = re.compile(r"\s+")
+
+_TEAM_ALIASES: Final[dict[str, str]] = {"JAC": "JAX", "WSH": "WAS", "ARZ": "ARI", "LA": "LAR"}
+_VALID_POSITIONS: Final[frozenset[str]] = frozenset({"QB", "RB", "WR", "TE"})
+_TEAM_RE = re.compile(r"^[A-Z]{2,3}$")
 
 
 @dataclass(slots=True)
@@ -230,6 +236,19 @@ class AdpMergeResult:
     added: int
     unmatched: list[str]
     ambiguous: list[str] = field(default_factory=list)
+    added_verified: int = 0
+
+
+def _verified_team_and_position(row: dict[str, str]) -> tuple[str, str] | None:
+    """(team, position) when the CSV row carries a real NFL team and position, else None."""
+    team = _pick(row, ("team", "tm", "nfl_team")).upper().strip()
+    team = _TEAM_ALIASES.get(team, team)
+    position = _pick(row, ("pos", "position")).upper().strip()
+    if not _TEAM_RE.match(team) or team in ("FA", "NA"):
+        return None
+    if position not in _VALID_POSITIONS:
+        return None
+    return team, position
 
 
 def merge_adp_csv(
@@ -237,11 +256,13 @@ def merge_adp_csv(
     registry: dict[str, Any],
     *,
     add_unmatched: bool = False,
+    expand_verified: bool = True,
 ) -> AdpMergeResult:
     """Update registry ADP values from a BBTB-style CSV (name + adp columns).
 
-    Unmatched names are reported, never added, unless add_unmatched=True is
-    passed explicitly — auto-adding created junk team="FA" rows (2026-07-02 audit).
+    Unmatched rows are added only when the CSV carries a real team + position
+    (safe top-240 expansion, 2026-07-02); add_unmatched=True restores the legacy
+    team=FA fallback for unverifiable rows.
     """
 
     rows = _read_csv_rows(csv_path)
@@ -254,6 +275,7 @@ def merge_adp_csv(
     exact_matched = 0
     fuzzy_matched = 0
     added = 0
+    added_verified = 0
     unmatched: list[str] = []
     ambiguous: list[str] = []
 
@@ -279,6 +301,35 @@ def merge_adp_csv(
                 if fuzzy[1] < 95:
                     ambiguous.append(raw_name)
             else:
+                verified = _verified_team_and_position(row) if expand_verified else None
+                if verified is not None:
+                    team, position = verified
+                    tier = _tier_from_adp(adp_val)
+                    new_player = {
+                        "player_id": f"bbm:{merge_name.replace(' ', '-')}",
+                        "name": raw_name.strip(),
+                        "merge_name": merge_name,
+                        "position": position,
+                        "team": team,
+                        "bye_week": get_bye_week(team) or 0,
+                        "adp": adp_val,
+                        "strategy_rank": int(adp_val),
+                        "projection_pts": 100.0,
+                        "signal": "NEUTRAL",
+                        "tier": tier,
+                        "exposure_cap_pct": TIER_EXPOSURE_CAPS.get(tier, 0.20),
+                        "drift_coeff": 0.0,
+                        "injury_fade": False,
+                        "notes": "adp-expansion",
+                        "fade_rounds": None,
+                    }
+                    players.append(new_player)
+                    by_merge[merge_name] = new_player
+                    candidate_names.append(merge_name)
+                    matched += 1
+                    added += 1
+                    added_verified += 1
+                    continue
                 if add_unmatched:
                     position = _pick(row, ("pos", "position")).upper()
                     new_player = {
@@ -327,6 +378,7 @@ def merge_adp_csv(
         added=added,
         unmatched=unmatched,
         ambiguous=ambiguous,
+        added_verified=added_verified,
     )
 
 

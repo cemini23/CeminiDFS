@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from ceminidfs.bbm import cli, schedule
+from ceminidfs.bbm.config import TIER_EXPOSURE_CAPS
 from ceminidfs.bbm.normalize_adp import AdpMergeResult, merge_adp_csv
 from ceminidfs.bbm.registry import build_seed_registry
 from ceminidfs.bbm.schedule import (
@@ -218,3 +219,109 @@ def test_refresh_schedule_cli_writes_cache(isolated_schedule: Path, monkeypatch)
 
     clear_schedule_memo()
     assert get_bye_week("KC") == 7
+
+
+@pytest.fixture
+def verified_csv(tmp_path: Path) -> Path:
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text("name,adp,pos,team\nNick Chubb,52.0,RB,HOU\n", encoding="utf-8")
+    return csv_path
+
+
+def test_merge_adp_expands_verified_team_rows(verified_csv: Path):
+    registry = build_seed_registry()
+    before_count = len(registry["players"])
+    result = merge_adp_csv(verified_csv, registry)
+
+    assert result.added == 1
+    assert result.added_verified == 1
+    assert result.unmatched == []
+
+    added = next(p for p in registry["players"] if p["name"] == "Nick Chubb")
+    assert added["team"] == "HOU"
+    assert added["position"] == "RB"
+    assert added["tier"] == "stack_core"
+    assert added["bye_week"] == 8
+    assert added["signal"] == "NEUTRAL"
+    assert added["player_id"] == "bbm:nick-chubb"
+    assert added["exposure_cap_pct"] == TIER_EXPOSURE_CAPS["stack_core"]
+    assert added["notes"] == "adp-expansion"
+    assert len(registry["players"]) == before_count + 1
+
+
+def test_merge_adp_rejects_fa_or_missing_team(tmp_path: Path):
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text(
+        "name,adp,pos,team\nGhost Guy,90.0,WR,FA\nNo Team,95.0,WR,\n",
+        encoding="utf-8",
+    )
+    registry = build_seed_registry()
+    before_count = len(registry["players"])
+    result = merge_adp_csv(csv_path, registry)
+
+    assert result.added == 0
+    assert result.unmatched == ["Ghost Guy", "No Team"]
+    assert len(registry["players"]) == before_count
+
+
+def test_merge_adp_rejects_missing_position(tmp_path: Path):
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text("name,adp,pos,team\nSome Body,88.0,,KC\n", encoding="utf-8")
+    registry = build_seed_registry()
+    before_count = len(registry["players"])
+    result = merge_adp_csv(csv_path, registry)
+
+    assert result.added == 0
+    assert result.unmatched == ["Some Body"]
+    assert len(registry["players"]) == before_count
+
+
+def test_merge_adp_team_alias_normalized(tmp_path: Path):
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text("name,adp,pos,team\nAlias Guy,70.0,WR,JAC\n", encoding="utf-8")
+    registry = build_seed_registry()
+    result = merge_adp_csv(csv_path, registry)
+
+    assert result.added == 1
+    assert result.added_verified == 1
+    added = next(p for p in registry["players"] if p["name"] == "Alias Guy")
+    assert added["team"] == "JAX"
+    assert added["bye_week"] == 7
+
+
+def test_merge_adp_expand_verified_opt_out(verified_csv: Path):
+    registry = build_seed_registry()
+    result = merge_adp_csv(verified_csv, registry, expand_verified=False)
+
+    assert result.added == 0
+    assert result.unmatched == ["Nick Chubb"]
+
+
+def test_merge_adp_add_unmatched_flag_keeps_fa_fallback(tmp_path: Path):
+    csv_path = tmp_path / "adp.csv"
+    csv_path.write_text(
+        "name,adp,pos,team\nVerified Vance,80.0,TE,MIN\nMystery Man,110.0,RB,\n",
+        encoding="utf-8",
+    )
+    registry = build_seed_registry()
+    result = merge_adp_csv(csv_path, registry, add_unmatched=True)
+
+    assert result.added == 2
+    assert result.added_verified == 1
+
+    verified = next(p for p in registry["players"] if p["name"] == "Verified Vance")
+    assert verified["team"] == "MIN"
+
+    junk = next(p for p in registry["players"] if p["name"] == "Mystery Man")
+    assert junk["team"] == "FA"
+
+
+def test_merge_adp_expansion_sorts_and_updates_meta(verified_csv: Path):
+    registry = build_seed_registry()
+    before_count = len(registry["players"])
+    result = merge_adp_csv(verified_csv, registry)
+
+    assert result.added == 1
+    players = registry["players"]
+    assert players == sorted(players, key=lambda p: (float(p.get("adp", 9999)), str(p.get("name", ""))))
+    assert registry["meta"]["player_count"] == before_count + 1

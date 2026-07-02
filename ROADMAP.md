@@ -78,6 +78,6 @@ ceminidfs espn probe --league-id <id> --year 2025
 
 ## Backlog
 
-- Registry expansion toward top-240 via weekly ADP refresh
+- ~~Registry expansion toward top-240 via weekly ADP refresh~~ — `expand_verified` on `refresh-adp` + `bbm preflight` (2026-07-02)
 - Setfive fanduel-api WebSocket → CCC-wiki (not this repo)
 - sportsdataverse adopt only if maintenance win is proven on 2025+ slates

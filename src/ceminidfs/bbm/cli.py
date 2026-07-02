@@ -57,7 +57,7 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
     if not hasattr(args, "bbm_command") or args.bbm_command is None:
         print("Error: No BBM subcommand specified", file=sys.stderr)
         print(
-            "Available: draft, serve, practice, abandon, refresh-adp, refresh-weekly, refresh-schedule, fetch-bbm3, draft-card, audit, reconcile, backtest"
+            "Available: draft, serve, practice, abandon, preflight, refresh-adp, refresh-weekly, refresh-schedule, fetch-bbm3, draft-card, audit, reconcile, backtest"
         )
         return 2
 
@@ -66,6 +66,7 @@ def handle_bbm_command(args: argparse.Namespace) -> int:
         "serve": _cmd_serve,
         "practice": _cmd_practice,
         "abandon": _cmd_abandon,
+        "preflight": _cmd_preflight,
         "refresh-adp": _cmd_refresh_adp,
         "refresh-weekly": _cmd_refresh_weekly,
         "refresh-schedule": _cmd_refresh_schedule,
@@ -155,6 +156,10 @@ def build_bbm_parser(subparsers: Any) -> None:
     abandon_parser.add_argument("--draft-id", type=str, default=None, help="Draft to delete (omit to list)")
     abandon_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
     abandon_parser.add_argument("--force", action="store_true", help="Allow deleting a complete draft")
+
+    subparsers.add_parser(
+        "preflight", help="Pre-draft readiness checklist (registry, drafts, schedule, smoke)"
+    )
 
 
 def _cmd_draft(args: argparse.Namespace) -> int:
@@ -462,9 +467,11 @@ def _refresh_registry(
 
 
 def _print_refresh_summary(adp_result: Any, projection_result: Any | None, synced_count: int) -> None:
+    added_verified = getattr(adp_result, "added_verified", 0)
     print(
         f"ADP updated {adp_result.matched} (exact {adp_result.exact_matched}, "
-        f"fuzzy {adp_result.fuzzy_matched}, added {adp_result.added}, unmatched {len(adp_result.unmatched)})"
+        f"fuzzy {adp_result.fuzzy_matched}, added {adp_result.added} ({added_verified} verified-team), "
+        f"unmatched {len(adp_result.unmatched)})"
     )
     if adp_result.unmatched:
         print(f"  ADP unmatched ({len(adp_result.unmatched)}): {', '.join(adp_result.unmatched[:10])}")
@@ -739,3 +746,63 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
 
     print(f"Deleted {args.draft_id} ({result['picks_removed']} picks, {result['taken_removed']} taken)")
     return 0
+
+
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    del args
+    import sqlite3
+    from ceminidfs.bbm.config import REGISTRY_TARGET
+    from ceminidfs.bbm.ledger import get_db_path
+    from ceminidfs.bbm.schedule import get_schedule_cache_path, get_schedule_source
+
+    ensure_initialized()
+    warnings = 0
+
+    registry = load_registry()
+    player_count = len(registry.get("players", []))
+    if player_count >= REGISTRY_TARGET:
+        print(f"[ok]   Registry: {player_count} players (target {REGISTRY_TARGET})")
+    else:
+        warnings += 1
+        print(
+            f"[WARN] Registry: {player_count} players (target {REGISTRY_TARGET}) — "
+            "run: ceminidfs bbm refresh-adp --csv <bbtb.csv>"
+        )
+
+    conn = sqlite3.connect(get_db_path())
+    practice_done = conn.execute(
+        "SELECT COUNT(*) FROM drafts WHERE is_practice = 1 AND status = 'complete'"
+    ).fetchone()[0] or 0
+    conn.close()
+    if practice_done:
+        print(f"[ok]   Practice drafts completed: {practice_done}")
+    else:
+        warnings += 1
+        print("[WARN] No completed practice draft — run: ceminidfs bbm practice --slot 4")
+
+    stale = list_in_progress_drafts()
+    if stale:
+        warnings += 1
+        print(f"[WARN] Stale in-progress drafts ({len(stale)}):")
+        for draft in stale:
+            tag = " [practice]" if draft.get("is_practice") else ""
+            print(
+                f"         {draft['draft_id']}  slot {draft['slot']}  "
+                f"R{draft['current_round']}/{draft['total_rounds']}{tag}"
+            )
+        print("       -> ceminidfs bbm abandon --draft-id <id>")
+    else:
+        print("[ok]   No stale in-progress drafts")
+
+    source = get_schedule_source()
+    if source == "cache":
+        print(f"[ok]   Schedule source: cache ({get_schedule_cache_path()})")
+    else:
+        print(
+            "[ok]   Schedule source: hardcoded 2026 fallback — "
+            "optional: ceminidfs bbm refresh-schedule"
+        )
+
+    print("Smoke: .venv/bin/pytest tests/bbm -q")
+    print(f"Result: {'READY' if warnings == 0 else f'{warnings} warning(s)'}")
+    return 0 if warnings == 0 else 1

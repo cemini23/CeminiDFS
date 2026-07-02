@@ -7,7 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from ceminidfs.bbm.config import IN_PROGRESS_EXPOSURE_WEIGHT, TOTAL_ENTRIES
 from ceminidfs.bbm.normalize_adp import normalize_name
@@ -382,6 +382,56 @@ def combo_pct(player_a: str, player_b: str, db_path: Optional[Path] = None) -> d
     exposure = weighted / TOTAL_ENTRIES
 
     return {"current": exposure, "cap": cap, "available": cap - exposure}
+
+
+def combo_exposures_for_roster(
+    roster_player_ids: Sequence[str],
+    candidate_ids: Sequence[str],
+    db_path: Optional[Path | str] = None,
+) -> dict[tuple[str, str], float]:
+    """Weighted joint-draft exposure for every (roster, candidate) pair in one query.
+
+    Same semantics as combo_pct()["current"]: practice drafts excluded,
+    complete counts 1.0, in_progress counts IN_PROGRESS_EXPOSURE_WEIGHT,
+    denominator TOTAL_ENTRIES. Pairs with zero joint drafts are omitted.
+    """
+    roster_ids = [pid for pid in dict.fromkeys(roster_player_ids) if pid]
+    cand_ids = [pid for pid in dict.fromkeys(candidate_ids) if pid]
+    if not roster_ids or not cand_ids:
+        return {}
+
+    conn = connect_db(db_path or get_db_path())
+    cursor = conn.cursor()
+    exposures: dict[tuple[str, str], float] = {}
+
+    chunk_size = 400
+    for start in range(0, len(cand_ids), chunk_size):
+        chunk = cand_ids[start : start + chunk_size]
+        r_ph = ",".join("?" * len(roster_ids))
+        c_ph = ",".join("?" * len(chunk))
+        cursor.execute(
+            f"""
+            SELECT joint.a, joint.b,
+                   COALESCE(SUM(CASE WHEN d.status = 'complete' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN d.status = 'in_progress' THEN 1 ELSE 0 END), 0)
+            FROM (
+                SELECT DISTINCT p1.player_id AS a, p2.player_id AS b, p1.draft_id AS draft_id
+                FROM picks p1
+                JOIN picks p2 ON p1.draft_id = p2.draft_id
+                WHERE p1.player_id IN ({r_ph}) AND p2.player_id IN ({c_ph})
+            ) joint
+            JOIN drafts d ON joint.draft_id = d.draft_id
+            WHERE d.is_practice = 0
+            GROUP BY joint.a, joint.b
+            """,
+            [*roster_ids, *chunk],
+        )
+        for a, b, complete_count, in_progress_count in cursor.fetchall():
+            weighted = complete_count + IN_PROGRESS_EXPOSURE_WEIGHT * in_progress_count
+            exposures[(a, b)] = weighted / TOTAL_ENTRIES
+
+    conn.close()
+    return exposures
 
 
 def create_draft(

@@ -121,19 +121,22 @@
   function collectBoardLabels() {
     let root = null;
     let usedSelector = null;
+    let warning = null;
     for (const sel of BOARD_SELECTORS) {
       root = document.querySelector(sel);
       if (root) { usedSelector = sel; break; }
     }
     if (!root) {
-      return { labels: [], warning: 'Board container not found — Underdog DOM may have changed' };
+      root = document.body;
+      usedSelector = 'body-fallback';
+      warning = 'Board container not found — page-wide scan (less precise)';
     }
     const labels = [];
     root.querySelectorAll('[aria-label]').forEach((el) => {
       const label = el.getAttribute('aria-label')?.trim();
       if (label && label.length >= 4 && label.length <= 60) labels.push(label);
     });
-    return { labels: labels.slice(0, 200), warning: null, selector: usedSelector };
+    return { labels: labels.slice(0, 200), warning, selector: usedSelector };
   }
 
   async function undoLast() {
@@ -170,10 +173,16 @@
 
     const { labels, warning } = collectBoardLabels();
     if (warning) {
-      statusEl.textContent = warning;
-      return;
-    }
-    if (labels.length === 0) {
+      console.warn('BBM:', warning);
+      if (labels.length === 0) {
+        statusEl.textContent = `${warning} — no labels found`;
+        return;
+      }
+      if (!window.confirm(`${warning}.\nSync ${labels.length} page-wide labels anyway? (may include undrafted players)`)) {
+        statusEl.textContent = `${warning} — sync cancelled`;
+        return;
+      }
+    } else if (labels.length === 0) {
       statusEl.textContent = 'No players found';
       return;
     }
@@ -192,6 +201,7 @@
       }
       const ambiguousCount = data.ambiguous_count ?? 0;
       statusEl.textContent =
+        (warning ? 'WARN page-wide scan — ' : '') +
         `Synced ${data.synced_count ?? 0} — ${data.skipped_count ?? 0} known — ` +
         `${data.unmatched_count ?? 0} unmatched` +
         (ambiguousCount ? ` — ${ambiguousCount} ambiguous` : '');
@@ -200,7 +210,7 @@
         renderAmbiguous(entry.query, entry.matches, '/api/taken');
       });
       fetchRecommendations();
-      if (!ambiguousCount) setTimeout(() => { statusEl.textContent = ''; }, 3000);
+      if (!ambiguousCount && !warning) setTimeout(() => { statusEl.textContent = ''; }, 3000);
     } catch (_e) {
       statusEl.textContent = 'API unreachable — is serve running?';
       setTimeout(() => { statusEl.textContent = ''; }, 4000);

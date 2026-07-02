@@ -25,7 +25,7 @@ from ceminidfs.bbm.config import (
 from ceminidfs.bbm.models import Player, Roster, DraftState, Archetype, Recommendation
 from ceminidfs.bbm.archetype import archetype_mult, should_force_archetype_pick
 from ceminidfs.bbm.validator import validate_pick, get_violation_severity
-from ceminidfs.bbm.ledger import combo_pct
+from ceminidfs.bbm.ledger import combo_exposures_for_roster
 from ceminidfs.bbm.schedule import are_opponents_week17
 
 
@@ -208,19 +208,6 @@ def _calculate_exposure_mult(
     return 1.0, None
 
 
-def _combo_cap_blocks(player: Player, roster: Roster) -> bool:
-    """Check if adding this player would exceed COMBO_PAIR_CAP with any roster teammate.
-
-    Uses combo_pct from ledger to check if any player pair exceeds the 25% cap.
-    Returns True if any combo would exceed the cap (player should be blocked).
-    """
-    for roster_player in roster.players:
-        combo_info = combo_pct(roster_player.player_id, player.player_id)
-        if combo_info["current"] >= COMBO_PAIR_CAP:
-            return True
-    return False
-
-
 def _get_default_cap(player: Player) -> float:
     """Get default exposure cap based on player tier."""
     from ceminidfs.bbm.config import TIER_EXPOSURE_CAPS
@@ -265,6 +252,10 @@ def _prefilter_candidates(
     """
     candidates: List[Player] = []
     current_round = roster.current_round
+    roster_ids = [rp.player_id for rp in roster.players]
+    combo_exposures = combo_exposures_for_roster(
+        roster_ids, [p.player_id for p in players]
+    )
 
     for player in players:
         # Skip stubs and team-less FA rows (cannot validate constraints with no real team/bye)
@@ -277,8 +268,11 @@ def _prefilter_candidates(
         if player.is_faded_for_round(current_round):
             continue
 
-        # Skip players where any roster teammate combo exceeds COMBO_PAIR_CAP
-        if _combo_cap_blocks(player, roster):
+        # Skip players where any roster-teammate joint exposure meets COMBO_PAIR_CAP
+        if any(
+            combo_exposures.get((rid, player.player_id), 0.0) >= COMBO_PAIR_CAP
+            for rid in roster_ids
+        ):
             continue
 
         # Quick check for obvious critical violations (without full validation)
