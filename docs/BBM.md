@@ -180,3 +180,4 @@ The weekly DFS pipeline (`fetch` → `project` → `optimize`) is unchanged. BBM
 - Operator brief: [`briefs/2026-06-24_bbm7-draft-copilot-implementation-brief.md`](../briefs/2026-06-24_bbm7-draft-copilot-implementation-brief.md)
 - Architecture map: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#bbm-best-ball-mania-extension)
 - P1/P2 patch plans: `briefs/2026-06-24_bbm7-p*-implementation-plan.md`
+- SFB16 ADP context: [Scott Fish Bowl 16 — draft strategy, rankings and ADP (RotoWire, 2026-07-04)](https://www.rotowire.com/football/article/scott-fish-bowl-16-draft-strategy-rankings-and-adp-121124) — SFB drafts move July ADP while BBM VII slow drafts run; reading only, registry ADP stays BBTB CSV

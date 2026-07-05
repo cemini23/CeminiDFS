@@ -39,6 +39,7 @@
 | K138 | ESPN injury adjunct + draftfast reject | `docs/espn-api-eval.md` |
 | BBM7 | Best Ball draft copilot | `docs/BBM.md` |
 | Sweep 07-03 | Research triage — zero adopts; reading refs → Gambling wiki | `briefs/2026-07-03_research-triage-plan.md` |
+| Sweep 07-05 | Research triage — zero adopts; SFB16 ADP reading ref → docs/BBM.md | `briefs/2026-07-05_research-triage-plan.md` |
 
 ## K129 — Sleeper sentiment (2026-06-25)
 
