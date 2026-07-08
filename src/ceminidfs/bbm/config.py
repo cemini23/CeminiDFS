@@ -115,6 +115,9 @@ STACK_MULT_MIN_CLV_DELTA = 3
 MAX_RECOMMENDATIONS = 3
 RECOMMENDER_TIMEOUT_MS = 200
 
+# QB round gate — draft-card targets QB1 in R6–7; never surface QB recs earlier
+QB_MIN_ROUND = 6
+
 # Archetype pivot state machine
 ARCHETYPE_PIVOTS: Dict[str, List[Tuple[str, str]]] = {
     "D": [("B", "Hero RB"), ("A", "RB-forward")],

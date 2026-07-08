@@ -150,6 +150,7 @@ def build_draft_state(draft_id: str, round_num: int) -> DraftState | None:
         roster=roster,
         taken_players=get_taken_player_ids(draft_id),
         draft_date=datetime.now(),
+        single_entry=state.is_single_entry,
     )
 
 

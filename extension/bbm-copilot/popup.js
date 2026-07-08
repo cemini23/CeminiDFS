@@ -32,7 +32,8 @@ document.getElementById('test').addEventListener('click', async () => {
       document.getElementById('draftId').value = data.draft_id;
       chrome.storage.local.set({ apiBase, draftId: data.draft_id, token });
     }
-    setStatus(`Connected — round ${data.current_round || '?'}, pick ${data.pick_num || '?'}`, false);
+    const mode = data.single_entry ? ' · single-entry' : '';
+    setStatus(`Connected — round ${data.current_round || '?'}, pick ${data.pick_num || '?'}${mode}`, false);
   } catch (_e) {
     setStatus('Cannot reach API — run: ceminidfs bbm serve --slot 4', true);
   }

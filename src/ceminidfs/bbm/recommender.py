@@ -88,7 +88,7 @@ def score_player(
 
     # 4. Calculate exposure multiplier
     exp_mult, exp_warning = _calculate_exposure_mult(
-        player, exposure_pct_fn, archetype
+        player, exposure_pct_fn, archetype, single_entry=draft_state.single_entry
     )
     if exp_warning:
         warnings.append(exp_warning)
@@ -175,7 +175,8 @@ def _is_w17_bringback(player: Player, roster: Roster) -> bool:
 def _calculate_exposure_mult(
     player: Player,
     exposure_pct_fn: Callable[[str], float],
-    archetype: Archetype
+    archetype: Archetype,
+    single_entry: bool = False,
 ) -> Tuple[float, Optional[str]]:
     """Calculate exposure multiplier with soft brake.
 
@@ -183,9 +184,9 @@ def _calculate_exposure_mult(
     - exposure >= cap: multiplier 0.0 (hard prune)
     - exposure >= cap - 5%: linear soft brake from cap-5% to cap
     - Archetype E ignores caps
+    - single_entry drafts ignore portfolio exposure caps
     """
-    # Archetype E (Contrarian) ignores exposure caps
-    if archetype == Archetype.E:
+    if single_entry or archetype == Archetype.E:
         return 1.0, None
 
     exposure_pct = exposure_pct_fn(player.player_id)
@@ -253,9 +254,12 @@ def _prefilter_candidates(
     candidates: List[Player] = []
     current_round = roster.current_round
     roster_ids = [rp.player_id for rp in roster.players]
-    combo_exposures = combo_exposures_for_roster(
-        roster_ids, [p.player_id for p in players]
+    skip_combo = draft_state.single_entry
+    combo_exposures = (
+        {} if skip_combo else combo_exposures_for_roster(roster_ids, [p.player_id for p in players])
     )
+
+    from ceminidfs.bbm.config import QB_MIN_ROUND
 
     for player in players:
         # Skip stubs and team-less FA rows (cannot validate constraints with no real team/bye)
@@ -264,12 +268,16 @@ def _prefilter_candidates(
         if not player.team or player.team == "FA":
             continue
 
+        # Draft-card band: QB1 targets R6–7 only
+        if player.position == "QB" and current_round < QB_MIN_ROUND:
+            continue
+
         # Exclude faded players (use round-specific fade check)
         if player.is_faded_for_round(current_round):
             continue
 
         # Skip players where any roster-teammate joint exposure meets COMBO_PAIR_CAP
-        if any(
+        if not skip_combo and any(
             combo_exposures.get((rid, player.player_id), 0.0) >= COMBO_PAIR_CAP
             for rid in roster_ids
         ):

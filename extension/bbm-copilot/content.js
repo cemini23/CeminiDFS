@@ -36,7 +36,12 @@
     try {
       const res = await fetch(`${config.apiBase}/api/status`);
       const data = await res.json();
-      if (data.draft_id && !config.draftId) {
+      if (data.draft_id) {
+        if (config.draftId && config.draftId !== data.draft_id) {
+          console.warn(
+            `BBM: draft_id updated ${config.draftId} → ${data.draft_id} (serve restarted)`
+          );
+        }
         config.draftId = data.draft_id;
         chrome.storage.local.set({ draftId: data.draft_id });
       }

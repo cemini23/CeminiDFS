@@ -92,18 +92,33 @@ Exposure policy details: see [BBM-EXPOSURE.md](BBM-EXPOSURE.md).
 
 Optional MV3 overlay for Underdog draft rooms — top-3 panel with **manual** board scan and **Rec** button to log picks to the ledger (you still submit picks on Underdog; no auto-pick).
 
+**Underdog URL:** drafts run on **`https://app.underdogsports.com/`** (not legacy `underdogfantasy.com`). Extension v1.3.2+ matches both domains.
+
 ```bash
 # Terminal — local API (ledger remains source of truth)
-ceminidfs bbm serve --slot 4 --port 8765
+# Golden / 1-max contests: add --single-entry (skips 150-entry exposure/combo caps)
+ceminidfs bbm serve --slot 4 --archetype C --single-entry --port 8765
 
 # Chrome: chrome://extensions → Load unpacked → extension/bbm-copilot/
-# Set API base (http://127.0.0.1:8765) and draft ID in extension popup
+# Popup: API base http://127.0.0.1:8765 → Test Connection → Save
+# Reload the underdogsports.com draft tab after installing/updating extension
 ```
+
+Or: `bash scripts/install-bbm-extension.sh`
 
 Panel UX follows the [draft-co-pilot](https://github.com/howrealizdat/draft-co-pilot) zero-dependency MV3 pattern; recommendations come from the Cemini recommender via localhost, not ESPN VBD.
 
+**Troubleshooting**
+
+| Symptom | Fix |
+|---------|-----|
+| No panel | Reload extension; confirm URL is `app.underdogsports.com`; refresh draft tab |
+| Terminal 404 spam | Popup → **Test Connection** (overwrites stale `draft_id` after re-running `serve`) |
+| QB in early-round recs | Fixed v1.3.2+: QBs gated before round 6 (draft-card R6–7 band) |
+
 | Endpoint | Purpose |
 |----------|---------|
+| `GET /api/status` | Health + `draft_id` for extension auto-sync |
 | `GET /api/recommendations` | Top-3 for current draft state |
 | `POST /api/sync` | Apply scanned board names to `room_taken` |
 | `POST /api/pick` / `POST /api/taken` | Record picks from extension (optional) |
@@ -134,7 +149,7 @@ At each pick the recommender scores available players:
 score = (projection_pts + clv_bonus) × stack_mult × archetype_mult × exposure_mult
 ```
 
-Hard constraints (bye conflicts, roster limits, exposure caps, combo pair caps) filter candidates before ranking. Top 3 are printed with exposure warnings and stack flags.
+Hard constraints (bye conflicts, roster limits, exposure caps, combo pair caps) filter candidates before ranking. **QB recommendations begin at round 6** (draft-card R6–7 band). Use `--single-entry` for 1-max contests to disable portfolio exposure/combo caps. Top 3 are printed with exposure warnings and stack flags.
 
 **Archetypes (A–E)** route portfolio balance across 150 entries. The pivot state machine can switch archetype once per draft when the board blocks the primary plan.
 

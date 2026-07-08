@@ -155,6 +155,7 @@ class DraftState:
     taken_players: Set[str] = field(default_factory=set)  # player_ids taken by others
     draft_date: Optional[datetime] = None
     underdog_entry_id: Optional[str] = None
+    single_entry: bool = False  # Golden / 1-max: skip portfolio exposure + combo caps
 
     @property
     def current_pick_num(self) -> int:

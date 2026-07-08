@@ -176,6 +176,7 @@ class CorsRequestHandler(BaseHTTPRequestHandler):
                 payload["current_round"] = state.current_round
                 payload["pick_num"] = self._compute_pick_num(state.current_round, state.slot)
                 payload["status"] = state.status
+                payload["single_entry"] = state.is_single_entry
         self._send_json_response(payload)
 
     def _handle_state(self, params: dict[str, str]) -> None:
@@ -633,7 +634,8 @@ def run_server(
     print("  POST /api/pivot            -> {draft_id, archetype}", flush=True)
     if token:
         print("  POST auth                  -> X-BBM-Token header required", flush=True)
-    print("\nWaiting for Chrome extension (Ctrl+C to stop)", flush=True)
+    print("\nServer ready — extension polls this API (Ctrl+C to stop)", flush=True)
+    print("  If panel missing: reload extension + use app.underdogsports.com draft tab", flush=True)
 
     try:
         server.serve_forever()

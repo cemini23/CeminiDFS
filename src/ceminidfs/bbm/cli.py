@@ -90,11 +90,21 @@ def build_bbm_parser(subparsers: Any) -> None:
     draft_parser.add_argument("--slot", type=int, required=True, help="Draft slot (1-12)")
     draft_parser.add_argument("--archetype", type=str, default=None, help="Archetype override A-E")
     draft_parser.add_argument("--draft-id", type=str, default=None, help="Resume existing draft")
+    draft_parser.add_argument(
+        "--single-entry",
+        action="store_true",
+        help="1-max contest (Golden etc.): skip portfolio exposure/combo caps in recs",
+    )
 
     serve_parser = subparsers.add_parser("serve", help="Run local API server for Chrome extension")
     serve_parser.add_argument("--slot", type=int, default=None, help="Draft slot (1-12)")
     serve_parser.add_argument("--draft-id", type=str, default=None, help="Existing draft ID")
     serve_parser.add_argument("--archetype", type=str, default=None, help="Archetype A-E")
+    serve_parser.add_argument(
+        "--single-entry",
+        action="store_true",
+        help="1-max contest: skip portfolio exposure/combo caps in recs",
+    )
     serve_parser.add_argument("--port", type=int, default=8765, help="Server port (default: 8765)")
     serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     serve_parser.add_argument("--token", type=str, default=None, help="Optional static token required on POST endpoints (X-BBM-Token header)")
@@ -200,7 +210,7 @@ def _cmd_draft(args: argparse.Namespace) -> int:
             return 1
         archetype = args.archetype or _suggest_archetype()
         draft_id = f"draft-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        create_draft(draft_id, slot, archetype)
+        create_draft(draft_id, slot, archetype, is_single_entry=getattr(args, "single_entry", False))
         current_round = 1
         print(f"Created draft: {draft_id}")
 
@@ -682,13 +692,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
         archetype = archetype or _suggest_archetype()
         draft_id = f"draft-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
-        create_draft(draft_id, slot, archetype)
+        create_draft(draft_id, slot, archetype, is_single_entry=getattr(args, "single_entry", False))
         print(f"Created draft: {draft_id}", flush=True)
 
     print(f"Slot: {slot}, Archetype: {archetype}", flush=True)
-    print("\nExtension setup: paste draft ID into extension/bbm-copilot popup", flush=True)
+    if getattr(args, "single_entry", False):
+        print("Mode: single-entry (portfolio exposure/combo caps off)", flush=True)
+    print("\nExtension: open popup → Test Connection → Save", flush=True)
+    print("  Underdog URL: https://app.underdogsports.com/ (reload tab after extension update)", flush=True)
     print(f"  draft_id = {draft_id}", flush=True)
-    print(f"  api_base = http://{args.host}:{args.port}\n", flush=True)
+    print(f"  api_base = http://{args.host}:{args.port}", flush=True)
+    print("  Server ready — panel polls /api/recommendations (Ctrl+C to stop)\n", flush=True)
     if args.token:
         print(f"  token   = {args.token}  (set in extension popup)", flush=True)
 

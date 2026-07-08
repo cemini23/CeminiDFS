@@ -119,6 +119,11 @@ def init_db(path: Optional[Path | str] = None) -> Path:
         "WHERE draft_id LIKE 'practice-%' AND (is_practice IS NULL OR is_practice = 0)"
     )
 
+    try:
+        cursor.execute("ALTER TABLE drafts ADD COLUMN is_single_entry INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     # Picks table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS picks (
@@ -249,6 +254,7 @@ class DraftState:
     total_rounds: int
     my_picks: list[dict[str, Any]]
     all_picks: list[dict[str, Any]]
+    is_single_entry: bool = False
 
 
 def sync_players_from_registry(registry: dict[str, Any], db_path: Optional[Path] = None) -> int:
@@ -441,6 +447,7 @@ def create_draft(
     db_path: Optional[Path] = None,
     total_rounds: int = 18,
     is_practice: bool = False,
+    is_single_entry: bool = False,
 ) -> dict[str, Any]:
     """Create a new draft record."""
     db = db_path or get_db_path()
@@ -449,10 +456,11 @@ def create_draft(
 
     # Force is_practice=1 for practice drafts
     is_practice_flag = 1 if (is_practice or draft_id.startswith("practice-")) else 0
+    single_entry_flag = 1 if is_single_entry else 0
 
     cursor.execute("""
-        INSERT INTO drafts (draft_id, draft_date, slot, archetype, status, current_round, total_rounds, is_practice)
-        VALUES (?, ?, ?, ?, 'in_progress', 1, ?, ?)
+        INSERT INTO drafts (draft_id, draft_date, slot, archetype, status, current_round, total_rounds, is_practice, is_single_entry)
+        VALUES (?, ?, ?, ?, 'in_progress', 1, ?, ?, ?)
     """, (
         draft_id,
         datetime.now().isoformat(),
@@ -460,6 +468,7 @@ def create_draft(
         archetype,
         total_rounds,
         is_practice_flag,
+        single_entry_flag,
     ))
 
     conn.commit()
@@ -472,6 +481,7 @@ def create_draft(
         "status": "in_progress",
         "current_round": 1,
         "is_practice": bool(is_practice_flag),
+        "is_single_entry": bool(single_entry_flag),
     }
 
 
@@ -620,7 +630,7 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
 
     # Get draft info
     cursor.execute("""
-        SELECT draft_id, slot, archetype, status, current_round, total_rounds
+        SELECT draft_id, slot, archetype, status, current_round, total_rounds, is_single_entry
         FROM drafts WHERE draft_id = ?
     """, (draft_id,))
     row = cursor.fetchone()
@@ -629,7 +639,7 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
         conn.close()
         return None
 
-    draft_id, slot, archetype, status, current_round, total_rounds = row
+    draft_id, slot, archetype, status, current_round, total_rounds, is_single_entry = row
 
     # Get my picks with player details (including bye_week, adp, signal, tier, cap_pct)
     cursor.execute("""
@@ -695,6 +705,7 @@ def get_draft_state(draft_id: str, db_path: Optional[Path] = None) -> Optional[D
         total_rounds=total_rounds,
         my_picks=my_picks,
         all_picks=all_picks,
+        is_single_entry=bool(is_single_entry),
     )
 
 
