@@ -49,7 +49,7 @@ def _player(pid: str, name: str, pos: str, team: str = "CIN", adp: float = 50.0)
     )
 
 
-def test_qb_excluded_before_round_6() -> None:
+def test_qb_excluded_before_round_6(bbm_db: Path) -> None:
     qb = _player("bbm:joe-burrow", "Joe Burrow", "QB", adp=61.0)
     rb = _player("bbm:test-rb", "Test RB", "RB", adp=22.0)
     state = _draft_state(round_num=2, roster_players=[_player("bbm:chase", "Ja'Marr Chase", "WR")])
@@ -60,7 +60,7 @@ def test_qb_excluded_before_round_6() -> None:
     assert not any(p.position == "QB" for p in filtered)
 
 
-def test_qb_allowed_from_round_6() -> None:
+def test_qb_allowed_from_round_6(bbm_db: Path) -> None:
     qb = _player("bbm:joe-burrow", "Joe Burrow", "QB", adp=61.0)
     state = _draft_state(round_num=6)
 
