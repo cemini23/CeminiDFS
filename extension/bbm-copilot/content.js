@@ -15,6 +15,29 @@
     '[data-testid*="board"]',
   ];
 
+  const UNDERDOG_SELECTORS = [
+    '[data-testid*="draft-board"]',
+    '[data-testid*="draft-room"]',
+    '[data-testid*="pick-ticker"]',
+    '[data-testid*="drafted"]',
+    '[data-testid*="player"]',
+    '[class*="DraftBoard"]',
+    '[class*="draft-board"]',
+    '[class*="DraftRoom"]',
+    '[class*="draft-room"]',
+    '[class*="PickTicker"]',
+    '[class*="pick-ticker"]',
+    '[class*="DraftedPlayers"]',
+    '[class*="drafted-players"]',
+  ];
+
+  function getSelectorCandidates() {
+    if (location.hostname && location.hostname.includes('underdogsports.com')) {
+      return UNDERDOG_SELECTORS.concat(BOARD_SELECTORS);
+    }
+    return BOARD_SELECTORS;
+  }
+
   function buildPostHeaders() {
     const headers = { 'Content-Type': 'application/json' };
     if (config.token) headers['X-BBM-Token'] = config.token;
@@ -124,24 +147,40 @@
   }
 
   function collectBoardLabels() {
-    let root = null;
-    let usedSelector = null;
-    let warning = null;
-    for (const sel of BOARD_SELECTORS) {
-      root = document.querySelector(sel);
-      if (root) { usedSelector = sel; break; }
+    let bestRoot = null;
+    let bestSelector = null;
+    let bestLabels = [];
+
+    for (const sel of getSelectorCandidates()) {
+      const roots = document.querySelectorAll(sel);
+      for (const root of roots) {
+        const labels = [];
+        root.querySelectorAll('[aria-label]').forEach((el) => {
+          const label = el.getAttribute('aria-label')?.trim();
+          if (label && label.length >= 4 && label.length <= 60) labels.push(label);
+        });
+        if (labels.length > bestLabels.length) {
+          bestRoot = root;
+          bestSelector = sel;
+          bestLabels = labels;
+        }
+      }
     }
-    if (!root) {
-      root = document.body;
-      usedSelector = 'body-fallback';
-      warning = 'Board container not found — page-wide scan (less precise)';
+
+    if (bestRoot && bestLabels.length >= 1) {
+      return { labels: bestLabels.slice(0, 200), warning: null, selector: bestSelector };
     }
-    const labels = [];
-    root.querySelectorAll('[aria-label]').forEach((el) => {
+
+    const fallbackLabels = [];
+    document.body.querySelectorAll('[aria-label]').forEach((el) => {
       const label = el.getAttribute('aria-label')?.trim();
-      if (label && label.length >= 4 && label.length <= 60) labels.push(label);
+      if (label && label.length >= 4 && label.length <= 60) fallbackLabels.push(label);
     });
-    return { labels: labels.slice(0, 200), warning, selector: usedSelector };
+    return {
+      labels: fallbackLabels.slice(0, 200),
+      warning: 'Board container not found — page-wide scan (less precise)',
+      selector: 'body-fallback',
+    };
   }
 
   async function undoLast() {
@@ -176,15 +215,15 @@
       return;
     }
 
-    const { labels, warning } = collectBoardLabels();
+    const { labels, warning, selector } = collectBoardLabels();
     if (warning) {
-      console.warn('BBM:', warning);
+      console.warn('BBM:', warning, selector);
       if (labels.length === 0) {
-        statusEl.textContent = `${warning} — no labels found`;
+        statusEl.textContent = `${warning} — no labels found (selector: ${selector})`;
         return;
       }
-      if (!window.confirm(`${warning}.\nSync ${labels.length} page-wide labels anyway? (may include undrafted players)`)) {
-        statusEl.textContent = `${warning} — sync cancelled`;
+      if (!window.confirm(`${warning} (selector: ${selector}).\nSync ${labels.length} page-wide labels anyway? (may include undrafted players)`)) {
+        statusEl.textContent = `${warning} — sync cancelled (selector: ${selector})`;
         return;
       }
     } else if (labels.length === 0) {
@@ -206,7 +245,7 @@
       }
       const ambiguousCount = data.ambiguous_count ?? 0;
       statusEl.textContent =
-        (warning ? 'WARN page-wide scan — ' : '') +
+        (warning ? `WARN page-wide scan (selector: ${selector}) — ` : `selector: ${selector} — `) +
         `Synced ${data.synced_count ?? 0} — ${data.skipped_count ?? 0} known — ` +
         `${data.unmatched_count ?? 0} unmatched` +
         (ambiguousCount ? ` — ${ambiguousCount} ambiguous` : '');

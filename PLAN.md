@@ -199,7 +199,7 @@ Operational and v3 enhancements — not blockers for live slate use:
 
 - Contest ROI / dup-adjusted reranking (full field sim)
 - Defense EPA opponent adjustments in stats layer
-- Open-Meteo **archive** API for historical weather in backtests
+- ~~Open-Meteo **archive** API for historical weather in backtests~~ — `data/weather.py` `OPEN_METEO_ARCHIVE_URL` + `_open_meteo_url()` (2026-07-10)
 - Injury play-probability redistribution in usage model
 - NGS/participation data integration (K127 reference-only, see `docs/ngs-participation-eval.md`)
 - Automated GitHub release / PyPI publish

@@ -92,7 +92,7 @@ Exposure policy details: see [BBM-EXPOSURE.md](BBM-EXPOSURE.md).
 
 Optional MV3 overlay for Underdog draft rooms — top-3 panel with **manual** board scan and **Rec** button to log picks to the ledger (you still submit picks on Underdog; no auto-pick).
 
-**Underdog URL:** drafts run on **`https://app.underdogsports.com/`** (not legacy `underdogfantasy.com`). Extension v1.3.2+ matches both domains.
+**Underdog URL:** drafts run on **`https://app.underdogsports.com/`** (not legacy `underdogfantasy.com`). Extension v1.3.3+ matches both domains with improved board container detection.
 
 ```bash
 # Terminal — local API (ledger remains source of truth)
@@ -115,6 +115,7 @@ Panel UX follows the [draft-co-pilot](https://github.com/howrealizdat/draft-co-p
 | No panel | Reload extension; confirm URL is `app.underdogsports.com`; refresh draft tab |
 | Terminal 404 spam | Popup → **Test Connection** (overwrites stale `draft_id` after re-running `serve`) |
 | QB in early-round recs | Fixed v1.3.2+: QBs gated before round 6 (draft-card R6–7 band) |
+| Board scan not found / wrong players | Fixed v1.3.3+: extension picks the Underdog container with the most player-name `aria-label`s. If it still falls back to `body`, confirm the page-wide scan before syncing. |
 
 | Endpoint | Purpose |
 |----------|---------|

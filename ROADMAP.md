@@ -40,6 +40,8 @@
 | BBM7 | Best Ball draft copilot | `docs/BBM.md` |
 | Sweep 07-03 | Research triage — zero adopts; reading refs → Gambling wiki | `briefs/2026-07-03_research-triage-plan.md` |
 | Sweep 07-05 | Research triage — zero adopts; SFB16 ADP reading ref → docs/BBM.md | `briefs/2026-07-05_research-triage-plan.md` |
+| Sweep 07-07→10 | Research triage — zero adopts | `briefs/2026-07-10_research-triage-plan.md` |
+| BBM board scan | UnderdogSports host-aware selectors + container scoring | `briefs/2026-07-10_underdog-board-selector-fix-plan.md` |
 
 ## K129 — Sleeper sentiment (2026-06-25)
 
