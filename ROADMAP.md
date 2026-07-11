@@ -42,6 +42,7 @@
 | Sweep 07-05 | Research triage — zero adopts; SFB16 ADP reading ref → docs/BBM.md | `briefs/2026-07-05_research-triage-plan.md` |
 | Sweep 07-07→10 | Research triage — zero adopts | `briefs/2026-07-10_research-triage-plan.md` |
 | BBM board scan | UnderdogSports host-aware selectors + container scoring | `briefs/2026-07-10_underdog-board-selector-fix-plan.md` |
+| Sweep 07-11 | Research triage — zero adopts (DUP of 07-10) | `briefs/2026-07-11_research-triage-plan.md` |
 
 ## K129 — Sleeper sentiment (2026-06-25)
 

@@ -69,7 +69,6 @@ See [`briefs/2026-07-02_p1-reaudit-fix-plan.md`](2026-07-02_p1-reaudit-fix-plan.
 
 ## Operator checklist (before paid entry)
 
-- [ ] `ceminidfs bbm practice --slot 4` — full draft, test Rec + Undo + Scan Board
-- [ ] Reload extension v1.1.0 in Chrome
-- [ ] Confirm `refresh-adp` CSV has full names (not surnames only)
-- [ ] `ceminidfs bbm abandon --draft-id` any stale in-progress drafts
+**Operator manual steps** — canonical checklist lives in [`docs/BBM.md` § Before paid entry](../docs/BBM.md#before-paid-entry) (updated 2026-07-11; supersedes stale v1.1.0 extension ref below).
+
+- [ ] See [docs/BBM.md — Before paid entry](../docs/BBM.md#before-paid-entry): `preflight`, practice dry-run, extension v1.3.3+, ADP names, abandon stale drafts, `--single-entry` for Golden/1-max
