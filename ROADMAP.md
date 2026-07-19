@@ -43,6 +43,26 @@
 | Sweep 07-07→10 | Research triage — zero adopts | `briefs/2026-07-10_research-triage-plan.md` |
 | BBM board scan | UnderdogSports host-aware selectors + container scoring | `briefs/2026-07-10_underdog-board-selector-fix-plan.md` |
 | Sweep 07-11 | Research triage — zero adopts (DUP of 07-10) | `briefs/2026-07-11_research-triage-plan.md` |
+| K163 | Optional maths-cs-ai-compendium local knowledge MCP (agent assist only; no runtime/`src/` dep) | `briefs/2026-07-14_k163-maths-compendium-mcp-extract.md` |
+| K159 | Pipeline cost discipline — fable-advisor + implementer lane (process/docs only) | `briefs/2026-07-11_k159-fable-advisor-pipeline-cost-steal.md` |
+
+## K159 — pipeline cost discipline (2026-07-19)
+
+**Process guidance only** — not a code ship. Pattern for projection-layer work so architect tokens stay on architecture.
+
+| Lane | Use for | Do not use for |
+|------|---------|----------------|
+| **fable-advisor** | Projection-layer refactors: nflverse ingest, ownership sim, pydfs hooks | Routine file edits, test green-ups |
+| **Implementer** (Grok / Codex / grok-implementer) | Bounded file edits + test fixes | Unreviewed architecture changes |
+| **Architect** | Reviews implementer diff; owns plan | Boilerplate typing |
+
+**Rules**
+
+1. Architect plans via fable-advisor; implementer executes routine edits; architect reviews the diff.
+2. Before wide adopt: log token delta on **one bounded slice** (e.g. a single position-model calibration script). Operator-owned log — do not invent numbers.
+3. **NO-GO** if the implementer lane is unavailable (Grok must be authenticated). Do not burn architect tokens on boilerplate as a fallback without an explicit exception.
+
+Source brief: `briefs/2026-07-11_k159-fable-advisor-pipeline-cost-steal.md`.
 
 ## K129 — Sleeper sentiment (2026-06-25)
 

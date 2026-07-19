@@ -11,6 +11,9 @@ venv/
 # Secrets
 .env
 
+# Optional local adopts / knowledge clones (MCP, skills — never commit)
+.local/
+
 # Pipeline artifacts
 artifacts/
 runs/
