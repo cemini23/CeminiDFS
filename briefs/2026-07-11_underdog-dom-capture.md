@@ -113,3 +113,41 @@ A follow-up **code-only** sprint (WS-A v1.3.4) may start only when §4 is filled
 ## 6. Handoff
 
 When §4 is complete, change **Status** at the top to `CAPTURED — ready for v1.3.4` and ping the implementer. Do not edit `extension/` until the code sprint starts.
+
+---
+
+## 7. Public research notes (2026-07-19) — candidates only
+
+Live §4 capture is still required before shipping v1.3.4. These are **unverified candidates** from open web + GitHub (not a substitute for DevTools on a live BBM room).
+
+### Sources
+
+| Source | What it adds |
+|--------|----------------|
+| [heithoffp/bestball](https://github.com/heithoffp/bestball) `chrome-extension/src/adapters/underdog.js` (no SPDX license on repo; cite only) | Live draft URL + concrete `data-testid` / class fragment selectors |
+| Reddit r/BestBall — [Bag Manager](https://www.reddit.com/r/BestBall/comments/1sda3k2/i_built_a_free_chrome_extension_for_tracking_best/) / [update](https://www.reddit.com/r/BestBall/comments/1szwu39/my_free_best_ball_exposure_tracker_the_bag/) | Confirms May 2025 domain move `underdogfantasy.com` → `underdogsports.com` breaks host-scoped extensions until hosts updated |
+| Draft Caddy Firefox listing | Declares host perms for both `underdogfantasy.com` and `underdogsports.com` |
+| Brave web search | No public dump of full draft-room DOM; overlays/trackers are the useful trail |
+| opencli Reddit / X | Reddit adapter returned empty for these queries; X “live” search was noisy on the word “extension” — not useful for selectors |
+
+### Candidate tokens (verify in §4)
+
+From `underdog.js` adapter (player **queue/grid**, not necessarily the drafted-picks ticker):
+
+| Role | Candidate selector |
+|------|--------------------|
+| Draft URL path | `/draft/<uuid>` (`isDraftPage`: `^/draft/[a-f0-9-]+`) |
+| Grid / inject root | `[role="grid"]` |
+| Player row | `[data-testid="player-cell-wrapper"]` |
+| Name cell | `[class*="playerName"]` |
+| My pick cell | `[class*="playerPickCell"]` |
+| Position chrome | `[class*="positionSection"]`, `[class*="positionHeader"]`, `[class*="playerPosition"]` |
+| Row chrome | `[class*="rightSide"]`, `[class*="statCell"]`, `[class*="playerListSortButtons"]` |
+
+**Gap vs our v1.3.3 list:** we try `data-testid*="draft-board|draft-room|pick-ticker|drafted|player"` and class `*DraftBoard*` / `*pick-ticker*` — we do **not** yet try exact `player-cell-wrapper` or `[role="grid"]`. Those are high-priority §4 checks and likely v1.3.4 selector adds **if** a live capture confirms they wrap drafted names (or that Scan Board should score the player grid instead of a separate “board” container).
+
+### Operator focus when capturing
+
+1. Confirm pathname is `/draft/...` on `app.underdogsports.com`.
+2. Check whether drafted picks live under `[role="grid"]` / `player-cell-wrapper`, or a separate ticker — capture **both** if present.
+3. Prefer exact `data-testid` values over hashed `styles__*__XXXX` classes (those break on rebuilds; see hashed `styles__active__A5wMB` in the public adapter).
