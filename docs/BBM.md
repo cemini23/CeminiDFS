@@ -81,7 +81,7 @@ Operator manual steps — run once before first paid BBM VII entry (or after a l
 
 - [ ] `ceminidfs bbm preflight` — must exit 0 (registry coverage, DB health)
 - [ ] `ceminidfs bbm practice --slot N` — dry-run full draft; exercise **Rec**, **Undo**, and **Scan Board**
-- [ ] Reload extension **v1.3.3+** on `app.underdogsports.com` (see [Chrome extension](#chrome-extension-phase-3))
+- [ ] Reload extension **v1.3.4+** on `app.underdogsports.com` (see [Chrome extension](#chrome-extension-phase-3))
 - [ ] Confirm `refresh-adp` CSV has **full names** (not surnames only)
 - [ ] `ceminidfs bbm abandon` any stale in-progress drafts
 - [ ] **Golden / 1-max contests:** pass `--single-entry` to `serve` and `draft` (skips 150-entry exposure/combo caps)
@@ -103,7 +103,7 @@ Operator manual steps — run once before first paid BBM VII entry (or after a l
 
 Optional MV3 overlay for Underdog draft rooms — top-3 panel with **manual** board scan and **Rec** button to log picks to the ledger (you still submit picks on Underdog; no auto-pick).
 
-**Underdog URL:** drafts run on **`https://app.underdogsports.com/`** (not legacy `underdogfantasy.com`). Extension v1.3.3+ matches both domains with improved board container detection.
+**Underdog URL:** drafts run on **`https://app.underdogsports.com/`** (not legacy `underdogfantasy.com`). Extension v1.3.4+ matches both domains; board scan prefers 2026 research candidates (`player-cell-wrapper`, `[role="grid"]`, `playerPickCell` / `playerName` / `positionSection`) and scores the ancestor container with the most player-name `aria-label`s.
 
 ```bash
 # Terminal — local API (ledger remains source of truth)
@@ -126,20 +126,7 @@ Panel UX follows the [draft-co-pilot](https://github.com/howrealizdat/draft-co-p
 | No panel | Reload extension; confirm URL is `app.underdogsports.com`; refresh draft tab |
 | Terminal 404 spam | Popup → **Test Connection** (overwrites stale `draft_id` after re-running `serve`) |
 | QB in early-round recs | Fixed v1.3.2+: QBs gated before round 6 (draft-card R6–7 band) |
-| Board scan not found / wrong players | Fixed v1.3.3+: extension picks the Underdog container with the most player-name `aria-label`s. If it still falls back to `body`, confirm the page-wide scan before syncing. |
-
-#### DOM capture for v1.3.4
-
-If **Scan Board** shows `body-fallback`, a confirm dialog (*"Board container not found — page-wide scan"*), or syncs the wrong players, v1.3.3 selectors do not match Underdog’s current draft-room DOM. Capture tokens once from a **live BBM draft** (≥3 picks visible) before the v1.3.4 selector sprint:
-
-1. Open `https://app.underdogsports.com/` draft room (desktop, 100% zoom).
-2. DevTools → **Elements** → inspect the **draft board container** (not the Cemini panel).
-3. Copy from the board ancestor: `data-testid`, full `class`, tag name; repeat for one **drafted pick** child node.
-4. From three drafted picks, copy exact `aria-label` attribute values.
-5. Note what v1.3.3 reported after Scan Board (status selector or console `BBM:` line).
-6. Paste into [`briefs/2026-07-11_underdog-dom-capture.md`](../briefs/2026-07-11_underdog-dom-capture.md) §4 and set brief status to `CAPTURED — ready for v1.3.4`.
-
-Do not guess selectors in `content.js` without a capture — Underdog changes `data-testid` and class names without notice.
+| Board scan not found / wrong players | Fixed v1.3.4+: Scan Board prefers `player-cell-wrapper` / `[role="grid"]` (and related 2026 research selectors), then scores the ancestor with the most player-name `aria-label`s. If it still falls back to `body`, confirm the page-wide scan before syncing. Optional live DevTools paste into [`briefs/2026-07-11_underdog-dom-capture.md`](../briefs/2026-07-11_underdog-dom-capture.md) still welcome for exact attrs. |
 
 | Endpoint | Purpose |
 |----------|---------|

@@ -15,7 +15,16 @@
     '[data-testid*="board"]',
   ];
 
+  // High-priority 2026 research candidates (exact/specific before broad *=).
+  // player-cell-wrapper is a row — collectBoardLabels scores ancestors so the
+  // grid/parent with the most player-name aria-labels wins over a single row.
   const UNDERDOG_SELECTORS = [
+    '[data-testid="player-cell-wrapper"]',
+    '[role="grid"]',
+    '[data-testid*="player-cell"]',
+    '[class*="playerPickCell"]',
+    '[class*="playerName"]',
+    '[class*="positionSection"]',
     '[data-testid*="draft-board"]',
     '[data-testid*="draft-room"]',
     '[data-testid*="pick-ticker"]',
@@ -150,19 +159,39 @@
     let bestRoot = null;
     let bestSelector = null;
     let bestLabels = [];
+    // Row-level hits (e.g. player-cell-wrapper) are not the board root; score the
+    // match plus a few ancestors so [role="grid"] / multi-row parents win.
+    // Never score document.body here — that path stays confirm-gated below.
+    const scored = new WeakSet();
+    const ANCESTOR_DEPTH = 6;
+
+    function playerNameLabels(root) {
+      const labels = [];
+      root.querySelectorAll('[aria-label]').forEach((el) => {
+        const label = el.getAttribute('aria-label')?.trim();
+        if (label && label.length >= 4 && label.length <= 60) labels.push(label);
+      });
+      return labels;
+    }
+
+    function consider(node, sel) {
+      if (!node || node === document.body || scored.has(node)) return;
+      scored.add(node);
+      const labels = playerNameLabels(node);
+      if (labels.length > bestLabels.length) {
+        bestRoot = node;
+        bestSelector = sel;
+        bestLabels = labels;
+      }
+    }
 
     for (const sel of getSelectorCandidates()) {
       const roots = document.querySelectorAll(sel);
       for (const root of roots) {
-        const labels = [];
-        root.querySelectorAll('[aria-label]').forEach((el) => {
-          const label = el.getAttribute('aria-label')?.trim();
-          if (label && label.length >= 4 && label.length <= 60) labels.push(label);
-        });
-        if (labels.length > bestLabels.length) {
-          bestRoot = root;
-          bestSelector = sel;
-          bestLabels = labels;
+        let node = root;
+        for (let depth = 0; depth < ANCESTOR_DEPTH && node && node !== document.body; depth++) {
+          consider(node, sel);
+          node = node.parentElement;
         }
       }
     }
@@ -171,11 +200,7 @@
       return { labels: bestLabels.slice(0, 200), warning: null, selector: bestSelector };
     }
 
-    const fallbackLabels = [];
-    document.body.querySelectorAll('[aria-label]').forEach((el) => {
-      const label = el.getAttribute('aria-label')?.trim();
-      if (label && label.length >= 4 && label.length <= 60) fallbackLabels.push(label);
-    });
+    const fallbackLabels = playerNameLabels(document.body);
     return {
       labels: fallbackLabels.slice(0, 200),
       warning: 'Board container not found — page-wide scan (less precise)',

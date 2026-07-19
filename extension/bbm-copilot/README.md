@@ -2,7 +2,7 @@
 
 Chrome extension for CeminiDFS Best Ball Mania draft assistance. Read-only panel with manual board sync.
 
-**Total JS: ~250 lines** | No build step | Vanilla JS only | v1.3.3+ supports `app.underdogsports.com` with improved board selector scoring
+**Total JS: ~250 lines** | No build step | Vanilla JS only | v1.3.4+ supports `app.underdogsports.com` with 2026 board selectors (`player-cell-wrapper`, `[role="grid"]`, etc.) and ancestor-aware scoring
 
 ## Installation
 

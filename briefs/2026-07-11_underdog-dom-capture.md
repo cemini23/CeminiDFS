@@ -1,11 +1,12 @@
 # Underdog DOM capture — operator brief (WS-B)
 
 **Date:** 2026-07-11  
-**Status:** WAITING ON CAPTURE  
-**Unblocks:** Extension v1.3.4 code sprint (`UNDERDOG_SELECTORS` refresh in `extension/bbm-copilot/content.js`)  
-**Parent plan:** [2026-07-10_underdog-board-selector-fix-plan.md](2026-07-10_underdog-board-selector-fix-plan.md) (WS-A shipped v1.3.3)
+**Updated:** 2026-07-19  
+**Status:** SHIPPED — extension v1.3.4 (research-driven selectors; live DevTools still welcome)  
+**Unblocks:** — (v1.3.4 shipped from §7–§8 research candidates; live DevTools §4 still preferred for refinement)  
+**Parent plan:** [2026-07-10_underdog-board-selector-fix-plan.md](2026-07-10_underdog-board-selector-fix-plan.md) (WS-A shipped v1.3.3; v1.3.4 selector refresh follows)
 
-Extension v1.3.3 scores containers by player-name `aria-label` count but still falls back to `body-fallback` on some live Underdog draft rooms. Before we ship v1.3.4, an operator must capture the **current** Underdog DOM tokens from a real draft and paste them into §4 below.
+Extension v1.3.4 prepends high-priority 2026 candidates (`player-cell-wrapper`, `[role="grid"]`, `playerPickCell` / `playerName` / `positionSection`) and scores match + ancestors so row-level hits promote the multi-name board container over `body-fallback`. Exact live DevTools attrs in §4 are still welcome but not blocking.
 
 ---
 
@@ -70,41 +71,41 @@ Fill every field. Use literal values from DevTools — do not paraphrase class f
 ## 4. Operator capture (paste below)
 
 ```text
-CAPTURE_DATE:
-OPERATOR:
-DRAFT_URL_PATH:
-VIEWPORT:
-CHROME_VERSION:
+CAPTURE_DATE: 2026-07-19 (YouTube research — not live DevTools)
+OPERATOR: agent (YT frames) — operator still needed for exact attrs
+DRAFT_URL_PATH: /draft/<uuid>  (inferred; see §8 — confirm on live room)
+VIEWPORT: 1280×720 stream capture (not desktop Chrome)
+CHROME_VERSION: N/A (YouTube)
 
-BOARD_CONTAINER_TAG:
-BOARD_CONTAINER_DATA_TESTID:
-BOARD_CONTAINER_CLASS:
-BOARD_CONTAINER_ID:
+BOARD_CONTAINER_TAG: unknown (video cannot expose DOM)
+BOARD_CONTAINER_DATA_TESTID: CANDIDATE [role="grid"] / see §7–§8 — UNVERIFIED
+BOARD_CONTAINER_CLASS: CANDIDATE [class*="DraftBoard"] etc — UNVERIFIED
+BOARD_CONTAINER_ID: NONE observed on stream
 
-PICK_CHILD_TAG:
-PICK_CHILD_DATA_TESTID:
-PICK_CHILD_CLASS:
+PICK_CHILD_TAG: unknown
+PICK_CHILD_DATA_TESTID: CANDIDATE player-cell-wrapper — UNVERIFIED (public adapter + UI match)
+PICK_CHILD_CLASS: CANDIDATE [class*="playerName"] / playerPickCell — UNVERIFIED
 
-ARIA_LABEL_SAMPLE_1:
-ARIA_LABEL_SAMPLE_2:
-ARIA_LABEL_SAMPLE_3:
+ARIA_LABEL_SAMPLE_1: (visible text only) Ja'Marr Chase CIN  — exact aria-label UNVERIFIED
+ARIA_LABEL_SAMPLE_2: (visible text only) Cam Ward QB · TEN · Bye 9 — exact aria-label UNVERIFIED
+ARIA_LABEL_SAMPLE_3: (visible text only) Breece Hall NYJ — exact aria-label UNVERIFIED
 
-V133_SCAN_SELECTOR:
-NOTES:
+V133_SCAN_SELECTOR: unknown from YT
+NOTES: §8 YouTube 2026 streams. Splash Play / Club Fantasy / Fanatics often show OBS board overlays — only Spags native Underdog room frames count for Scan Board. Exact data-testid + aria-label still require one live DevTools paste.
 ```
 
 ---
 
-## 5. Acceptance — future v1.3.4 code sprint
+## 5. Acceptance — v1.3.4 code sprint
 
-A follow-up **code-only** sprint (WS-A v1.3.4) may start only when §4 is filled and reviewed. That sprint is **done** when:
+Code sprint shipped from §7–§8 research candidates (operator green light 2026-07-19; live §4 DevTools not blocking).
 
-- [ ] `UNDERDOG_SELECTORS` in `content.js` includes at least one selector derived from §4 `BOARD_CONTAINER_*` tokens (prefer `data-testid` exact or prefix match before class-only).
-- [ ] `collectBoardLabels()` on the captured draft URL scores the real board container **above** `body` fallback (status shows a non–`body-fallback` selector; no confirm dialog on a normal scan).
-- [ ] Sample `aria-label` strings from §4 are parsed by `board_parse.extract_names_from_aria_labels` (manual check or unit fixture seeded from capture).
-- [ ] `manifest.json` bumped to `1.3.4`; `docs/BBM.md` troubleshooting row updated; `extension/bbm-copilot/README.md` version note updated.
-- [ ] Manual checklist on the **same** draft room: Scan Board → synced counts, no `WARN page-wide scan`, status auto-clears after 3s when clean.
-- [ ] `POST /api/sync` contract unchanged: `{draft_id, labels}`.
+- [x] `UNDERDOG_SELECTORS` in `content.js` includes high-priority research candidates early: exact `player-cell-wrapper`, `[role="grid"]`, `player-cell` / `playerPickCell` / `playerName` / `positionSection` (before broad `*=` patterns). §4 live tokens not claimed as verified attrs.
+- [x] `collectBoardLabels()` scores match + ancestors by player-name `aria-label` count (len 4–60) so row hits promote grid/parent over a single cell; confirm-gated `body-fallback` retained when no candidate scores ≥1.
+- [ ] Sample `aria-label` strings from live §4 — still UNVERIFIED from YT; operator verify parse on next live draft (`board_parse` fixtures optional).
+- [x] `manifest.json` bumped to `1.3.4`; `docs/BBM.md` troubleshooting/version refs updated; `extension/bbm-copilot/README.md` version note updated.
+- [ ] Manual checklist on a live draft room: Scan Board → synced counts, no `WARN page-wide scan`, status auto-clears after 3s when clean. **Operator verify on next live draft.**
+- [x] `POST /api/sync` contract unchanged: `{draft_id, labels}`.
 
 **Out of scope for v1.3.4:** `src/`, `tests/`, auto-pick, continuous scraping, React fiber hacks.
 
@@ -112,13 +113,13 @@ A follow-up **code-only** sprint (WS-A v1.3.4) may start only when §4 is filled
 
 ## 6. Handoff
 
-When §4 is complete, change **Status** at the top to `CAPTURED — ready for v1.3.4` and ping the implementer. Do not edit `extension/` until the code sprint starts.
+v1.3.4 shipped 2026-07-19 from research candidates (YT + public adapter). Optional: still paste live DevTools into §4 if Scan Board mis-selects; use that for a follow-up selector tweak only.
 
 ---
 
 ## 7. Public research notes (2026-07-19) — candidates only
 
-Live §4 capture is still required before shipping v1.3.4. These are **unverified candidates** from open web + GitHub (not a substitute for DevTools on a live BBM room).
+Used as the v1.3.4 selector source (operator green light 2026-07-19). Still **unverified on live DevTools** — refine if Scan Board mis-picks.
 
 ### Sources
 
@@ -151,3 +152,45 @@ From `underdog.js` adapter (player **queue/grid**, not necessarily the drafted-p
 1. Confirm pathname is `/draft/...` on `app.underdogsports.com`.
 2. Check whether drafted picks live under `[role="grid"]` / `player-cell-wrapper`, or a separate ticker — capture **both** if present.
 3. Prefer exact `data-testid` values over hashed `styles__*__XXXX` classes (those break on rebuilds; see hashed `styles__active__A5wMB` in the public adapter).
+
+---
+
+## 8. YouTube research — 2026 live drafts (2026-07-19)
+
+Videos cannot expose `data-testid` / class strings. They **do** confirm the live 2026 Underdog draft-room chrome and visible name formats.
+
+### Videos checked
+
+| Video | Why 2026 | What we saw |
+|-------|----------|-------------|
+| [Spags — My Secret Weapon For Best Ball Drafts in 2026](https://www.youtube.com/watch?v=xc6OdCnoDQs) (streamed ~1 day before search) | Title + mid-stream slide **"July 17, 2026 — NFL Training Camp & Fantasy News Breakdown"** | **Best native Underdog UI** (~18–33 min): top nav Drafts / Pick'em / Live / Results / Rankings / News; horizontal pick ticker; left player pool (ADP + Proj); right My Team by position. Splash Play Monte Carlo overlay often covers center — ignore for selectors. |
+| [Professional Fanatics — Underdog Best Ball Drafts LIVE \| 2026](https://www.youtube.com/watch?v=n3QSHt36b44) | Title 2026 | Custom OBS snake-board overlay (FILLED seats, color cells) — **not** native Underdog DOM. |
+| [Club Fantasy — Best Ball Draft Strategies LIVE \| Underdog Fantasy Draft 2026](https://www.youtube.com/watch?v=kDNxlCYCCbI) | Title 2026 | "MOCK IT LIKE IT'S HOT" board overlay — **not** native Underdog DOM. |
+
+Frame dumps (local, gitignored via handoffs): `briefs/handoffs/yt-frames/ud-spags*.png`, `ud-fanatics*.png`, `ud-club*.png`.
+
+### Native Underdog chrome (Spags frames ~1100s / 1500s / 2000s)
+
+| Region | Visible structure | Scan Board implication |
+|--------|-------------------|------------------------|
+| Top nav | Drafts, Pick'em, Live, Results, Rankings, News feed | Confirms `app.underdogsports.com` product shell |
+| Pick ticker | Cards: username · `R.P \| overall` · player · on-clock timer | Drafted names may live here **and/or** in a grid — capture both |
+| Player pool (left) | Rows: name, POS, team, bye, ADP, Proj P | Aligns with public `[data-testid="player-cell-wrapper"]` + `[role="grid"]` |
+| My Team (right) | Position sections with drafted names + team abbrev | Aligns with `[class*="positionSection"]` / `playerPickCell` |
+
+### Visible name strings (for parse fixtures — not proven aria-labels)
+
+From native UI frames (approximate on-screen text):
+
+- `Ja'Marr Chase` / `Ja'Marr Chase CIN`
+- `Cam Ward` / `Cam Ward QB · TEN · Bye 9`
+- `Breece Hall` / `Breece Hall NYJ`
+- `Travis Etienne Jr.` / `Travis Etienne Jr. NO`
+
+Our `board_parse` already expects patterns like `Select Ja'Marr Chase, WR, CIN` — **still need one real `aria-label=` paste** to confirm 2026 wording.
+
+### Verdict
+
+- YouTube **confirms** 2026 Underdog draft room layout and that v1.3.4 should prioritize `player-cell-wrapper` + `[role="grid"]` candidates from §7.
+- YouTube **does not** complete §4 acceptance for shipping — one live DevTools capture (or login + active `/draft/...` room) remains the gate.
+- Prefer Spags-style **native app screenshare**; skip streams that only show OBS/mock boards.
