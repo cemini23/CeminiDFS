@@ -38,6 +38,7 @@
 | K129 | Sleeper buzz + luck metrics | `docs/sleeper-sentiment-eval.md` |
 | K138 | ESPN injury adjunct + draftfast reject | `docs/espn-api-eval.md` |
 | BBM7 | Best Ball draft copilot | `docs/BBM.md` |
+| ESPN redraft | 12-team snake full-PPR draft card + prerank → ESPN native Auto-Pick | `docs/ESPN-REDRAFT.md` |
 | Sweep 07-03 | Research triage — zero adopts; reading refs → Gambling wiki | `briefs/2026-07-03_research-triage-plan.md` |
 | Sweep 07-05 | Research triage — zero adopts; SFB16 ADP reading ref → docs/BBM.md | `briefs/2026-07-05_research-triage-plan.md` |
 | Sweep 07-07→10 | Research triage — zero adopts | `briefs/2026-07-10_research-triage-plan.md` |
@@ -84,6 +85,18 @@ buzz_signal:
   ownership_boost_per_1k: 0.5
   max_ownership_boost: 8.0
 ```
+
+## ESPN redraft — 12-team snake PPR (2026-07-29)
+
+Season-long cheat sheet + prerank CSV for ESPN Pre-Draft Rankings / Auto-Pick Strategy. **Not** a click-bot.
+
+```bash
+ceminidfs redraft draft-card
+ceminidfs redraft refresh --adp config/espn-ppr-adp.csv
+```
+
+Operator guide: `docs/ESPN-REDRAFT.md`. Scoring: `score_espn_ppr_season` in `models/scoring.py`.
+ADP snapshot: `config/espn-ppr-adp.csv` (FantasyPros PPR; see `config/espn-ppr-adp.SOURCE.md`).
 
 ## K138 — ESPN adjunct (2026-07-01)
 

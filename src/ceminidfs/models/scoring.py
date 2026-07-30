@@ -109,6 +109,25 @@ def score_half_ppr_season(stats: StatsMapping) -> float:
     )
 
 
+def score_espn_ppr_season(stats: StatsMapping) -> float:
+    """Return ESPN default full-PPR season fantasy points (no yardage bonuses).
+
+    ESPN standard PPR: 1.0/rec, 4pt pass TD, −2 INT, −2 fumble lost.
+    """
+
+    return (
+        _stat(stats, "pass_yds") * 0.04
+        + _stat(stats, "pass_td") * 4.0
+        - _stat(stats, "int") * 2.0
+        + _stat(stats, "rush_yds") * 0.1
+        + _stat(stats, "rush_td") * 6.0
+        + _stat(stats, "rec") * 1.0
+        + _stat(stats, "rec_yds") * 0.1
+        + _stat(stats, "rec_td") * 6.0
+        - _stat(stats, "fumbles_lost") * 2.0
+    )
+
+
 def fd_points(stats: StatsMapping) -> float:
     """Return FanDuel half-PPR fantasy points from counting stats."""
 

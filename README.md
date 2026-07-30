@@ -95,6 +95,9 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs sleeper trending` | Sleeper add/drop buzz (K129 optional sentiment) |
 | `ceminidfs luck-metrics` | Team Pythagorean expected wins vs actual |
 | `ceminidfs espn probe` | ESPN fantasy league injury map smoke test (K138) |
+| `ceminidfs redraft draft-card` | ESPN 12-team PPR cheat sheet (BUY/FADE + Auto-Pick) |
+| `ceminidfs redraft prerank` | Ranked CSV for ESPN Pre-Draft Rankings |
+| `ceminidfs redraft refresh` | Weekly: draft card + prerank from ADP CSV |
 | `ceminidfs regression` | One command: optional prepare + backtest + calibrate + lineup backtest |
 | `ceminidfs lineup-backtest` | Synthetic slate → pydfs optimize → score vs actuals |
 | `ceminidfs benchmark replay` | Replay every paid CSV in a folder across weeks |
@@ -116,6 +119,18 @@ Requires `pip install -e ".[bbm]"`. See [docs/BBM.md](docs/BBM.md).
 | `ceminidfs bbm serve` | Local HTTP API for Chrome extension overlay (`--slot`, `--draft-id`, `--port`) |
 
 **Chrome extension (optional):** load `extension/bbm-copilot/` unpacked — read-only top-3 panel on Underdog with manual board scan. See [docs/BBM.md](docs/BBM.md#chrome-extension-phase-3).
+
+### ESPN season-long redraft (`ceminidfs redraft`)
+
+12-team snake full-PPR cheat sheet + prerank for ESPN native Auto-Pick. See [docs/ESPN-REDRAFT.md](docs/ESPN-REDRAFT.md).
+
+| Command | Purpose |
+|---------|---------|
+| `ceminidfs redraft draft-card` | Markdown cheat sheet (BUY/FADE, round bands, Auto-Pick Strategy) |
+| `ceminidfs redraft prerank --adp` | Ordered CSV for ESPN Pre-Draft Rankings |
+| `ceminidfs redraft refresh --adp` | Weekly card + prerank from ADP CSV |
+
+Template ADP: [`config/espn-ppr-adp.csv`](config/espn-ppr-adp.csv) (FantasyPros PPR consensus, refreshed periodically). Schema template: [`config/espn-ppr-adp.template.csv`](config/espn-ppr-adp.template.csv).
 
 ### Common invocations
 

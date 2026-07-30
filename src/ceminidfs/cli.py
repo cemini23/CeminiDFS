@@ -15,6 +15,12 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     handle_bbm_command = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.redraft.cli import build_redraft_parser, handle_redraft_command
+except ImportError:  # pragma: no cover - defensive for partial installs
+    build_redraft_parser = None  # type: ignore[assignment]
+    handle_redraft_command = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.orchestrator.run import run_pipeline
     from ceminidfs.orchestrator.run import _run_fetch, _run_normalize, _run_optimize
 except ImportError:  # pragma: no cover - defensive for partial installs
@@ -512,6 +518,16 @@ def build_parser() -> argparse.ArgumentParser:
         build_bbm_parser(bbm_sub)
     bbm_parser.set_defaults(handler=_cmd_bbm)
 
+    # ESPN season-long redraft (12-team snake full PPR)
+    redraft_parser = subparsers.add_parser(
+        "redraft",
+        help="ESPN 12-team PPR snake draft prep (cheat sheet + prerank)",
+    )
+    redraft_sub = redraft_parser.add_subparsers(dest="redraft_command")
+    if build_redraft_parser is not None:
+        build_redraft_parser(redraft_sub)
+    redraft_parser.set_defaults(handler=_cmd_redraft)
+
     return parser
 
 
@@ -990,6 +1006,14 @@ def _cmd_bbm(args: argparse.Namespace) -> int:
         print("Error: BBM module not available", file=sys.stderr)
         return 1
     return handle_bbm_command(args)
+
+
+def _cmd_redraft(args: argparse.Namespace) -> int:
+    """Dispatch to ESPN redraft subcommand handler."""
+    if handle_redraft_command is None:
+        print("Error: redraft module not available", file=sys.stderr)
+        return 1
+    return handle_redraft_command(args)
 
 
 def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:

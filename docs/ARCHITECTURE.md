@@ -38,6 +38,7 @@ Analytics (parallel): backtest · benchmark · calibrate
 Post-lock: late_swap
 
 BBM (optional): ceminidfs bbm — exposure ledger + live draft recommender
+ESPN redraft (optional): ceminidfs redraft — season-long PPR cheat sheet + prerank
 ```
 
 ## BBM (Best Ball Mania extension)
@@ -81,6 +82,23 @@ player_registry.json + BBTB ADP CSV
 | Scoring reuse | `models.scoring.score_half_ppr_season` | Optional season half-PPR `projection_pts` |
 
 Runtime artifacts: `data/bbm/bbm7.db`, `data/bbm/player_registry.json` (gitignored).
+
+## ESPN redraft (season-long)
+
+Thin prep lane for a **12-team ESPN snake full-PPR** draft. Not a BBM fork and not a click-bot — outputs a cheat sheet + ranked CSV for ESPN Pre-Draft Rankings / Auto-Pick Strategy. Operator guide: [ESPN-REDRAFT.md](ESPN-REDRAFT.md).
+
+| Component | Module | Role |
+|-----------|--------|------|
+| CLI | `ceminidfs.redraft.cli` | `draft-card`, `prerank`, `refresh` |
+| Config | `ceminidfs.redraft.config` | BUY/FADE, round bands, Auto-Pick Strategy defaults |
+| Draft card | `ceminidfs.redraft.draft_card` | Markdown cheat sheet |
+| Prerank | `ceminidfs.redraft.prerank` | ADP CSV → ordered board for ESPN |
+| Scoring | `models.scoring.score_espn_ppr_season` | Full PPR, −2 INT/−2 fumble, no bonuses |
+
+```text
+FantasyPros/ESPN ADP CSV → redraft prerank CSV → ESPN Pre-Draft Rankings
+redraft config BUY/FADE → draft card → ESPN Auto-Pick Strategy
+```
 
 ## Wiki layer → module mapping
 

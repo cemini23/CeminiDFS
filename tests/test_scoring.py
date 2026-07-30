@@ -5,7 +5,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ceminidfs.models.scoring import dk_points, fantasy_points_from_stats, fd_points
+from ceminidfs.models.scoring import (
+    dk_points,
+    fantasy_points_from_stats,
+    fd_points,
+    score_espn_ppr_season,
+)
 
 
 def test_fd_points_half_ppr_with_bonuses_and_fumbles():
@@ -40,9 +45,33 @@ def test_dk_points_full_ppr_with_bonuses_and_fumbles():
     assert dk_points(stats) == pytest.approx(64.8)
 
 
+def test_espn_ppr_season_full_ppr_no_bonuses():
+    stats = {
+        "pass_yds": 305,
+        "pass_td": 2,
+        "int": 1,
+        "rush_yds": 101,
+        "rush_td": 1,
+        "rec": 5,
+        "rec_yds": 105,
+        "rec_td": 1,
+        "fumbles_lost": 1,
+    }
+
+    # 12.2 + 8 - 2 + 10.1 + 6 + 5 + 10.5 + 6 - 2 = 53.8 (no DK/FD bonuses)
+    assert score_espn_ppr_season(stats) == pytest.approx(53.8)
+
+
+def test_espn_ppr_reception_premium_vs_half():
+    stats = {"rec": 80, "rec_yds": 1000, "rec_td": 8}
+    # full PPR: 80 + 100 + 48 = 228
+    assert score_espn_ppr_season(stats) == pytest.approx(228.0)
+
+
 def test_missing_stats_score_as_zero():
     assert fd_points({}) == 0.0
     assert dk_points({}) == 0.0
+    assert score_espn_ppr_season({}) == 0.0
 
 
 def test_dst_stub_event_points():
