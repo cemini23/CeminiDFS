@@ -5,12 +5,17 @@ from pathlib import Path
 from typing import Any
 
 from ceminidfs.export.normalize import normalize_site
-from ceminidfs.export.optimize import LINEUP_HEADERS
+from ceminidfs.export.optimize import LINEUP_HEADERS, SHOWDOWN_SITES
 
 SALARY_CAPS = {
     "fanduel": 60_000,
     "draftkings": 50_000,
+    "fanduel_showdown": 60_000,
+    "draftkings_showdown": 50_000,
 }
+
+# Lineup header columns whose slot costs the captain (1.5x) salary.
+CAPTAIN_HEADERS = frozenset({"MVP", "CPT"})
 
 
 def validate_lineups_csv(
@@ -43,7 +48,7 @@ def validate_lineups_csv(
     if lineup_count != expected_count:
         raise ValueError(f"Expected {expected_count} lineups, found {lineup_count}")
 
-    salary_by_name = _salary_lookup(players_csv) if players_csv else {}
+    salary_lookup = _salary_lookup(players_csv, site_key) if players_csv else {}
     salary_cap = SALARY_CAPS.get(site_key)
 
     empty_slots = 0
@@ -61,8 +66,14 @@ def validate_lineups_csv(
         if len(names) != len(set(_normalize_name(name) for name in names)):
             duplicate_players += 1
 
-        if salary_by_name and salary_cap is not None:
-            total = sum(salary_by_name.get(_normalize_name(name), 0) for name in names)
+        if salary_lookup and salary_cap is not None:
+            if site_key in SHOWDOWN_SITES:
+                total = sum(
+                    _showdown_slot_cost(salary_lookup, slot, name)
+                    for slot, name in zip(header, names)
+                )
+            else:
+                total = sum(salary_lookup.get(_normalize_name(name), 0) for name in names)
             if total > salary_cap:
                 salary_violations += 1
 
@@ -83,26 +94,67 @@ def validate_lineups_csv(
     }
 
 
-def _salary_lookup(players_csv: str | Path) -> dict[str, int]:
+def _salary_lookup(players_csv: str | Path, site_key: str) -> dict[str, Any]:
+    """Map normalized player names to salaries from a players CSV.
+
+    Classic sites map a name to its single salary. Showdown sites map a name
+    to ``{"cpt": ..., "flex": ...}`` when the CSV carries CPT/FLEX roster rows
+    (row salaries are slot-specific: CPT already at 1.5x); when only FLEX
+    prices exist, the captain slot falls back to round(flex * 1.5).
+    """
     path = Path(players_csv)
     if not path.is_file():
         raise FileNotFoundError(f"Players CSV not found: {path}")
 
-    lookup: dict[str, int] = {}
+    showdown = site_key in SHOWDOWN_SITES
+    lookup: dict[str, Any] = {}
     with path.open(newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        for row in reader:
             salary = _parse_salary(row.get("Salary") or row.get("salary"))
             if salary is None:
                 continue
+            names: list[str] = []
             for key in ("Nickname", "Name", "name", "player_name"):
                 value = str(row.get(key, "")).strip()
                 if value:
-                    lookup[_normalize_name(value)] = salary
+                    names.append(value)
             first = str(row.get("First Name", "")).strip()
             last = str(row.get("Last Name", "")).strip()
             if first and last:
-                lookup[_normalize_name(f"{first} {last}")] = salary
+                names.append(f"{first} {last}")
+
+            roster = str(row.get("Roster Position") or row.get("roster position") or "")
+            roster = roster.strip().upper()
+            for name in names:
+                norm = _normalize_name(name)
+                if not showdown:
+                    lookup[norm] = salary
+                else:
+                    entry = lookup.setdefault(norm, {"cpt": None, "flex": None})
+                    if roster == "CPT":
+                        entry["cpt"] = salary
+                    else:
+                        entry["flex"] = salary
     return lookup
+
+
+def _showdown_slot_cost(
+    lookup: dict[str, Any],
+    slot: str,
+    name: str,
+) -> int:
+    """Cost of one showdown lineup cell: captain slots pay the 1.5x row salary."""
+    entry = lookup.get(_normalize_name(name)) or {}
+    flex = entry.get("flex")
+    cpt = entry.get("cpt")
+    if slot in CAPTAIN_HEADERS:
+        if cpt is not None:
+            return cpt
+        return round((flex or 0) * 1.5)
+    if flex is not None:
+        return flex
+    return round((cpt or 0) / 1.5) if cpt else 0
 
 
 def _parse_salary(value: Any) -> int | None:

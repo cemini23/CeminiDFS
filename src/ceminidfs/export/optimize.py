@@ -8,21 +8,26 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .normalize import normalize_site
+from .normalize import SHOWDOWN_SITES, normalize_site
 
 DEFAULT_MIN_SALARY = {
     "fanduel": 59400,
     "draftkings": 49000,
+    "fanduel_showdown": 56000,
+    "draftkings_showdown": 45000,
 }
 
 LINEUP_HEADERS = {
     "fanduel": ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DEF"],
     "draftkings": ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"],
+    "fanduel_showdown": ["MVP", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"],
+    "draftkings_showdown": ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"],
 }
 
 POSITION_ALIASES = {
     "DEF": ("DEF", "D", "DST"),
     "DST": ("DST", "DEF", "D"),
+    "MVP": ("MVP", "CPT"),
 }
 
 
@@ -39,6 +44,12 @@ def _load_pydfs() -> tuple[Any, Any, Any, Any]:
 
 
 def _site_enum(site_key: str, site_cls: Any) -> Any:
+    # 2026 FanDuel single-game (MVP 1.5x salary+points, DST allowed, $60k)
+    # is not pydfs FANDUEL_SINGLE_GAME (old 1 MVP + 4 UTIL, no DST); both
+    # showdown sites ride DK captain-mode structure (see generate_lineups for
+    # the FanDuel $60k budget override).
+    if site_key in SHOWDOWN_SITES:
+        return site_cls.DRAFTKINGS_CAPTAIN_MODE
     if site_key == "fanduel":
         return site_cls.FANDUEL
     if site_key == "draftkings":
@@ -81,6 +92,11 @@ def generate_lineups(
 
     Site, Sport, get_optimizer, TeamStack = _load_pydfs()
     optimizer = get_optimizer(_site_enum(site_key, Site), Sport.FOOTBALL)
+    if site_key == "fanduel_showdown":
+        # FanDuel 2026 single game: 1 MVP + 5 FLEX at $60k, max 5 per team —
+        # same 6-man structure as DK captain mode but with the FD budget/team cap.
+        optimizer.settings.budget = 60000
+        optimizer.settings.max_from_one_team = 5
     optimizer.load_players_from_csv(str(csv_file))
     _relax_tiny_slate_limits(optimizer, site_key)
 
@@ -158,6 +174,11 @@ def optimize_lineups(
 
 
 def _relax_tiny_slate_limits(optimizer: Any, site_key: str) -> None:
+    if site_key in SHOWDOWN_SITES:
+        # Single-game slates are always one game (two teams); captain mode
+        # already caps max_from_one_team at 5 and DK/FD showdown allow a full
+        # team, so the classic FD 9-slot tiny-slate relaxation does not apply.
+        return
     if site_key != "fanduel" or not _is_tiny_slate(optimizer):
         return
     lineup_size = len(LINEUP_HEADERS[site_key])
@@ -173,7 +194,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="NFL DFS lineup optimizer wrapper")
     parser.add_argument("--csv", required=True, help="Player projection CSV path")
     parser.add_argument("--out", required=True, help="Output CSV path for lineups")
-    parser.add_argument("--site", default="fanduel", choices=["fanduel", "fd", "draftkings", "dk"])
+    parser.add_argument(
+        "--site",
+        default="fanduel",
+        choices=sorted(
+            {
+                "fanduel",
+                "fd",
+                "draftkings",
+                "dk",
+                *SHOWDOWN_SITES,
+                "fd_showdown",
+                "fd_single",
+                "dk_showdown",
+                "dk_captain",
+                "draftkings_captain",
+            }
+        ),
+    )
     parser.add_argument("--count", type=int, default=150, help="Number of lineups")
     parser.add_argument("--min-salary", type=int, default=None, help="Min salary cap used (0=disable)")
     parser.add_argument("--max-exposure", type=float, default=0.35, help="Max player exposure 0-1")

@@ -178,6 +178,8 @@ CeminiDFS/
 | BBTB / Underdog exports | **Manual** ADP + exposure CSV for BBM |
 | Sleeper public API | **Optional** trending buzz (K129) — not projections |
 
+**Single-game showdown (2026) — build on pydfs captain mode, never draftfast.** FanDuel 2026 NFL single-game (1 MVP + 5 FLEX, $60k, MVP 1.5x salary *and* points, DST allowed, max 5 per team) is structurally DK captain mode, so CeminiDFS rides pydfs `Site.DRAFTKINGS_CAPTAIN_MODE` (budget overridden to $60k for FD) instead of the obsolete 1+4 no-DST `Site.FANDUEL_SINGLE_GAME` or a draftfast clone (no LICENSE → no vendoring). The normalize layer emits DK-captain CSVs (CPT 1.5x-salary + FLEX 1x rows sharing one ID; pydfs re-applies the 1.5x FPPG on CPT rows) for `fanduel_showdown` / `draftkings_showdown`. Contest rules only — no code copied from `BenBrostoff/draftfast`. `scripts/kickoff_showdown_2026.py` is the first live user of the same rules; the library path (`ceminidfs optimize --site fd_showdown|dk_captain`) now makes it reusable.
+
 ## Cross-wiki references
 
 | Need | Wiki |
