@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,8 +46,16 @@ def validate_lineups_csv(
         raise ValueError(f"Lineups CSV header mismatch: expected {expected_header}, got {header}")
 
     lineup_count = len(rows)
-    if lineup_count != expected_count:
-        raise ValueError(f"Expected {expected_count} lineups, found {lineup_count}")
+    if lineup_count == 0:
+        raise ValueError("Expected at least 1 lineup, found 0")
+    if lineup_count > expected_count:
+        raise ValueError(f"Expected at most {expected_count} lineups, found {lineup_count}")
+    if lineup_count < expected_count:
+        print(
+            f"WARNING: wrote {lineup_count} lineups; requested {expected_count} "
+            "(exposure cap or an infeasible stack can shorten the file)",
+            file=sys.stderr,
+        )
 
     salary_lookup = _salary_lookup(players_csv, site_key) if players_csv else {}
     salary_cap = SALARY_CAPS.get(site_key)

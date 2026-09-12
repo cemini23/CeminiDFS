@@ -27,6 +27,8 @@ MIN_BACKUP_QB_L3_ATTEMPTS = 5
 QB_BACKUP_PASS_SHARE = 0.05
 QB_IMPLIED_PASS_BOOST = 0.012
 QB_IMPLIED_PASS_BASELINE = 22.0
+WEEK1_RB_SALARY_FLOOR = 7000.0
+WEEK1_RB_MIN_CARRY_SHARE = 0.35
 
 
 @dataclass(frozen=True)
@@ -633,6 +635,14 @@ def build_week_usage(
             roster_team=team_roster,
             prefer_season_leader=week <= 1,
         )
+        starter_id = _week1_qb_starter_id(
+            share_records,
+            starter_id,
+            stats,
+            team=team,
+            through_week=hist_cutoff,
+            week=week,
+        )
         backup_id = _identify_qb_backup(
             stats,
             team=team,
@@ -643,7 +653,7 @@ def build_week_usage(
         )
         volume_dict = volume_row.to_dict()
         volume_dict["rb_rush_attempts"] = _rb_rush_pool(volume_dict)
-        _assign_rb_committee_shares(share_records, settings=settings)
+        _assign_rb_committee_shares(share_records, settings=settings, week=week)
         _enrich_qb_player_context(share_records, stats, team=team, through_week=hist_cutoff)
 
         for player in share_records:
@@ -808,10 +818,63 @@ def _rb_rush_pool(volume_row: Mapping[str, Any]) -> float:
     return max(rush_attempts - qb_scrambles, rush_attempts * 0.70)
 
 
+def _week1_qb_starter_id(
+    share_records: list[dict[str, Any]],
+    starter_id: str | None,
+    stats: pd.DataFrame,
+    team: str,
+    through_week: int,
+    *,
+    week: int,
+) -> str | None:
+    """Week-1 escape: new-team QBs have 2025 attempts on another club."""
+
+    if week > 1:
+        return starter_id
+    qbs = [
+        player
+        for player in share_records
+        if str(player.get("position", "")).upper() == "QB" and not str(player.get("injury_status") or "").strip()
+    ]
+    if not qbs:
+        return starter_id
+    salary_ids = {str(player.get("player_id", "")) for player in qbs if player.get("player_id")}
+    ranked = sorted(qbs, key=_player_salary, reverse=True)
+    top_id = str(ranked[0].get("player_id", "") or "")
+    if not top_id:
+        return starter_id
+    if starter_id is None or starter_id not in salary_ids:
+        return top_id
+    hist = 0.0
+    required = {"team", "player_id", "pass_attempts"}
+    if not stats.empty and required.issubset(stats.columns):
+        mask = (stats["team"].astype(str) == team) & (stats["player_id"].astype(str) == top_id)
+        if "week" in stats.columns:
+            mask = mask & (pd.to_numeric(stats["week"], errors="coerce") < through_week)
+        hist = float(pd.to_numeric(stats.loc[mask, "pass_attempts"], errors="coerce").fillna(0.0).sum())
+    if hist <= 0:
+        return top_id
+    return starter_id
+
+
+def _player_salary(player: Mapping[str, Any]) -> float:
+    for key in ("salary", "fd_salary", "dk_salary"):
+        value = player.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).replace("$", "").replace(",", "").strip()
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
 def _assign_rb_committee_shares(
     share_records: list[dict[str, Any]],
     *,
     settings: UsageSettings | None = None,
+    week: int = 99,
 ) -> None:
     """Normalize top-N RB carry/target shares so backups do not inflate the team pool."""
 
@@ -863,6 +926,20 @@ def _assign_rb_committee_shares(
     if carry_total > 1.0:
         for player in committee:
             player["carry_share_override"] = float(player["carry_share_override"]) / carry_total
+
+    if week <= 1:
+        expensive = [
+            player
+            for player in rbs
+            if _player_salary(player) >= WEEK1_RB_SALARY_FLOOR
+        ]
+        if len(expensive) == 1:
+            player = expensive[0]
+            current = float(player.get("carry_share_override", 0.0) or 0.0)
+            if current <= 0:
+                player["carry_share_override"] = WEEK1_RB_MIN_CARRY_SHARE
+                if float(player.get("target_share_override", 0.0) or 0.0) <= 0:
+                    player["target_share_override"] = min(WEEK1_RB_MIN_CARRY_SHARE, 0.08)
 
     target_total = sum(float(player.get("target_share_override", 0.0)) for player in committee)
     if target_total > 1.0:

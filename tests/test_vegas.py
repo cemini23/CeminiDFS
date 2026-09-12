@@ -12,12 +12,13 @@ def test_implied_totals_from_synthetic_schedule_row():
     row = {
         "home_team": "KC",
         "away_team": "BUF",
-        "spread_line": -3,
+        "spread_line": 3,
         "total_line": 47,
     }
 
     result = vegas.implied_team_totals_from_schedule_row(row)
 
+    assert result["spread"] == -3
     assert result["home_implied_total"] == 25
     assert result["away_implied_total"] == 22
 
@@ -29,7 +30,7 @@ def test_enrich_schedules_with_vegas_adds_implied_total_columns():
                 "week": 1,
                 "home_team": "KC",
                 "away_team": "BUF",
-                "spread_line": -3,
+                "spread_line": 3,
                 "total_line": 47,
             }
         ]
@@ -39,8 +40,24 @@ def test_enrich_schedules_with_vegas_adds_implied_total_columns():
 
     assert "home_implied_total" in result.columns
     assert "away_implied_total" in result.columns
+    assert result.loc[0, "spread"] == -3
     assert result.loc[0, "home_implied_total"] == 25
     assert result.loc[0, "away_implied_total"] == 22
+
+
+def test_home_spread_keeps_betting_convention():
+    row = {
+        "home_team": "KC",
+        "away_team": "BUF",
+        "home_spread": -3,
+        "total_line": 47,
+    }
+
+    result = vegas.implied_team_totals_from_schedule_row(row)
+
+    assert result["spread"] == -3
+    assert result["home_implied_total"] == 25
+    assert result["away_implied_total"] == 22
 
 
 def test_build_week_vegas_uses_loaded_schedule(monkeypatch):
@@ -50,7 +67,7 @@ def test_build_week_vegas_uses_loaded_schedule(monkeypatch):
                 "week": 1,
                 "home_team": "KC",
                 "away_team": "BUF",
-                "spread_line": -3,
+                "spread_line": 3,
                 "total_line": 47,
             }
         ]

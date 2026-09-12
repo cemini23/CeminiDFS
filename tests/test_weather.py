@@ -126,6 +126,32 @@ def test_build_week_weather_fetches_open_meteo_for_open_air_game():
     assert result.loc[0, "stadium_name"] == "GEHA Field at Arrowhead Stadium"
 
 
+def test_build_week_weather_raising_opener_leaves_weather_empty():
+    schedules = pd.DataFrame(
+        [
+            {
+                "game_id": "g_fail",
+                "season": 2026,
+                "week": 1,
+                "home_team": "KC",
+                "away_team": "BUF",
+                "gameday": "2026-09-13",
+                "gametime": "13:00",
+            }
+        ]
+    )
+
+    def fail_opener(url, timeout=30):
+        raise TimeoutError("open-meteo down")
+
+    result = weather.build_week_weather_from_schedules(schedules, opener=fail_opener)
+
+    assert len(result) == 1
+    assert result.loc[0, "weather_exposed"]
+    assert pd.isna(result.loc[0, "wind_speed_10m_mph"])
+    assert pd.isna(result.loc[0, "temperature_2m_f"])
+
+
 def test_build_week_weather_returns_empty_frame_without_schedule_columns():
     schedules = pd.DataFrame({"week": [1], "game_id": ["g1"]})
 

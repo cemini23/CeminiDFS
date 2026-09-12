@@ -307,6 +307,32 @@ CI (`.github/workflows/ci.yml`) runs pytest + ruff on Python 3.11 and 3.12 with 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — wiki layer → module map
 - [docs/BBM.md](docs/BBM.md) — Best Ball Mania draft copilot guide
 - [K125 master research plan](https://github.com/cemini23/gambling-wiki/blob/main/wiki/sources/research-diy-dfs-model-master-plan-2026-06-20.md)
+- Donation wallets (canonical): [SUPPORT.md](SUPPORT.md)
+
+## Support
+
+Thank you for your support — stars, issues, shares, and tips all help keep this pipeline and the broader Cemini open-research stack alive.
+
+If you’d like to tip, use the **donation-only** addresses below (not trading or production wallets). Prefer following the work? These are the best places to start:
+
+| Project | Link |
+|---------|------|
+| **Outlier Weekly** (methodology newsletter) | [outlierweekly.substack.com](https://outlierweekly.substack.com) |
+| **Atto** — organize Italian family documents on your computer | [youratto.com](https://youratto.com) |
+| **GuruWatcher** — Discord alerts for your newsletter’s price levels | [guruwatcher.com](https://guruwatcher.com) |
+| **YouTube** | [@Cemini23](https://www.youtube.com/@Cemini23) |
+
+| Chain family | Address |
+|--------------|---------|
+| **X Money** (fiat, US) | Request [@Cemini23](https://x.com/Cemini23) in the X app — scan the Request QR |
+| **EVM** (Ethereum, Polygon, Base, Arbitrum, …) | `0x444C5C2eC439E0382aa5a17F70313c536BcC5D58` |
+| **Solana / SVM** | `J4zNn4hK9jTrKBFY8sbAGJHLoZvXvQf4B9pQSbSrocZE` |
+| **Polymarket** (referral) | [polymarket.com/?r=Cemini23](https://polymarket.com/?r=Cemini23) |
+| **Hyperliquid** (referral) | [app.hyperliquid.xyz/join/CEMINI23](https://app.hyperliquid.xyz/join/CEMINI23) |
+
+Full wallet note: [SUPPORT.md](SUPPORT.md) · canon also in [CCC SUPPORT.md](https://github.com/cemini23/cemini-claude-code-CCC/blob/main/SUPPORT.md).
+
+We’re grateful you’re here. Thank you for your support.
 
 ## License
 

@@ -12,6 +12,7 @@ from ceminidfs.export.stack_rules import (
     max_repeating_from_uniques,
     offense_vs_dst_pairs,
     parse_stack_rule,
+    parse_stack_rules,
     players_below_floor,
     rbs_by_team,
     resolve_repeating_players,
@@ -52,6 +53,19 @@ def test_parse_random_game_and_rb_dst():
     wr = parse_stack_rule("wr:2")
     assert wr.kind == "position"
     assert wr.positions == ("WR",)
+
+
+def test_parse_stack_rules_splits_pipe_tokens():
+    specs = parse_stack_rules(["qb:3|CIN3-TB2"])
+    assert [spec.kind for spec in specs] == ["qb_stack", "game_pair"]
+    assert specs[0].size == 3
+    assert specs[1].teams == (("CIN", 3), ("TB", 2))
+
+    repeated = parse_stack_rules(["qb:3", "CIN3-TB2"])
+    assert [(spec.kind, spec.raw) for spec in repeated] == [
+        ("qb_stack", "qb:3"),
+        ("game_pair", "CIN3-TB2"),
+    ]
 
 
 def test_parse_stack_rule_rejects_empty_and_junk():

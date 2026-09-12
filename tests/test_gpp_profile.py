@@ -26,8 +26,10 @@ def test_gpp_profile_deep_merges_over_conservative_base():
     assert gpp["simulate"]["enabled"] is True
     assert gpp["simulate"]["method"] == "copula"
     assert gpp["simulate"]["n_iterations"] == 5000
+    assert gpp["simulate"]["seed"] == 20260913
     assert gpp["ownership"]["enabled"] is True
     assert gpp["sim_rerank"]["enabled"] is True
+    assert gpp["sim_rerank"]["candidates"] == 500
     assert gpp["sim_rerank"]["quantile"] == pytest.approx(0.85)
     assert gpp["sim_rerank"]["ownership_penalty"] == pytest.approx(0.15)
     assert gpp["volume"]["base_pass_rate"] == base["volume"]["base_pass_rate"]
@@ -43,9 +45,9 @@ def test_apply_profile_preserves_existing_nested_keys_without_mutating_input():
 
     assert cfg["simulate"]["enabled"] is False
     assert merged["simulate"]["enabled"] is True
-    assert merged["simulate"]["seed"] == 11
+    assert merged["simulate"]["seed"] == 20260913
     assert merged["sim_rerank"]["enabled"] is True
-    assert merged["sim_rerank"]["candidates"] == 2000
+    assert merged["sim_rerank"]["candidates"] == 500
 
 
 def test_run_optimize_project_accept_gpp_profile_flag():
@@ -146,6 +148,53 @@ def test_optimize_and_run_accept_gpp_constraint_flags():
     assert run.uniques == 3
     assert run_overrides["uniques"] == 3
     assert "no_offense_vs_dst" not in run_overrides
+
+
+def test_optimize_and_run_accept_min_salary_and_force_and_research_csv(tmp_path: Path):
+    from ceminidfs.cli import _optimizer_build_overrides
+
+    research = tmp_path / "locks.csv"
+    research.write_text("name,lock,exclude\nPatrick Mahomes,1,0\nAlvin Kamara,0,1\n", encoding="utf-8")
+    parser = build_parser()
+    optimize = parser.parse_args(
+        [
+            "optimize",
+            "--csv",
+            "players.csv",
+            "--out",
+            "lineups.csv",
+            "--min-salary",
+            "50000",
+            "--research-csv",
+            str(research),
+        ]
+    )
+    run = parser.parse_args(
+        [
+            "run",
+            "--season",
+            "2026",
+            "--week",
+            "1",
+            "--salary",
+            "slate.csv",
+            "--force",
+            "--min-salary",
+            "59400",
+        ]
+    )
+    fetch = parser.parse_args(["fetch", "--season", "2026", "--week", "1", "--force"])
+
+    optimize_overrides = _optimizer_build_overrides(optimize)
+    run_overrides = _optimizer_build_overrides(run)
+
+    assert optimize.min_salary == 50000
+    assert optimize_overrides["min_salary"] == 50000
+    assert "Patrick Mahomes" in optimize_overrides["locks"]
+    assert "Alvin Kamara" in optimize_overrides["excludes"]
+    assert run.force is True
+    assert run_overrides["min_salary"] == 59400
+    assert fetch.force is True
 
 
 def test_simulation_inputs_keep_coherence_columns_after_projection_merge(tmp_path: Path):

@@ -84,3 +84,32 @@ def test_rerank_lineups_selects_top_unique_lineups_by_sim_score():
         ["A", "B"],
         ["A", "C"],
     ]
+
+
+def test_rerank_lineups_greedy_final_portfolio_exposure():
+    sim_matrix = np.array(
+        [
+            [10.0, 10.0],
+            [9.0, 9.0],
+            [8.0, 8.0],
+            [1.0, 1.0],
+        ]
+    )
+    player_index = {"A": 0, "B": 1, "C": 2, "D": 3}
+    lineups = [
+        ["A", "B"],
+        ["A", "C"],
+        ["C", "D"],
+    ]
+
+    selected = rerank_lineups(
+        lineups,
+        sim_matrix,
+        player_index,
+        final_count=2,
+        max_exposure=0.5,
+    )
+
+    assert selected == [["A", "B"], ["C", "D"]]
+    names = [name for lineup in selected for name in lineup]
+    assert names.count("A") == 1

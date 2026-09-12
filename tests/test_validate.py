@@ -56,12 +56,24 @@ def test_validate_lineups_csv_rejects_header_mismatch(tmp_path: Path):
         validate_lineups_csv(path, expected_count=1)
 
 
-def test_validate_lineups_csv_rejects_wrong_count(tmp_path: Path):
+def test_validate_lineups_csv_rejects_more_than_expected(tmp_path: Path):
+    path = tmp_path / "lineups.csv"
+    _write_lineups(path, [_valid_row("a"), _valid_row("b"), _valid_row("c")])
+
+    with pytest.raises(ValueError, match="Expected at most 2 lineups, found 3"):
+        validate_lineups_csv(path, expected_count=2)
+
+
+def test_validate_lineups_csv_allows_fewer_than_expected(tmp_path: Path, capsys):
     path = tmp_path / "lineups.csv"
     _write_lineups(path, [_valid_row("a")])
 
-    with pytest.raises(ValueError, match="Expected 2 lineups, found 1"):
-        validate_lineups_csv(path, expected_count=2)
+    result = validate_lineups_csv(path, expected_count=2)
+
+    assert result["valid"] is True
+    assert result["lineup_count"] == 1
+    captured = capsys.readouterr()
+    assert "wrote 1 lineups; requested 2" in captured.err
 
 
 def test_validate_lineups_csv_rejects_duplicate_players(tmp_path: Path):
@@ -72,6 +84,15 @@ def test_validate_lineups_csv_rejects_duplicate_players(tmp_path: Path):
 
     with pytest.raises(ValueError, match="duplicate players"):
         validate_lineups_csv(path, expected_count=1)
+
+
+def test_run_pipeline_passes_normalized_players_csv_to_validate():
+    import inspect
+
+    from ceminidfs.orchestrator import run as run_mod
+
+    source = inspect.getsource(run_mod.run_pipeline)
+    assert "players_csv=normalized_csv" in source
 
 
 def test_validate_lineups_csv_checks_salary_cap(tmp_path: Path):

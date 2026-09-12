@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from ceminidfs.data.stadiums import normalize_team_abbr
+
 
 LEAGUE_SEC_PER_PLAY = 36.2
 LEAGUE_TOTAL = 44.8
@@ -116,12 +118,14 @@ def projected_pass_rate(
 ) -> float:
     """Project pass rate from PROE, spread, and wind."""
 
-    spread_adj = 0.005 * team_spread
+    spread_val = pd.to_numeric(team_spread, errors="coerce")
+    spread_adj = 0.0 if pd.isna(spread_val) else 0.005 * float(spread_val)
     wind_adj = 0.0
-    if wind_mph is not None:
-        if wind_mph >= 15:
+    wind_val = pd.to_numeric(wind_mph, errors="coerce") if wind_mph is not None else float("nan")
+    if pd.notna(wind_val):
+        if wind_val >= 15:
             wind_adj = -0.03
-        elif wind_mph >= 10:
+        elif wind_val >= 10:
             wind_adj = -0.015
 
     pass_rate = base + (0.8 * (neutral_proe / 100.0)) + spread_adj + wind_adj
@@ -216,18 +220,28 @@ def build_week_volume(
         return pd.DataFrame(columns=columns)
 
     wind_by_home = _wind_by_home_team(weather)
-    teams = set(vegas["home_team"]).union(set(vegas["away_team"]))
+    teams = {
+        normalize_team_abbr(team)
+        for team in set(vegas["home_team"]).union(set(vegas["away_team"]))
+    }
     pace_by_team = {team: neutral_seconds_per_play(pbp, team) for team in teams}
     proe_by_team = {team: neutral_proe(pbp, team) for team in teams}
 
     rows: list[dict[str, Any]] = []
     for _, game in vegas.iterrows():
-        home_team = game["home_team"]
-        away_team = game["away_team"]
-        total = float(game["total"])
-        home_spread = float(game["spread"])
-        game_id = str(game.get("game_id", ""))
+        home_team = normalize_team_abbr(game["home_team"])
+        away_team = normalize_team_abbr(game["away_team"])
+        total_val = pd.to_numeric(game["total"], errors="coerce")
+        spread_val = pd.to_numeric(game["spread"], errors="coerce")
+        game_id = str(game.get("game_id", "") or "")
+        if pd.isna(total_val) or pd.isna(spread_val):
+            label = game_id or f"{away_team}@{home_team}"
+            raise ValueError(f"Vegas spread/total is missing for game {label}")
+        total = float(total_val)
+        home_spread = float(spread_val)
         wind_mph = wind_by_home.get(home_team)
+        if wind_mph is None:
+            wind_mph = wind_by_home.get(normalize_team_abbr(str(game["home_team"])))
 
         rows.append(
             project_team_volume(
@@ -285,5 +299,5 @@ def _wind_by_home_team(weather: pd.DataFrame | None) -> dict[str, float | None]:
     wind: dict[str, float | None] = {}
     for _, row in weather.iterrows():
         value = pd.to_numeric(row["wind_speed_10m_mph"], errors="coerce")
-        wind[row["home_team"]] = None if pd.isna(value) else float(value)
+        wind[normalize_team_abbr(row["home_team"])] = None if pd.isna(value) else float(value)
     return wind

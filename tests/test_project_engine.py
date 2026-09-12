@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.pipeline import engine
+from ceminidfs.pipeline.engine import empty_fd_projection_names, warn_empty_fd_projections
 from ceminidfs.pipeline.project import project_week
 
 
@@ -16,6 +17,26 @@ Id,Nickname,Position,Team,Opponent,Salary,FPPG,Injury Indicator
 1,Patrick Mahomes,QB,KC,BUF,8500,22.5,
 2,Travis Kelce,TE,KC,BUF,7200,14.1,Q
 """
+
+
+def test_empty_fd_projection_names_lists_missing_rows():
+    rows = [
+        {"player_name": "Rookie One", "fd_projection": ""},
+        {"name": "Filled QB", "fd_projection": 18.2},
+        {"player_name": "Null WR", "fd_projection": None},
+    ]
+    names = empty_fd_projection_names(rows)
+    assert names == ["Rookie One", "Null WR"]
+    warned = warn_empty_fd_projections(rows, limit=15)
+    assert warned == names
+
+
+def test_normalize_join_key_canonicalizes_dst_aliases():
+    def_key = engine.normalize_join_key("Kansas City Chiefs", "KC", "DEF")
+    dst_key = engine.normalize_join_key("Kansas City Chiefs", "KC", "DST")
+    d_key = engine.normalize_join_key("Kansas City Chiefs", "KC", "D")
+    assert def_key == dst_key == d_key
+    assert def_key.endswith("|DST")
 
 
 def test_historical_pbp_week1_keeps_prior_season_and_drops_current_week1():

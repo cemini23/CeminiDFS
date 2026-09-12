@@ -92,6 +92,7 @@ def run_pipeline(
                 lineups_csv,
                 site=str(cfg.get("site", "fanduel")),
                 expected_count=expected_count,
+                players_csv=normalized_csv,
             )
             manifest.record_artifact("lineups_csv", lineups_csv)
             projection_mode = str(cfg.get("projection_mode", "auto")).lower()

@@ -16,7 +16,12 @@ from ceminidfs.models.ownership import (
 from ceminidfs.data.espn import apply_espn_injury_overlay
 from ceminidfs.models.buzz_signal import apply_buzz_signal
 from ceminidfs.models.dst import apply_dst_projections
-from ceminidfs.pipeline.engine import build_diy_projections, load_week_artifacts, merge_projections_into_canonical
+from ceminidfs.pipeline.engine import (
+    build_diy_projections,
+    load_week_artifacts,
+    merge_projections_into_canonical,
+    warn_empty_fd_projections,
+)
 
 
 def project_week(
@@ -47,6 +52,7 @@ def project_week(
         try:
             stats_df = build_diy_projections(season, week, rows, cfg)
             rows = merge_projections_into_canonical(rows, stats_df)
+            warn_empty_fd_projections(rows)
             vegas, _, _ = load_week_artifacts(season, week)
             rows = apply_dst_projections(rows, vegas, config=cfg)
             rows = _fill_dst_salary_fppg(rows)

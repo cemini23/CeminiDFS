@@ -181,6 +181,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write a stub artifact when nflreadpy is unavailable",
     )
+    fetch.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore parquet cache TTL and refetch",
+    )
     fetch.set_defaults(handler=_cmd_fetch)
 
     project = subparsers.add_parser("project", help="Create canonical placeholder projections")
@@ -216,7 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rerank pydfs candidates by simulation",
     )
     optimize.add_argument(
-        "--candidates", type=int, default=2000, help="Candidate lineups before rerank"
+        "--candidates",
+        type=int,
+        default=None,
+        help="Candidate lineups before rerank (GPP profile default 500)",
     )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     _add_optimizer_build_arguments(optimize)
@@ -252,6 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     late_swap.add_argument("--out", dest="output_path", type=Path)
     late_swap.add_argument("--site", default="fanduel")
     late_swap.add_argument("--count", type=int, default=None)
+    _add_optimizer_build_arguments(late_swap)
     late_swap.set_defaults(handler=_cmd_late_swap)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
@@ -266,7 +275,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Rerank optimizer candidates by simulation",
     )
-    run.add_argument("--candidates", type=int, default=2000, help="Candidate lineups before rerank")
+    run.add_argument(
+        "--candidates",
+        type=int,
+        default=None,
+        help="Candidate lineups before rerank (GPP profile default 500)",
+    )
     run.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     run.add_argument(
         "--stages",
@@ -277,6 +291,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-stub",
         action="store_true",
         help="Allow fetch stage to write stub artifacts when data deps are missing",
+    )
+    run.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore parquet cache TTL and refetch",
     )
     _add_optimizer_build_arguments(run)
     _add_profile_argument(run)
@@ -539,6 +558,7 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
     config = runtime_config(
         work_dir=Path("runs") / f"{args.season}_week_{args.week}",
         allow_stub=args.allow_stub,
+        fetch={"force": True} if args.force else None,
     )
     artifact = _run_fetch(args.season, args.week, config)
     print(artifact)
@@ -583,12 +603,7 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
 def _cmd_optimize(args: argparse.Namespace) -> int:
     if _run_optimize is None:
         raise RuntimeError("Optimize stage unavailable: orchestrator import failed")
-    rerank_override: dict[str, Any] = {
-        "candidates": args.candidates,
-        "final_count": args.final_count,
-    }
-    if args.sim_rerank is not None:
-        rerank_override["enabled"] = args.sim_rerank
+    rerank_override = _sim_rerank_cli_override(args)
     config = runtime_config(
         profile=args.profile,
         site=args.site,
@@ -627,6 +642,7 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
     output_path = args.output_path or args.lineups_path.with_name(
         f"{args.lineups_path.stem}_late_swap.csv"
     )
+    overrides = _optimizer_build_overrides(args)
     late_swap_lineups(
         args.lineups_path,
         args.players_path,
@@ -634,6 +650,15 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
         output_path,
         site=args.site,
         count=args.count,
+        stacks=overrides.get("stacks"),
+        locks=overrides.get("locks"),
+        excludes=overrides.get("excludes"),
+        max_exposure=overrides.get("max_exposure"),
+        no_offense_vs_dst=bool(overrides.get("no_offense_vs_dst")),
+        one_rb_per_team=bool(overrides.get("one_rb_per_team")),
+        projection_floor=overrides.get("projection_floor"),
+        uniques=overrides.get("uniques"),
+        max_repeating_players=overrides.get("max_repeating_players"),
     )
     print(output_path)
     return 0
@@ -642,17 +667,13 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     if run_pipeline is None:
         raise RuntimeError("Run pipeline unavailable: orchestrator import failed")
-    rerank_override: dict[str, Any] = {
-        "candidates": args.candidates,
-        "final_count": args.final_count,
-    }
-    if args.sim_rerank is not None:
-        rerank_override["enabled"] = args.sim_rerank
+    rerank_override = _sim_rerank_cli_override(args)
     config = runtime_config(
         profile=args.profile,
         site=args.site,
         allow_stub=args.allow_stub,
         sim_rerank=rerank_override,
+        fetch={"force": True} if args.force else None,
         **_optimizer_build_overrides(args),
     )
     count = args.final_count if _sim_rerank_enabled(config) else args.count
@@ -1066,6 +1087,29 @@ def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Remove unlocked pool players with FPPG below N",
     )
+    parser.add_argument(
+        "--min-salary",
+        type=int,
+        default=None,
+        help="Min salary cap used (FanDuel default 59400; 0=disable)",
+    )
+    parser.add_argument(
+        "--research-csv",
+        type=Path,
+        default=None,
+        help="Optional research CSV with name plus lock/exclude/fade columns",
+    )
+
+
+def _sim_rerank_cli_override(args: argparse.Namespace) -> dict[str, Any]:
+    override: dict[str, Any] = {
+        "final_count": args.final_count,
+    }
+    if getattr(args, "candidates", None) is not None:
+        override["candidates"] = args.candidates
+    if getattr(args, "sim_rerank", None) is not None:
+        override["enabled"] = args.sim_rerank
+    return override
 
 
 def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
@@ -1088,6 +1132,17 @@ def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["one_rb_per_team"] = bool(args.one_rb_per_team)
     if getattr(args, "projection_floor", None) is not None:
         overrides["projection_floor"] = args.projection_floor
+    if getattr(args, "min_salary", None) is not None:
+        overrides["min_salary"] = args.min_salary
+    research_csv = getattr(args, "research_csv", None)
+    if research_csv is not None:
+        from ceminidfs.data.research_locks import parse_research_locks
+
+        extra_locks, extra_excludes = parse_research_locks(research_csv)
+        if extra_locks:
+            overrides["locks"] = list(overrides.get("locks", [])) + extra_locks
+        if extra_excludes:
+            overrides["excludes"] = list(overrides.get("excludes", [])) + extra_excludes
     return overrides
 
 

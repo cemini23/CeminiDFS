@@ -45,6 +45,7 @@ def simulate_fd_points(
     """Return simulated FanDuel points with shape (n_players, n_iterations)."""
 
     _validate_inputs(df, n_iterations)
+    seed = _seed_from_config(config, seed)
     normalized_method = _normalize_method(method)
     if normalized_method == "copula":
         return simulate_fd_points_copula(
@@ -87,6 +88,7 @@ def simulate_fd_points_copula(
     """Return FanDuel point simulations from a Gaussian copula with lognormal marginals."""
 
     _validate_inputs(df, n_iterations)
+    seed = _seed_from_config(config, seed)
     if df.empty:
         return np.empty((0, n_iterations), dtype=float)
 
@@ -183,6 +185,19 @@ def _method_from_config(config: Mapping[str, Any] | None, fallback: str) -> str:
     if isinstance(simulate_cfg, Mapping):
         return str(simulate_cfg.get("method", fallback))
     return fallback
+
+
+def _seed_from_config(config: Mapping[str, Any] | None, seed: int | None) -> int | None:
+    if seed is not None:
+        return int(seed)
+    if not config:
+        return None
+    simulate_cfg = config.get("simulate", {})
+    if isinstance(simulate_cfg, Mapping) and simulate_cfg.get("seed") is not None:
+        return int(simulate_cfg["seed"])
+    if config.get("simulation_seed") is not None:
+        return int(config["simulation_seed"])
+    return None
 
 
 def _normalize_method(method: str) -> str:

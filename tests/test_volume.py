@@ -179,3 +179,29 @@ def test_build_week_volume_from_synthetic_vegas_and_pbp():
     )
     assert result["plays_projected"].notna().all()
     assert result["pass_attempts"].gt(0).all()
+
+
+def test_build_week_volume_raises_on_nan_spread():
+    vegas = pd.DataFrame(
+        [
+            {
+                "game_id": "2024_01_BUF_KC",
+                "home_team": "KC",
+                "away_team": "BUF",
+                "total": 47.0,
+                "spread": float("nan"),
+                "home_implied_total": 25.0,
+                "away_implied_total": 22.0,
+            }
+        ]
+    )
+    pbp = pd.DataFrame(columns=["posteam", "wp", "qtr", "game_seconds_remaining"])
+
+    with pytest.raises(ValueError, match="2024_01_BUF_KC"):
+        build_week_volume(vegas, pbp, season=2024, week=1)
+
+
+def test_projected_pass_rate_treats_nan_wind_as_zero_adj():
+    assert projected_pass_rate(team_spread=0, wind_mph=float("nan")) == pytest.approx(
+        projected_pass_rate(team_spread=0, wind_mph=None)
+    )

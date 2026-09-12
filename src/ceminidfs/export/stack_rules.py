@@ -118,7 +118,19 @@ def parse_stack_rule(rule: str) -> StackSpec:
 
 
 def parse_stack_rules(rules: list[str] | None) -> list[StackSpec]:
-    return [parse_stack_rule(rule) for rule in rules or []]
+    """Parse stack rules. A token that contains ``|`` splits into multiple rules."""
+
+    specs: list[StackSpec] = []
+    for rule in rules or []:
+        raw = str(rule or "").strip()
+        if "|" in raw:
+            parts = [part.strip() for part in raw.split("|") if part.strip()]
+            if not parts:
+                raise ValueError("empty stack rule")
+            specs.extend(parse_stack_rule(part) for part in parts)
+        else:
+            specs.append(parse_stack_rule(rule))
+    return specs
 
 
 def apply_stack_specs(optimizer: Any, specs: list[StackSpec]) -> None:

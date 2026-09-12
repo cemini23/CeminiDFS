@@ -1,7 +1,10 @@
 """Vegas enrichment for week-scoped schedules.
 
-Spread values use the home team's perspective: home -3 means the home team is
-favored by 3 points, so its implied total is `(total - spread) / 2`.
+Internal ``spread`` uses betting convention: home -3 means the home team is
+favored by 3 points, so its implied total is ``(total - spread) / 2``.
+
+nflverse ``spread_line`` uses the opposite sign (positive = home favored, so
+it lines up with ``result``). That column is negated at extract time.
 """
 
 from __future__ import annotations
@@ -19,8 +22,11 @@ AWAY_TEAM_COLUMNS = ("away_team", "away")
 
 
 def extract_spread_total(row: Mapping[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-    spread = _first_numeric(row, SPREAD_COLUMNS)
+    spread, source = _first_numeric_named(row, SPREAD_COLUMNS)
     total = _first_numeric(row, TOTAL_COLUMNS)
+    if spread is not None and source == "spread_line":
+        # nflverse: + means home favored. Convert to betting convention.
+        spread = -spread
     return spread, total
 
 
@@ -39,7 +45,7 @@ def implied_team_totals_from_schedule_row(row: Mapping[str, Any]) -> Dict[str, A
             "away_implied_total": None,
         }
 
-    # Assumes spread is from the home team's perspective: home -3 means favored by 3.
+    # Betting convention after extract: home -3 means favored by 3.
     home_implied = (total - spread) / 2.0
     away_implied = (total + spread) / 2.0
     return {
@@ -93,13 +99,22 @@ def write_week_vegas(season: int, week: int, out_path: Path | None = None) -> Pa
 
 
 def _first_numeric(row: Mapping[str, Any], columns: Tuple[str, ...]) -> Optional[float]:
-    value = _first_value(row, columns)
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    value, _source = _first_numeric_named(row, columns)
+    return value
+
+
+def _first_numeric_named(
+    row: Mapping[str, Any], columns: Tuple[str, ...]
+) -> Tuple[Optional[float], Optional[str]]:
+    for column in columns:
+        value = _first_value(row, (column,))
+        if value is None or value == "":
+            continue
+        try:
+            return float(value), column
+        except (TypeError, ValueError):
+            continue
+    return None, None
 
 
 def _first_value(row: Mapping[str, Any], columns: Tuple[str, ...]) -> Any:

@@ -135,6 +135,160 @@ def test_identify_qb_starter_prefers_last_week():
     assert identify_qb_starter(stats, team="AAA", through_week=4) == "qb1"
 
 
+def test_week1_new_team_qb_keeps_starter_share():
+    volume = pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 1,
+                "team": "CCC",
+                "opponent": "DDD",
+                "pass_attempts": 32.0,
+                "rush_attempts": 22.0,
+                "implied_total": 24.0,
+            }
+        ]
+    )
+    pbp = pd.DataFrame(
+        [
+            {
+                "season": 2025,
+                "week": 18,
+                "game_id": "old",
+                "posteam": "CCC",
+                "pass_attempt": 1,
+                "rush": 0,
+                "passer_player_id": "qb_old",
+                "passer_player_name": "Old QB",
+                "receiver_player_id": "wr_c",
+                "receiver_player_name": "WR C",
+                "air_yards": 10,
+            }
+        ]
+        * 20
+    )
+    roster = pd.DataFrame(
+        [
+            {
+                "player_id": "qb_new",
+                "player_name": "New QB",
+                "team": "CCC",
+                "position": "QB",
+                "injury_status": "",
+                "salary": 8500,
+            },
+            {
+                "player_id": "qb_old",
+                "player_name": "Old QB",
+                "team": "CCC",
+                "position": "QB",
+                "injury_status": "",
+                "salary": 5200,
+            },
+            {
+                "player_id": "wr_c",
+                "player_name": "WR C",
+                "team": "CCC",
+                "position": "WR",
+                "injury_status": "",
+                "salary": 6000,
+            },
+        ]
+    )
+
+    usage = build_week_usage(volume, pbp, season=2026, week=1, roster=roster)
+    new_qb = usage.loc[usage["player_id"] == "qb_new"].iloc[0]
+    old_qb = usage.loc[usage["player_id"] == "qb_old"].iloc[0]
+
+    assert new_qb["projected_pass_attempts"] > 0
+    assert old_qb["projected_pass_attempts"] < new_qb["projected_pass_attempts"]
+
+
+def test_week1_lone_expensive_rb_keeps_min_share():
+    volume = pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 1,
+                "team": "CCC",
+                "opponent": "DDD",
+                "pass_attempts": 30.0,
+                "rush_attempts": 25.0,
+            }
+        ]
+    )
+    pbp_rows = []
+    for week in (16, 17, 18):
+        for rusher_id, rusher_name in (
+            ("rb_hist", "Hist RB"),
+            ("rb_b", "RB B"),
+            ("rb_c", "RB C"),
+        ):
+            for _ in range(3):
+                pbp_rows.append(
+                    {
+                        "season": 2025,
+                        "week": week,
+                        "game_id": f"g{week}",
+                        "posteam": "CCC",
+                        "pass_attempt": 0,
+                        "rush": 1,
+                        "rusher_player_id": rusher_id,
+                        "rusher_player_name": rusher_name,
+                    }
+                )
+    pbp = pd.DataFrame(pbp_rows)
+    roster = pd.DataFrame(
+        [
+            {
+                "player_id": "rb_star",
+                "player_name": "Star RB",
+                "team": "CCC",
+                "position": "RB",
+                "injury_status": "",
+                "salary": 7500,
+            },
+            {
+                "player_id": "rb_hist",
+                "player_name": "Hist RB",
+                "team": "CCC",
+                "position": "RB",
+                "injury_status": "",
+                "salary": 5200,
+            },
+            {
+                "player_id": "rb_b",
+                "player_name": "RB B",
+                "team": "CCC",
+                "position": "RB",
+                "injury_status": "",
+                "salary": 5000,
+            },
+            {
+                "player_id": "rb_c",
+                "player_name": "RB C",
+                "team": "CCC",
+                "position": "RB",
+                "injury_status": "",
+                "salary": 4800,
+            },
+            {
+                "player_id": "rb_d",
+                "player_name": "RB D",
+                "team": "CCC",
+                "position": "RB",
+                "injury_status": "",
+                "salary": 4600,
+            },
+        ]
+    )
+
+    usage = build_week_usage(volume, pbp, season=2026, week=1, roster=roster)
+    star = usage.loc[usage["player_id"] == "rb_star"].iloc[0]
+    assert star["projected_carries"] > 0
+    assert star["carry_share"] >= 0.35
+
+
 def test_rb_committee_zeros_deep_backups():
     volume = _volume_df()
     pbp = _synthetic_pbp()

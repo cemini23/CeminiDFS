@@ -1,6 +1,7 @@
 import inspect
 import json
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -168,3 +169,48 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
         )
 
     assert set(datasets) == {"schedules", "vegas", "weather", "pbp", "injuries"}
+
+
+def test_fetch_cached_skips_parquet_older_than_ttl(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    stale = pd.DataFrame({"game_id": ["old"]})
+    cache_path = cache_root / "schedules_2026.parquet"
+    stale.to_parquet(cache_path, index=False)
+    old = time.time() - fetch_module.CACHE_TTL_SECONDS - 60
+    cache_path.touch()
+    import os
+
+    os.utime(cache_path, (old, old))
+
+    fresh = pd.DataFrame({"game_id": ["live"]})
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "_require_nflreadpy", lambda: object())
+    monkeypatch.setattr(fetch_module, "_call_loader", lambda *args, **kwargs: fresh)
+    monkeypatch.setattr(fetch_module, "_to_pandas", lambda data: data)
+
+    result = fetch_module._fetch_cached("schedules", 2026, ("load_schedules",))
+
+    assert list(result["game_id"]) == ["live"]
+
+
+def test_fetch_cached_force_ignores_fresh_parquet(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    cache_path = cache_root / "schedules_2026.parquet"
+    pd.DataFrame({"game_id": ["cached"]}).to_parquet(cache_path, index=False)
+    fresh = pd.DataFrame({"game_id": ["forced"]})
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "_require_nflreadpy", lambda: object())
+    monkeypatch.setattr(fetch_module, "_call_loader", lambda *args, **kwargs: fresh)
+    monkeypatch.setattr(fetch_module, "_to_pandas", lambda data: data)
+
+    result = fetch_module._fetch_cached("schedules", 2026, ("load_schedules",), force=True)
+
+    assert list(result["game_id"]) == ["forced"]
+
+
+def test_fetch_force_enabled_reads_nested_config():
+    assert fetch_module.fetch_force_enabled({"fetch": {"force": True}}) is True
+    assert fetch_module.fetch_force_enabled({"force": True}) is True
+    assert fetch_module.fetch_force_enabled({}) is False

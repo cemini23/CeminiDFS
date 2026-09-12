@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -144,6 +145,7 @@ def rerank_lineups(
     quantile: float = 0.85,
     ownership_lookup: Mapping[str, float] | None = None,
     ownership_penalty: float = 0.0,
+    max_exposure: float | None = None,
 ) -> list[Any]:
     """Score candidates by simulated tail quantile and return the top unique lineups."""
 
@@ -176,7 +178,30 @@ def rerank_lineups(
         )
 
     ranked.sort(reverse=True)
-    return [lineup for _, _, _, lineup in ranked[:final_count]]
+    ordered = [lineup for _, _, _, lineup in ranked]
+    if max_exposure is None:
+        return ordered[:final_count]
+    return _select_with_exposure_cap(ordered, final_count, max_exposure)
+
+
+def _select_with_exposure_cap(lineups: list[Any], final_count: int, max_exposure: float) -> list[Any]:
+    """Greedily keep lineups that do not push any player above max_exposure of final_count."""
+
+    cap = math.floor(float(max_exposure) * final_count + 1e-9)
+    if max_exposure > 0:
+        cap = max(cap, 1)
+    selected: list[Any] = []
+    counts: dict[str, int] = {}
+    for lineup in lineups:
+        names = [_normalize_name(name) for name in lineup_player_names(lineup) if str(name).strip()]
+        if any(counts.get(name, 0) + 1 > cap for name in names):
+            continue
+        selected.append(lineup)
+        for name in names:
+            counts[name] = counts.get(name, 0) + 1
+        if len(selected) >= final_count:
+            break
+    return selected
 
 
 def optimize_with_sim_rerank(
@@ -196,6 +221,7 @@ def optimize_with_sim_rerank(
     """Generate candidate lineups, rerank by simulated score, and write final CSV."""
 
     candidate_lineups = generate_lineups(csv_path, site=site, count=candidates, **kwargs)
+    exposure = kwargs["max_exposure"] if "max_exposure" in kwargs else 0.35
     selected = rerank_lineups(
         candidate_lineups,
         sim_matrix,
@@ -204,6 +230,7 @@ def optimize_with_sim_rerank(
         quantile=quantile,
         ownership_lookup=ownership_lookup,
         ownership_penalty=ownership_penalty,
+        max_exposure=exposure,
     )
     rows = [lineup_to_row(lineup, site=site) for lineup in selected]
     written = write_lineup_rows(rows, out_path, site=site)

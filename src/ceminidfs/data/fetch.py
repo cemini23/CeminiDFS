@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -14,25 +16,45 @@ from ceminidfs.manifest import RunManifest, config_sha256, git_commit
 INSTALL_HINT = "Install nflreadpy with `pip install nflreadpy` to fetch NFL data."
 
 WEEK_COLUMNS = ("week", "week_num")
+CACHE_TTL_SECONDS = 12 * 60 * 60
 
 
-def fetch_schedules(season: int) -> pd.DataFrame:
-    return _fetch_cached("schedules", season, ("load_schedules", "import_schedules"))
+def fetch_schedules(season: int, *, force: bool = False) -> pd.DataFrame:
+    return _fetch_cached("schedules", season, ("load_schedules", "import_schedules"), force=force)
 
 
-def fetch_pbp(season: int) -> pd.DataFrame:
+def fetch_pbp(season: int, *, force: bool = False) -> pd.DataFrame:
     """Load season PBP from nflverse cache (unfiltered — see ``data.pbp_filters`` at use time)."""
 
-    return _fetch_cached("pbp", season, ("load_pbp", "import_pbp_data"))
+    return _fetch_cached("pbp", season, ("load_pbp", "import_pbp_data"), force=force)
 
 
-def fetch_injuries(season: int) -> pd.DataFrame:
-    return _fetch_cached("injuries", season, ("load_injuries", "import_injuries"))
+def fetch_injuries(season: int, *, force: bool = False) -> pd.DataFrame:
+    return _fetch_cached("injuries", season, ("load_injuries", "import_injuries"), force=force)
 
 
-def _fetch_cached(kind: str, season: int, loader_names: Iterable[str]) -> pd.DataFrame:
+def fetch_force_enabled(config: Mapping[str, Any] | None) -> bool:
+    """Return True when config asks fetch to ignore a fresh parquet cache."""
+
+    if not config:
+        return False
+    fetch_cfg = config.get("fetch")
+    if isinstance(fetch_cfg, Mapping) and fetch_cfg.get("force"):
+        return True
+    return bool(config.get("force"))
+
+
+def _fetch_cached(
+    kind: str,
+    season: int,
+    loader_names: Iterable[str],
+    *,
+    force: bool = False,
+) -> pd.DataFrame:
     cache_path = _cache_dir() / f"{kind}_{season}.parquet"
-    if cache_path.exists():
+    if cache_path.exists() and not force and _cache_is_fresh(cache_path):
+        mtime = datetime.fromtimestamp(cache_path.stat().st_mtime, tz=timezone.utc)
+        print(f"WARNING: reusing cache {cache_path} (mtime {mtime.isoformat()})", file=sys.stderr)
         return pd.read_parquet(cache_path)
 
     nflreadpy = _require_nflreadpy()
@@ -47,6 +69,18 @@ def _fetch_cached(kind: str, season: int, loader_names: Iterable[str]) -> pd.Dat
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(cache_path, index=False)
     return frame
+
+
+def _cache_is_fresh(cache_path: Path) -> bool:
+    age = time.time() - cache_path.stat().st_mtime
+    return age < CACHE_TTL_SECONDS
+
+
+def _call_season_fetcher(fetcher: Callable[..., pd.DataFrame], season: int, *, force: bool) -> pd.DataFrame:
+    try:
+        return fetcher(season, force=force)
+    except TypeError:
+        return fetcher(season)
 
 
 def _require_nflreadpy() -> Any:
@@ -131,9 +165,10 @@ def fetch_week_datasets(
         "injuries": fetch_injuries,
     }
 
+    force = fetch_force_enabled(cfg)
     datasets: dict[str, dict[str, Any]] = {}
     for kind, fetcher in fetchers.items():
-        frame = fetcher(season)
+        frame = _call_season_fetcher(fetcher, season, force=force)
         scope = "season"
         # Week 1 has no same-season prior weeks; keep last season for DIY usage.
         if kind == "pbp" and week <= 1 and season > 0:

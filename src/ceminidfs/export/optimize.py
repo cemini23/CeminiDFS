@@ -115,7 +115,9 @@ def generate_lineups(
     optimizer.load_players_from_csv(str(csv_file))
     attach_csv_original_positions(optimizer, csv_file)
     _relax_tiny_slate_limits(optimizer, site_key)
+    keep_injury_tagged_players(optimizer)
     apply_locks_and_excludes(optimizer, locks=locks, excludes=excludes)
+    assert_locked_players_eligible(optimizer)
     apply_pool_constraints(
         optimizer,
         no_offense_vs_dst=no_offense_vs_dst,
@@ -142,7 +144,7 @@ def generate_lineups(
     if _is_tiny_slate(optimizer) and max_exposure == 0.35:
         max_exposure = None
 
-    lineups = list(optimizer.optimize(n=count, max_exposure=max_exposure or None))
+    lineups = _optimize_or_raise(optimizer, n=count, max_exposure=max_exposure or None)
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
     return lineups
@@ -248,6 +250,63 @@ def _write_build_report(
     write_lineup_report(text, target)
     print(text)
     print(f"Wrote lineup report -> {target}")
+
+
+def keep_injury_tagged_players(optimizer: Any) -> None:
+    """Keep Q/questionable rows that pydfs marks injured.
+
+    The FanDuel importer sets ``is_injured`` for any non-empty Injury Indicator.
+    CeminiDFS already dropped OUT/IR/D in normalize. Default pydfs filtering
+    would then drop every remaining Q tag.
+    """
+
+    pool = getattr(optimizer, "player_pool", None)
+    if pool is None:
+        return
+    pool.with_injured = True
+    all_n = len(pool.all_players)
+    filtered_n = len(pool.filtered_players)
+    tagged = sum(1 for player in pool.all_players if getattr(player, "is_injured", False))
+    print(
+        f"optimizer pool: {all_n} loaded, {filtered_n} eligible, {tagged} injury-tagged (kept)",
+        file=sys.stderr,
+    )
+
+
+def assert_locked_players_eligible(optimizer: Any) -> None:
+    """Raise ValueError when a lock is missing from the eligible pool."""
+
+    pool = getattr(optimizer, "player_pool", None)
+    if pool is None:
+        return
+    eligible = set(pool.filtered_players)
+    missing = [
+        player.full_name
+        for player in getattr(pool, "locked_players", [])
+        if player not in eligible
+    ]
+    if missing:
+        names = ", ".join(missing)
+        raise ValueError(
+            f"Locked player(s) are not in the eligible pool: {names}. "
+            "Questionable (Q) tags stay in the pool; check --lock versus --exclude."
+        )
+
+
+def _optimize_or_raise(optimizer: Any, **kwargs: Any) -> list[Any]:
+    try:
+        return list(optimizer.optimize(**kwargs))
+    except KeyError as exc:
+        raise ValueError(
+            f"Locked player is not in the eligible optimizer pool: {exc}. "
+            "Questionable (Q) tags stay in the pool; check --lock versus --exclude."
+        ) from exc
+    except Exception as exc:
+        name = type(exc).__name__
+        message = str(exc)
+        if name in {"LineupOptimizerException", "GenerateLineupException"} or "Unable to build" in message:
+            raise ValueError(f"pydfs could not build lineups: {message}") from exc
+        raise
 
 
 def _relax_tiny_slate_limits(optimizer: Any, site_key: str) -> None:

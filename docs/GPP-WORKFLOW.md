@@ -11,9 +11,9 @@ simulation, simulation rerank, and ownership projection are disabled by default.
 For tournament builds, pass `--profile gpp`:
 
 ```bash
-ceminidfs project --season 2025 --week 1 --salary slate.csv --profile gpp
+ceminidfs project --season 2026 --week 1 --salary slate.csv --profile gpp
 ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp
-ceminidfs run --season 2025 --week 1 --salary slate.csv --stages all --profile gpp
+ceminidfs run --season 2026 --week 1 --salary slate.csv --stages all --profile gpp
 ```
 
 ## Stacks, locks, and fades
@@ -41,6 +41,7 @@ Stack text:
 - `rb+dst` — RB and DST from the same team
 
 FanDuel classic allows at most four from one team. Do not use `CIN:5`.
+Do not combine `qb:3`, `CIN3-TB2`, and `3-2` on one build. That set is often infeasible.
 Operator still exports the CSV and submits. Agent does not Enter.
 
 Optional build constraints (default off):
@@ -63,7 +64,7 @@ Config keys on `ceminidfs run`: `no_offense_vs_dst`, `one_rb_per_team`, `project
 The profile deep-merges `config/nfl_dfs_gpp.yaml` over the base config and enables:
 
 - `simulate.enabled: true` with the `copula` method.
-- `sim_rerank.enabled: true` with 2,000 candidates, 150 final lineups, and p85 scoring.
+- `sim_rerank.enabled: true` with 500 candidates, 150 final lineups, and p85 scoring.
 - `ownership.enabled: true` with heuristic ownership unless a calibration path is supplied.
 
 ## Ownership Calibration
@@ -84,18 +85,52 @@ Then set `ownership.calibration_path` in a local copy of the GPP profile or pass
 through a runtime config wrapper before projection. The calibrated ownership column
 feeds the rerank ownership penalty.
 
+## Tonight build (Week 1 2026)
+
+Do not use 2,000 candidates on the Sunday-afternoon FanDuel slate. One
+lineup takes about 1 second. 2,000 candidates can take 35 minutes. Stacks
+such as `qb:3` plus `3-2` can take hours.
+
+1. Time a probe: `ceminidfs optimize --csv normalized_players.csv --out probe.csv --count 25 --min-salary 58500`
+2. Full GPP: `ceminidfs run --season 2026 --week 1 --salary data/slates/2026-09-13_fd_sun.csv --site fanduel --stages all --profile gpp --min-salary 58500`
+3. Pass `--candidates 2000` only if you have extra time.
+4. Run `ceminidfs fetch --season 2026 --week 1 --force` before project.
+5. Use tonight’s FanDuel player-list CSV. Do not reuse an old contest export.
+6. Questionable (`Q`) players stay in the optimizer pool. OUT / IR / D drop in normalize.
+7. Late swap rebuilds one lineup at a time. A failed swap keeps the original row.
+
+Operator submits. Agent does not Enter.
+
 ## Late Swap
 
-After lock, rerun the build with updated player statuses and use late swap on the
-existing lineup file:
+Keep every original lineup name in the players file. Do not drop OUT rows.
+Zero FPPG for new OUTs. Use `--exclude` for unlocked names that must not
+enter a swapped lineup. A locked-team OUT stays in the file so the imported
+lineup still parses.
+
+Do not point `run` at an old FanDuel salary CSV. If you re-run `project`,
+write a *copy* that does not drop rows.
+
+Lock each 1 p.m. ET club once. Use nflverse abbreviations, not FanDuel aliases:
+
+- `JAX` (not `JAC`)
+- `WAS` (not `WSH`)
+- `LAR` (not `LA`)
 
 ```bash
 ceminidfs late-swap \
   --lineups lineups.csv \
   --players normalized_players.csv \
-  --lock-team KC \
+  --lock-team JAX \
+  --lock-team WAS \
+  --lock-team LAR \
+  --exclude "Alvin Kamara" \
+  --stack qb:3 \
+  --max-exposure 0.35 \
   --out lineups_late_swap.csv
 ```
 
-Keep the same profile assumptions for late-swap rebuilds so exposure, ownership,
-and simulation columns stay aligned with the original tournament build.
+`--lock-team JAC` aliases to `JAX`. If a lock team matches 0 pool players,
+the command prints a warning.
+
+Keep the same stack, exposure, and fade flags as the original GPP build.

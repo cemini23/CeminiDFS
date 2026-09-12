@@ -55,11 +55,12 @@ def salary_rows_to_roster(rows: list[dict]) -> pd.DataFrame:
                 "team": str(row.get("team") or ""),
                 "position": str(position or "").upper(),
                 "injury_status": str(row.get("injury_status") or row.get("Injury Indicator") or ""),
+                "salary": _row_salary(row),
             }
         )
     return pd.DataFrame(
         roster_rows,
-        columns=["player_id", "player_name", "team", "position", "injury_status"],
+        columns=["player_id", "player_name", "team", "position", "injury_status", "salary"],
     )
 
 
@@ -70,9 +71,32 @@ def normalize_join_key(name: Any, team: Any, position: Any) -> str:
         (
             _normalize_token(name),
             _normalize_token(normalize_team_abbr(team)),
-            _normalize_token(position).upper(),
+            _canonical_join_position(position),
         )
     )
+
+
+def empty_fd_projection_names(rows: list[dict[str, Any]]) -> list[str]:
+    """Return player names whose ``fd_projection`` is missing or null."""
+
+    names: list[str] = []
+    for row in rows:
+        if not _is_empty_fd_projection(row.get("fd_projection")):
+            continue
+        name = str(row.get("player_name") or row.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def warn_empty_fd_projections(rows: list[dict[str, Any]], *, limit: int = 15) -> list[str]:
+    """Print coverage for empty ``fd_projection`` rows. Does not fail."""
+
+    names = empty_fd_projection_names(rows)
+    if names:
+        preview = ", ".join(names[:limit])
+        print(f"WARNING: {len(names)} players have empty fd_projection: {preview}")
+    return names
 
 
 def build_diy_projections(
@@ -406,3 +430,30 @@ def _name_team_key(name: Any, team: Any) -> str:
 
 def _normalize_token(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _canonical_join_position(position: Any) -> str:
+    token = _normalize_token(position).upper()
+    if token in {"D", "DEF", "DST"}:
+        return "DST"
+    return token
+
+
+def _is_empty_fd_projection(value: Any) -> bool:
+    if value in (None, ""):
+        return True
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return bool(pd.isna(numeric))
+
+
+def _row_salary(row: Mapping[str, Any]) -> float:
+    for key in ("fd_salary", "dk_salary", "salary"):
+        value = row.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).replace("$", "").replace(",", "").strip()
+        try:
+            return float(text)
+        except ValueError:
+            continue
+    return 0.0

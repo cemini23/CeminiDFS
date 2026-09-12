@@ -11,9 +11,11 @@ Historical/archive backtests will use a separate endpoint in Phase 4.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
+from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
@@ -184,13 +186,17 @@ def _schedule_game_weather(row: Mapping[str, Any], *, opener: UrlOpener | None) 
     if not exposed or game_date is None:
         return base
 
-    forecast = fetch_hourly_forecast(
-        stadium.lat,
-        stadium.lon,
-        game_date,
-        game_date,
-        opener=opener,
-    )
+    try:
+        forecast = fetch_hourly_forecast(
+            stadium.lat,
+            stadium.lon,
+            game_date,
+            game_date,
+            opener=opener,
+        )
+    except (OSError, TimeoutError, URLError, json.JSONDecodeError, ValueError) as exc:
+        print(f"WARNING: weather fetch failed for {home_team}; leaving weather empty: {exc}", file=sys.stderr)
+        return base
     snapshot = kickoff_weather_snapshot(forecast.get("hourly", {}), game_time)
     base.update(
         {
