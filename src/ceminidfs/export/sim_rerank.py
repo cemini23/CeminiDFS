@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 
+from .lineup_report import format_lineup_report, write_lineup_report
 from .optimize import generate_lineups, lineup_to_row, write_lineup_rows
 
 NAME_KEYS = (
@@ -205,7 +206,23 @@ def optimize_with_sim_rerank(
         ownership_penalty=ownership_penalty,
     )
     rows = [lineup_to_row(lineup, site=site) for lineup in selected]
-    return write_lineup_rows(rows, out_path, site=site)
+    written = write_lineup_rows(rows, out_path, site=site)
+    stacks = kwargs.get("stacks")
+    locks = kwargs.get("locks")
+    excludes = kwargs.get("excludes")
+    report = format_lineup_report(
+        selected,
+        stacks=stacks,
+        locks=locks,
+        excludes=excludes,
+        no_offense_vs_dst=bool(kwargs.get("no_offense_vs_dst")),
+        one_rb_per_team=bool(kwargs.get("one_rb_per_team")),
+        projection_floor=kwargs.get("projection_floor"),
+        uniques=kwargs.get("uniques"),
+    )
+    write_lineup_report(report, Path(out_path).with_suffix(".report.txt"))
+    print(report)
+    return written
 
 
 def lineup_player_names(lineup: Any) -> list[str]:

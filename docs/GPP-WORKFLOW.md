@@ -16,6 +16,50 @@ ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp
 ceminidfs run --season 2025 --week 1 --salary slate.csv --stages all --profile gpp
 ```
 
+## Stacks, locks, and fades
+
+`optimize` and `run` accept the same build flags. The optimizer writes
+`lineups.report.txt` next to the CSV (stack badges + exposure).
+
+```bash
+ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp \
+  --stack qb:3 \
+  --stack CIN3-TB2 \
+  --lock "Ja'Marr Chase" \
+  --exclude "Alvin Kamara" \
+  --max-exposure 0.35
+```
+
+Stack text:
+
+- `qb:3` — QB plus two WR/TE teammates
+- `CIN:3` — three players from one team
+- `CIN3-TB2` — 3/2 game stack
+- `3-2` — any game, five players, at least two from each side
+- `game:5` — any game, five players
+- `wr:2` — two same-team WRs
+- `rb+dst` — RB and DST from the same team
+
+FanDuel classic allows at most four from one team. Do not use `CIN:5`.
+Operator still exports the CSV and submits. Agent does not Enter.
+
+Optional build constraints (default off):
+
+```bash
+ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp \
+  --no-offense-vs-dst \
+  --one-rb-per-team \
+  --projection-floor 8 \
+  --uniques 3
+```
+
+- `--no-offense-vs-dst` — a lineup cannot include a DST and an offensive player from the opposing team
+- `--one-rb-per-team` — at most one RB from any single team
+- `--projection-floor N` — remove unlocked pool players with FPPG below N
+- `--uniques N` — set `max_repeating_players` to slate size minus N (FanDuel classic 9, showdown 6). If both `--uniques` and `--max-repeating-players` are set, `--uniques` wins.
+
+Config keys on `ceminidfs run`: `no_offense_vs_dst`, `one_rb_per_team`, `projection_floor`, `uniques`.
+
 The profile deep-merges `config/nfl_dfs_gpp.yaml` over the base config and enables:
 
 - `simulate.enabled: true` with the `copula` method.

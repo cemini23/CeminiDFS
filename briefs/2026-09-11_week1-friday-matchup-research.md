@@ -84,28 +84,28 @@ Do **not** scrape Stokastic/Labs CSVs. Ownership benchmark stays manual export.
 
 ## Desktop dossier — DFS Repository Revenue Evaluation.docx
 
-20 GitHub URLs. Independent re-check 2026-09-11.
+20 GitHub URLs. Friday curl called 18 of them 404. **Saturday GitHub API recheck (2026-09-12):** all 18 named repos are public. None has a root `LICENSE`. See `briefs/2026-09-12_dossier-404-recheck.md`.
 
 | Verdict | Count | Action |
 |---------|-------|--------|
-| UNAVAILABLE (404) | 18 | No steal. Includes `nukesim/nuke-dfs-hub` (wrong domain — nuclear sim). |
-| Context | 1 | `Krool/FantasyFootballAnalyzer` — season-long draft room. **No LICENSE** in repo root. Wiki-only. Not a DFS solver. |
-| Pass | 1 | `mrbusche/dfs-optimizer` — static CSV LP. **No LICENSE**. CeminiDFS already covers this. |
+| Live, **no LICENSE** | 18 | Process only. `nukesim/nuke-dfs-hub` is a real NFL DFS hub (not a nuclear-sim miss). |
+| Context | 1 | `Krool/FantasyFootballAnalyzer` — season-long. No LICENSE. |
+| Pass | 1 | `mrbusche/dfs-optimizer` — static CSV LP. No LICENSE. Already covered. |
 
 **No Integrate. No Extract. Do not vendor.**
 
-`mehpackers13/fanduel-bot` is 404 and would be NO-GO anyway (auto-enter).
+`mehpackers13/fanduel-bot` is live and is still **NO-GO** (sportsbook bot + Discord, not a DFS solver).
 
 ## Other GitHub (independent search, not the docx list)
 
 | Repo | License | Stars | Steal |
 |------|---------|-------|-------|
-| DimaKudosh/pydfs-lineup-optimizer | MIT | (already in tree) | **Keep.** Showdown already wired. |
-| BenBrostoff/draftfast | **No LICENSE** (still) | 298 | CONDITIONAL-GO / reject. Do not vendor. |
-| chanzer0/NFL-DFS-Tools | **No LICENSE** in root | 49 | Wiki-only process notes. Do not clone into `src/`. |
-| n-roth12/DFSLineupOptimizer | MIT | 12 | Stale (last push 2024). Duplicate of pydfs path. Pass. |
-| aptmac/dfs-helper-nfl | MIT | 7 | Stale 2022 Yahoo helper. Pass. |
-| Krool/FantasyFootballAnalyzer | None | 5 | Season-long only. Pass. |
+| DimaKudosh/pydfs-lineup-optimizer | MIT | (already in tree) | **Keep.** Showdown + `--stack qb:2`. |
+| n-roth12/DFSLineupOptimizer | MIT | 12 | Game-stack CLI `KC3-JAX2` / random `3-2`. Best licensed idea we do not expose yet. After Sunday. |
+| ashhhlynn/custom-fantasy-optimizer | MIT | 1 | Lock/exclude, opposing stacks, RB+DST. Do not copy DK API fetch. |
+| aptmac/dfs-helper-nfl | MIT | 7 | Stale Yahoo/OwnersBox helper. Low value. |
+| BenBrostoff/draftfast | **No LICENSE** (still) | 298 | Reject (K138). |
+| chanzer0/NFL-DFS-Tools | **No LICENSE** in root | 49 | Wiki-only. |
 
 No new runtime dependency for Week 1.
 

@@ -219,6 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--candidates", type=int, default=2000, help="Candidate lineups before rerank"
     )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
+    _add_optimizer_build_arguments(optimize)
     _add_profile_argument(optimize)
     optimize.set_defaults(handler=_cmd_optimize)
 
@@ -277,6 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow fetch stage to write stub artifacts when data deps are missing",
     )
+    _add_optimizer_build_arguments(run)
     _add_profile_argument(run)
     run.set_defaults(handler=_cmd_run)
 
@@ -591,6 +593,7 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
         profile=args.profile,
         site=args.site,
         sim_rerank=rerank_override,
+        **_optimizer_build_overrides(args),
     )
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
@@ -650,6 +653,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         site=args.site,
         allow_stub=args.allow_stub,
         sim_rerank=rerank_override,
+        **_optimizer_build_overrides(args),
     )
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
@@ -1020,6 +1024,71 @@ def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:
     if rows and rows[0].get("dk_id") and not rows[0].get("fd_id"):
         return "draftkings"
     return "fanduel"
+
+
+def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--stack",
+        action="append",
+        default=[],
+        help="Stack rule: qb:3, CIN:3, CIN3-TB2, 3-2, game:5, wr:2, rb+dst",
+    )
+    parser.add_argument("--lock", action="append", default=[], help="Force a player into every lineup")
+    parser.add_argument("--exclude", action="append", default=[], help="Remove a player from the pool")
+    parser.add_argument("--max-exposure", type=float, default=None, help="Max player exposure 0-1")
+    parser.add_argument(
+        "--max-repeating-players",
+        type=int,
+        default=None,
+        help="Max players that may repeat across lineups",
+    )
+    parser.add_argument(
+        "--uniques",
+        type=int,
+        default=None,
+        help="Alias for max_repeating_players = slate_size - N (wins over --max-repeating-players)",
+    )
+    parser.add_argument(
+        "--no-offense-vs-dst",
+        action="store_true",
+        default=None,
+        help="Block DST plus an offensive player from the opposing team",
+    )
+    parser.add_argument(
+        "--one-rb-per-team",
+        action="store_true",
+        default=None,
+        help="At most one RB from any single team",
+    )
+    parser.add_argument(
+        "--projection-floor",
+        type=float,
+        default=None,
+        help="Remove unlocked pool players with FPPG below N",
+    )
+
+
+def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    if getattr(args, "stack", None):
+        overrides["stacks"] = list(args.stack)
+    if getattr(args, "lock", None):
+        overrides["locks"] = list(args.lock)
+    if getattr(args, "exclude", None):
+        overrides["excludes"] = list(args.exclude)
+    if getattr(args, "max_exposure", None) is not None:
+        overrides["max_exposure"] = args.max_exposure
+    if getattr(args, "max_repeating_players", None) is not None:
+        overrides["max_repeating_players"] = args.max_repeating_players
+    if getattr(args, "uniques", None) is not None:
+        overrides["uniques"] = args.uniques
+    if getattr(args, "no_offense_vs_dst", None) is not None:
+        overrides["no_offense_vs_dst"] = bool(args.no_offense_vs_dst)
+    if getattr(args, "one_rb_per_team", None) is not None:
+        overrides["one_rb_per_team"] = bool(args.one_rb_per_team)
+    if getattr(args, "projection_floor", None) is not None:
+        overrides["projection_floor"] = args.projection_floor
+    return overrides
 
 
 def _add_profile_argument(parser: argparse.ArgumentParser) -> None:

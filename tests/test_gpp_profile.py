@@ -94,6 +94,60 @@ def test_run_optimize_project_accept_gpp_profile_flag():
     assert project.profile == "gpp"
 
 
+def test_optimize_and_run_accept_gpp_constraint_flags():
+    from ceminidfs.cli import _optimizer_build_overrides
+
+    parser = build_parser()
+    optimize = parser.parse_args(
+        [
+            "optimize",
+            "--csv",
+            "players.csv",
+            "--out",
+            "lineups.csv",
+            "--no-offense-vs-dst",
+            "--one-rb-per-team",
+            "--projection-floor",
+            "8",
+            "--uniques",
+            "3",
+            "--max-repeating-players",
+            "4",
+        ]
+    )
+    run = parser.parse_args(
+        [
+            "run",
+            "--season",
+            "2025",
+            "--week",
+            "1",
+            "--salary",
+            "slate.csv",
+            "--one-rb-per-team",
+            "--uniques",
+            "3",
+        ]
+    )
+
+    optimize_overrides = _optimizer_build_overrides(optimize)
+    run_overrides = _optimizer_build_overrides(run)
+
+    assert optimize.no_offense_vs_dst is True
+    assert optimize.one_rb_per_team is True
+    assert optimize.projection_floor == pytest.approx(8.0)
+    assert optimize.uniques == 3
+    assert optimize.max_repeating_players == 4
+    assert optimize_overrides["uniques"] == 3
+    assert optimize_overrides["max_repeating_players"] == 4
+    assert optimize_overrides["no_offense_vs_dst"] is True
+    assert optimize_overrides["one_rb_per_team"] is True
+    assert run.one_rb_per_team is True
+    assert run.uniques == 3
+    assert run_overrides["uniques"] == 3
+    assert "no_offense_vs_dst" not in run_overrides
+
+
 def test_simulation_inputs_keep_coherence_columns_after_projection_merge(tmp_path: Path):
     salary_rows = [
         {

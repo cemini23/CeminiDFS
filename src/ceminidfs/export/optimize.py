@@ -8,7 +8,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .lineup_report import format_lineup_report, write_lineup_report
 from .normalize import SHOWDOWN_SITES, normalize_site
+from .stack_rules import (
+    apply_locks_and_excludes,
+    apply_pool_constraints,
+    apply_stack_specs,
+    attach_csv_original_positions,
+    parse_stack_rules,
+    resolve_repeating_players,
+)
 
 DEFAULT_MIN_SALARY = {
     "fanduel": 59400,
@@ -81,7 +90,13 @@ def generate_lineups(
     min_salary: int | None = None,
     max_exposure: float | None = 0.35,
     stacks: list[str] | None = None,
+    locks: list[str] | None = None,
+    excludes: list[str] | None = None,
     max_repeating_players: int | None = 7,
+    no_offense_vs_dst: bool = False,
+    one_rb_per_team: bool = False,
+    projection_floor: float | None = None,
+    uniques: int | None = None,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -90,7 +105,7 @@ def generate_lineups(
     if not csv_file.is_file():
         raise FileNotFoundError(f"CSV not found: {csv_file}")
 
-    Site, Sport, get_optimizer, TeamStack = _load_pydfs()
+    Site, Sport, get_optimizer, _team_stack = _load_pydfs()
     optimizer = get_optimizer(_site_enum(site_key, Site), Sport.FOOTBALL)
     if site_key == "fanduel_showdown":
         # FanDuel 2026 single game: 1 MVP + 5 FLEX at $60k, max 5 per team —
@@ -98,24 +113,31 @@ def generate_lineups(
         optimizer.settings.budget = 60000
         optimizer.settings.max_from_one_team = 5
     optimizer.load_players_from_csv(str(csv_file))
+    attach_csv_original_positions(optimizer, csv_file)
     _relax_tiny_slate_limits(optimizer, site_key)
+    apply_locks_and_excludes(optimizer, locks=locks, excludes=excludes)
+    apply_pool_constraints(
+        optimizer,
+        no_offense_vs_dst=no_offense_vs_dst,
+        one_rb_per_team=one_rb_per_team,
+        projection_floor=projection_floor,
+    )
+    apply_stack_specs(optimizer, parse_stack_rules(stacks))
 
-    if _is_tiny_slate(optimizer) and max_repeating_players == 7:
-        max_repeating_players = None
+    repeating = resolve_repeating_players(
+        slate_size=len(LINEUP_HEADERS[site_key]),
+        max_repeating_players=max_repeating_players,
+        uniques=uniques,
+    )
+    if uniques is None and _is_tiny_slate(optimizer) and repeating == 7:
+        repeating = None
 
-    if max_repeating_players is not None:
-        optimizer.set_max_repeating_players(max_repeating_players)
+    if repeating is not None:
+        optimizer.set_max_repeating_players(repeating)
 
     salary_floor = DEFAULT_MIN_SALARY[site_key] if min_salary is None else min_salary
     if salary_floor:
         optimizer.set_min_salary_cap(salary_floor)
-
-    for rule in stacks or []:
-        parts = rule.lower().split(":")
-        if len(parts) != 2:
-            raise ValueError(f"Invalid stack rule {rule!r}; expected format like qb:2")
-        pos, n = parts[0], int(parts[1])
-        optimizer.add_stack(TeamStack(n, for_positions=[pos.upper()]))
 
     if _is_tiny_slate(optimizer) and max_exposure == 0.35:
         max_exposure = None
@@ -156,7 +178,14 @@ def optimize_lineups(
     min_salary: int | None = None,
     max_exposure: float | None = 0.35,
     stacks: list[str] | None = None,
+    locks: list[str] | None = None,
+    excludes: list[str] | None = None,
     max_repeating_players: int | None = 7,
+    no_offense_vs_dst: bool = False,
+    one_rb_per_team: bool = False,
+    projection_floor: float | None = None,
+    uniques: int | None = None,
+    report_path: str | Path | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -168,9 +197,57 @@ def optimize_lineups(
         min_salary=min_salary,
         max_exposure=max_exposure,
         stacks=stacks,
+        locks=locks,
+        excludes=excludes,
         max_repeating_players=max_repeating_players,
+        no_offense_vs_dst=no_offense_vs_dst,
+        one_rb_per_team=one_rb_per_team,
+        projection_floor=projection_floor,
+        uniques=uniques,
     )
-    return write_lineup_rows([lineup_to_row(lineup, site_key) for lineup in lineups], out_path, site_key)
+    written = write_lineup_rows([lineup_to_row(lineup, site_key) for lineup in lineups], out_path, site_key)
+    _write_build_report(
+        lineups,
+        out_path,
+        stacks=stacks,
+        locks=locks,
+        excludes=excludes,
+        no_offense_vs_dst=no_offense_vs_dst,
+        one_rb_per_team=one_rb_per_team,
+        projection_floor=projection_floor,
+        uniques=uniques,
+        report_path=report_path,
+    )
+    return written
+
+
+def _write_build_report(
+    lineups: list[Any],
+    out_path: str | Path,
+    *,
+    stacks: list[str] | None,
+    locks: list[str] | None,
+    excludes: list[str] | None,
+    no_offense_vs_dst: bool = False,
+    one_rb_per_team: bool = False,
+    projection_floor: float | None = None,
+    uniques: int | None = None,
+    report_path: str | Path | None,
+) -> None:
+    text = format_lineup_report(
+        lineups,
+        stacks=stacks,
+        locks=locks,
+        excludes=excludes,
+        no_offense_vs_dst=no_offense_vs_dst,
+        one_rb_per_team=one_rb_per_team,
+        projection_floor=projection_floor,
+        uniques=uniques,
+    )
+    target = Path(report_path) if report_path is not None else Path(out_path).with_suffix(".report.txt")
+    write_lineup_report(text, target)
+    print(text)
+    print(f"Wrote lineup report -> {target}")
 
 
 def _relax_tiny_slate_limits(optimizer: Any, site_key: str) -> None:
@@ -216,7 +293,33 @@ def main() -> int:
     parser.add_argument("--min-salary", type=int, default=None, help="Min salary cap used (0=disable)")
     parser.add_argument("--max-exposure", type=float, default=0.35, help="Max player exposure 0-1")
     parser.add_argument("--max-repeating-players", type=int, default=7)
-    parser.add_argument("--stack", action="append", default=[], help="Stack rule e.g. qb:2")
+    parser.add_argument("--uniques", type=int, default=None, help="Alias: max_repeating = slate_size - N")
+    parser.add_argument(
+        "--no-offense-vs-dst",
+        action="store_true",
+        default=False,
+        help="Block DST plus an offensive player from the opposing team",
+    )
+    parser.add_argument(
+        "--one-rb-per-team",
+        action="store_true",
+        default=False,
+        help="At most one RB from any single team",
+    )
+    parser.add_argument(
+        "--projection-floor",
+        type=float,
+        default=None,
+        help="Remove unlocked pool players with FPPG below N",
+    )
+    parser.add_argument(
+        "--stack",
+        action="append",
+        default=[],
+        help="Stack rule: qb:3, CIN:3, CIN3-TB2, 3-2, game:5, wr:2, rb+dst",
+    )
+    parser.add_argument("--lock", action="append", default=[], help="Force a player into every lineup")
+    parser.add_argument("--exclude", action="append", default=[], help="Remove a player from the pool")
     args = parser.parse_args()
 
     try:
@@ -228,7 +331,13 @@ def main() -> int:
             min_salary=args.min_salary,
             max_exposure=args.max_exposure,
             stacks=args.stack,
+            locks=args.lock,
+            excludes=args.exclude,
             max_repeating_players=args.max_repeating_players,
+            no_offense_vs_dst=args.no_offense_vs_dst,
+            one_rb_per_team=args.one_rb_per_team,
+            projection_floor=args.projection_floor,
+            uniques=args.uniques,
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

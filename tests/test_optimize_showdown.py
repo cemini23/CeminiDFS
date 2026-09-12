@@ -232,6 +232,57 @@ def test_showdown_headers_and_caps_registered():
     assert SALARY_CAPS["draftkings_showdown"] == 50000
 
 
+def test_showdown_one_rb_per_team(tmp_path: Path):
+    rows = list(_FD_PLAYERS) + [("Kenneth Walker", "RB", "SEA", 7000, 18.0)]
+    source = tmp_path / "fd_source.csv"
+    captain_csv = tmp_path / "fd_captain.csv"
+    _write_players(source, rows)
+    normalize_csv(source, captain_csv, site="fanduel_showdown")
+
+    lineups = generate_lineups(
+        captain_csv,
+        site="fanduel_showdown",
+        count=4,
+        one_rb_per_team=True,
+        max_exposure=1.0,
+    )
+
+    assert lineups
+    for lineup in lineups:
+        sea_rbs = [
+            player
+            for player in lineup.players
+            if player.team == "SEA"
+            and "RB"
+            in {
+                str(item).upper()
+                for item in (getattr(player, "original_positions", None) or player.positions)
+            }
+        ]
+        assert len(sea_rbs) <= 1
+
+
+def test_showdown_lock_and_exclude_apply_to_all_lineups(tmp_path: Path):
+    source = tmp_path / "fd_source.csv"
+    captain_csv = tmp_path / "fd_captain.csv"
+    _write_players(source, _FD_PLAYERS)
+    normalize_csv(source, captain_csv, site="fanduel_showdown")
+
+    lineups = generate_lineups(
+        captain_csv,
+        site="fanduel_showdown",
+        count=2,
+        locks=["Sam Darnold"],
+        excludes=["A.J. Brown"],
+        max_exposure=1.0,
+    )
+
+    for lineup in lineups:
+        names = {player.full_name for player in lineup.players}
+        assert "Sam Darnold" in names
+        assert "A.J. Brown" not in names
+
+
 def test_classic_fanduel_headers_still_nine_columns():
     assert LINEUP_HEADERS["fanduel"] == ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DEF"]
     assert LINEUP_HEADERS["draftkings"] == ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"]

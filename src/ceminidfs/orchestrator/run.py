@@ -198,6 +198,7 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
             quantile=float(rerank_cfg.get("quantile", 0.85)),
             ownership_lookup=ownership_lookup,
             ownership_penalty=ownership_penalty,
+            **_optimize_build_kwargs(config),
         )
         return output_path
 
@@ -206,8 +207,37 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
         out_path=output_path,
         site=str(config.get("site", "fanduel")),
         count=count,
+        **_optimize_build_kwargs(config),
     )
     return output_path
+
+
+def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    stacks = config.get("stacks")
+    if stacks:
+        kwargs["stacks"] = list(stacks)
+    locks = config.get("locks")
+    if locks:
+        kwargs["locks"] = list(locks)
+    excludes = config.get("excludes")
+    if excludes:
+        kwargs["excludes"] = list(excludes)
+    if config.get("max_exposure") is not None:
+        kwargs["max_exposure"] = config.get("max_exposure")
+    if config.get("min_salary") is not None:
+        kwargs["min_salary"] = config.get("min_salary")
+    if config.get("max_repeating_players") is not None:
+        kwargs["max_repeating_players"] = config.get("max_repeating_players")
+    if config.get("uniques") is not None:
+        kwargs["uniques"] = config.get("uniques")
+    if config.get("no_offense_vs_dst"):
+        kwargs["no_offense_vs_dst"] = True
+    if config.get("one_rb_per_team"):
+        kwargs["one_rb_per_team"] = True
+    if config.get("projection_floor") is not None:
+        kwargs["projection_floor"] = config.get("projection_floor")
+    return kwargs
 
 
 def _sim_rerank_enabled(config: Mapping[str, Any]) -> bool:
