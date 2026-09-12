@@ -3,7 +3,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ceminidfs.data.stadiums import STADIUMS, Stadium, get_stadium, is_weather_exposed
+from ceminidfs.data.stadiums import (
+    STADIUMS,
+    Stadium,
+    get_stadium,
+    is_weather_exposed,
+    normalize_team_abbr,
+)
 
 
 EXPECTED_TEAMS = {
@@ -57,6 +63,16 @@ def test_get_stadium_handles_los_angeles_aliases():
     assert get_stadium("LAC").stadium_name == "SoFi Stadium"
 
 
+def test_normalize_team_abbr_maps_salary_aliases():
+    assert normalize_team_abbr("JAC") == "JAX"
+    assert normalize_team_abbr("WSH") == "WAS"
+    assert normalize_team_abbr("ARZ") == "ARI"
+    assert normalize_team_abbr("LA") == "LAR"
+    assert get_stadium("JAC") == STADIUMS["JAX"]
+    assert get_stadium("WSH") == STADIUMS["WAS"]
+    assert get_stadium("ARZ") == STADIUMS["ARI"]
+
+
 def test_is_weather_exposed_by_roof_type():
     assert not is_weather_exposed(
         Stadium("DET", "Ford Field", "Detroit", 42.3400, -83.0456, "dome")
@@ -64,9 +80,16 @@ def test_is_weather_exposed_by_roof_type():
     assert is_weather_exposed(
         Stadium("KC", "GEHA Field at Arrowhead Stadium", "Kansas City", 39.0489, -94.4839, "open")
     )
-    assert is_weather_exposed(
+    assert not is_weather_exposed(
         Stadium("LAR", "SoFi Stadium", "Inglewood", 33.9535, -118.3392, "semi_open")
     )
+    assert not is_weather_exposed(STADIUMS["LAC"])
+    assert not is_weather_exposed(STADIUMS["LAR"])
+    assert is_weather_exposed(STADIUMS["HOU"])
+    assert is_weather_exposed(STADIUMS["IND"])
+    assert STADIUMS["HOU"].roof_type == "retractable"
+    assert STADIUMS["IND"].roof_type == "retractable"
+    assert STADIUMS["LAC"].roof_type == "semi_open"
 
 
 def test_coordinates_are_within_reasonable_us_bounds():

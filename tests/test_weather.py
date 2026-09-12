@@ -62,6 +62,32 @@ def test_build_week_weather_skips_open_meteo_for_dome():
     assert pd.isna(result.loc[0, "wind_speed_10m_mph"])
 
 
+def test_build_week_weather_skips_open_meteo_for_sofi():
+    schedules = pd.DataFrame(
+        [
+            {
+                "game_id": "g_sofi",
+                "season": 2026,
+                "week": 1,
+                "home_team": "LAC",
+                "away_team": "KC",
+                "gameday": "2026-09-13",
+                "gametime": "13:00",
+            }
+        ]
+    )
+
+    def fail_opener(url, timeout=30):
+        raise AssertionError("Open-Meteo should not be called for SoFi (LAC/LAR)")
+
+    result = weather.build_week_weather_from_schedules(schedules, opener=fail_opener)
+
+    assert len(result) == 1
+    assert result.loc[0, "roof_type"] == "semi_open"
+    assert not result.loc[0, "weather_exposed"]
+    assert pd.isna(result.loc[0, "wind_speed_10m_mph"])
+
+
 def test_build_week_weather_fetches_open_meteo_for_open_air_game():
     schedules = pd.DataFrame(
         [

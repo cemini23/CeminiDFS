@@ -8,6 +8,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from ceminidfs.models.defense import build_defense_ratings, defense_multiplier
+from ceminidfs.models.usage import history_week_cutoff
 from ceminidfs.models.stats_settings import (
     DEFAULT_PASS_SHRINKAGE_K,
     DEFAULT_RUSH_SHRINKAGE_K,
@@ -188,15 +189,18 @@ def build_week_stats(
 
     historical_pbp = pbp.copy()
     if not historical_pbp.empty and "season" in historical_pbp.columns:
-        historical_pbp = historical_pbp.loc[
-            pd.to_numeric(historical_pbp["season"], errors="coerce").fillna(season) == season
-        ]
+        season_num = pd.to_numeric(historical_pbp["season"], errors="coerce").fillna(season)
+        keep_season = season_num == season
+        if week <= 1:
+            keep_season = keep_season | (season_num == season - 1)
+        historical_pbp = historical_pbp.loc[keep_season].copy()
 
+    hist_cutoff = history_week_cutoff(historical_pbp, season, week)
     defense_cfg = {}
     if isinstance(config, Mapping):
         defense_cfg = config.get("defense", {})
     alpha = float(defense_cfg.get("alpha", 0.08)) if isinstance(defense_cfg, Mapping) else 0.08
-    defense_ratings = build_defense_ratings(historical_pbp, through_week=week, alpha=alpha)
+    defense_ratings = build_defense_ratings(historical_pbp, through_week=hist_cutoff, alpha=alpha)
 
     stats_settings = StatsSettings.from_config(config)
     efficiency_by_player: dict[str, dict[str, float]] = {}
@@ -207,7 +211,7 @@ def build_week_stats(
             efficiency_by_player[player_id] = player_efficiency_from_pbp(
                 historical_pbp,
                 player_id,
-                through_week=week,
+                through_week=hist_cutoff,
                 position=str(usage_row.get("position", "")),
                 settings=stats_settings,
             )

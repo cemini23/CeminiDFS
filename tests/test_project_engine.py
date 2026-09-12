@@ -18,6 +18,22 @@ Id,Nickname,Position,Team,Opponent,Salary,FPPG,Injury Indicator
 """
 
 
+def test_historical_pbp_week1_keeps_prior_season_and_drops_current_week1():
+    pbp = pd.DataFrame(
+        [
+            {"season": 2025, "week": 1, "play_id": "prior_w1"},
+            {"season": 2025, "week": 18, "play_id": "prior_w18"},
+            {"season": 2026, "week": 1, "play_id": "current_w1"},
+        ]
+    )
+
+    historical = engine._historical_pbp(pbp, season=2026, week=1)
+
+    assert set(historical["season"]) == {2025}
+    assert set(historical["week"]) == {1, 18}
+    assert set(historical["play_id"]) == {"prior_w1", "prior_w18"}
+
+
 def test_build_diy_projections_synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     week_dir = _write_week_cache(tmp_path)
     monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)

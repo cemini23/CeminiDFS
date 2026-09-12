@@ -4,6 +4,7 @@ The coordinates and roof categories follow the greerreNFL/stadiums style of
 venue metadata: one row per home team, with latitude, longitude, and roof type.
 Retractable roofs are treated as weather-exposed until a game-level roof
 decision is available, which keeps Phase 1-D weather adjustments conservative.
+SoFi (LAC/LAR, ``semi_open`` canopy) is not weather-exposed.
 """
 
 from __future__ import annotations
@@ -72,13 +73,21 @@ STADIUMS: dict[str, Stadium] = {
 
 TEAM_ALIASES = {
     "LA": "LAR",
+    "JAC": "JAX",
+    "WSH": "WAS",
+    "ARZ": "ARI",
 }
 
 
+def normalize_team_abbr(team: str) -> str:
+    """Return the nflverse stadium key for a salary or schedule abbreviation."""
+
+    normalized = str(team or "").strip().upper()
+    return TEAM_ALIASES.get(normalized, normalized)
+
+
 def get_stadium(team: str) -> Stadium:
-    normalized = team.strip().upper()
-    normalized = TEAM_ALIASES.get(normalized, normalized)
-    return STADIUMS[normalized]
+    return STADIUMS[normalize_team_abbr(team)]
 
 
 def load_stadiums_df() -> pd.DataFrame:
@@ -92,4 +101,6 @@ def load_stadiums_df() -> pd.DataFrame:
 
 
 def is_weather_exposed(stadium: Stadium) -> bool:
-    return stadium.roof_type != "dome"
+    """True for open and retractable roofs. Domes and SoFi (semi_open) are indoor."""
+
+    return stadium.roof_type in {"open", "retractable"}

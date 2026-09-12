@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.models.usage import (
     build_week_usage,
+    history_week_cutoff,
     identify_qb_starter,
     infer_player_position,
     player_game_stats_from_pbp,
@@ -15,6 +16,18 @@ from ceminidfs.models.usage import (
     weighted_blend,
     wopr,
 )
+
+
+def test_history_week_cutoff_uses_prior_season_on_week_1():
+    frame = pd.DataFrame(
+        {
+            "season": [2025] * 18 + [2026],
+            "week": list(range(1, 19)) + [1],
+        }
+    )
+
+    assert history_week_cutoff(frame, season=2026, week=1) == 19
+    assert history_week_cutoff(frame, season=2026, week=2) == 2
 
 
 def test_weighted_blend():

@@ -267,6 +267,22 @@ def player_game_stats_from_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
     return assign_inferred_positions(result)
 
 
+def history_week_cutoff(frame: pd.DataFrame, season: int, week: int) -> int:
+    """Return the exclusive week cutoff so prior-season games survive week 1."""
+
+    if week > 1 or frame.empty or "week" not in frame.columns:
+        return week
+    weeks = pd.to_numeric(frame["week"], errors="coerce")
+    if "season" in frame.columns:
+        prior = pd.to_numeric(frame["season"], errors="coerce") == season - 1
+        if prior.any():
+            weeks = weeks.loc[prior]
+    max_week = weeks.max()
+    if pd.isna(max_week):
+        return week
+    return int(max_week) + 1
+
+
 def rolling_shares(
     stats: pd.DataFrame,
     team: str,
@@ -338,6 +354,7 @@ def identify_qb_starter(
     *,
     settings: UsageSettings | None = None,
     roster_team: pd.DataFrame | None = None,
+    prefer_season_leader: bool = False,
 ) -> str | None:
     """Return the team's likely starting QB by recent or season pass attempts."""
 
@@ -360,7 +377,7 @@ def identify_qb_starter(
         return frame.loc[frame["player_id"].astype(str).isin(qb_ids)]
 
     prior_week = through_week - 1
-    if prior_week >= 1:
+    if prior_week >= 1 and not prefer_season_leader:
         last_week = _filter_qbs(
             team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") == prior_week]
         )
@@ -383,7 +400,7 @@ def identify_qb_starter(
     two_week = _filter_qbs(
         team_stats.loc[pd.to_numeric(team_stats["week"], errors="coerce") >= through_week - 2]
     )
-    if not two_week.empty:
+    if not two_week.empty and not prefer_season_leader:
         combined = two_week.groupby("player_id", as_index=False)["pass_attempts"].sum()
         combined = combined.sort_values("pass_attempts", ascending=False)
         if (
@@ -579,11 +596,16 @@ def build_week_usage(
         return pd.DataFrame(columns=columns)
 
     stats = player_game_stats_from_pbp(pbp)
-    if "season" in stats.columns:
-        stats = stats.loc[pd.to_numeric(stats["season"], errors="coerce").fillna(season) == season]
-    stats = stats.loc[
-        pd.to_numeric(stats.get("week", pd.Series(dtype=float)), errors="coerce") < week
-    ]
+    if not stats.empty and "week" in stats.columns:
+        week_num = pd.to_numeric(stats["week"], errors="coerce")
+        if "season" in stats.columns:
+            season_num = pd.to_numeric(stats["season"], errors="coerce").fillna(season)
+            current = season_num == season
+            keep_season = current if week > 1 else current | (season_num == season - 1)
+            stats = stats.loc[keep_season & (~current | (week_num < week))].copy()
+        else:
+            stats = stats.loc[week_num < week].copy()
+    hist_cutoff = history_week_cutoff(stats, season, week)
     stats = assign_inferred_positions(stats, season=season, week=week)
 
     excluded_ids = resolve_unavailable_player_ids(season, week, roster=roster, config=config)
@@ -595,7 +617,7 @@ def build_week_usage(
     for _, volume_row in week_volume.iterrows():
         team = str(volume_row["team"])
         team_roster = roster_by_team.get(team)
-        shares = rolling_shares(stats, team=team, through_week=week, settings=settings)
+        shares = rolling_shares(stats, team=team, through_week=hist_cutoff, settings=settings)
         share_records = _projection_pool(team, shares, roster_by_team)
         if excluded_ids:
             share_records = [
@@ -606,14 +628,15 @@ def build_week_usage(
         starter_id = identify_qb_starter(
             stats,
             team=team,
-            through_week=week,
+            through_week=hist_cutoff,
             settings=settings,
             roster_team=team_roster,
+            prefer_season_leader=week <= 1,
         )
         backup_id = _identify_qb_backup(
             stats,
             team=team,
-            through_week=week,
+            through_week=hist_cutoff,
             starter_id=starter_id,
             settings=settings,
             roster_team=team_roster,
@@ -621,7 +644,7 @@ def build_week_usage(
         volume_dict = volume_row.to_dict()
         volume_dict["rb_rush_attempts"] = _rb_rush_pool(volume_dict)
         _assign_rb_committee_shares(share_records, settings=settings)
-        _enrich_qb_player_context(share_records, stats, team=team, through_week=week)
+        _enrich_qb_player_context(share_records, stats, team=team, through_week=hist_cutoff)
 
         for player in share_records:
             player_id = str(player.get("player_id", ""))

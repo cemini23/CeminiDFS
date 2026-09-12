@@ -6,6 +6,8 @@ from typing import Any, Mapping
 import pandas as pd
 
 from ceminidfs.data.fetch import week_cache_dir
+from ceminidfs.data.rosters import load_season_rosters
+from ceminidfs.data.stadiums import normalize_team_abbr
 from ceminidfs.models.coherence_risk import (
     apply_fourth_down_aggressiveness_adjustments,
     apply_pass_protection_penalties,
@@ -20,7 +22,7 @@ from ceminidfs.models.coherence_settings import CoherenceRiskSettings
 from ceminidfs.models.scoring import add_fantasy_points
 from ceminidfs.models.stats import build_week_stats
 from ceminidfs.models.dst import build_week_dst_projections
-from ceminidfs.models.usage import build_week_usage, player_game_stats_from_pbp
+from ceminidfs.models.usage import build_week_usage, history_week_cutoff, player_game_stats_from_pbp
 from ceminidfs.models.volume import build_week_volume
 
 
@@ -67,7 +69,7 @@ def normalize_join_key(name: Any, team: Any, position: Any) -> str:
     return "|".join(
         (
             _normalize_token(name),
-            _normalize_token(team),
+            _normalize_token(normalize_team_abbr(team)),
             _normalize_token(position).upper(),
         )
     )
@@ -132,17 +134,18 @@ def build_diy_projections_from_frames(
     if usage_df.empty:
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
+    hist_cutoff = history_week_cutoff(historical_pbp, season, week)
     if coherence_settings.enabled and coherence_settings.red_zone_playcall.enabled:
         rz_by_team = build_team_red_zone_run_tendency(
             historical_pbp,
-            week,
+            hist_cutoff,
             settings=coherence_settings,
         )
         usage_df = apply_red_zone_usage_adjustments(usage_df, rz_by_team, coherence_settings)
     if coherence_settings.enabled and coherence_settings.fourth_down.enabled:
         aggression_by_team = build_team_fourth_down_aggressiveness(
             historical_pbp,
-            week,
+            hist_cutoff,
             settings=coherence_settings,
         )
         usage_df = apply_fourth_down_aggressiveness_adjustments(
@@ -153,7 +156,7 @@ def build_diy_projections_from_frames(
     if coherence_settings.enabled and coherence_settings.workload.enabled:
         workload_by_player = build_player_workload_index(
             historical_pbp,
-            week,
+            hist_cutoff,
             settings=coherence_settings,
         )
         usage_df = apply_workload_risk_flags(usage_df, workload_by_player, coherence_settings)
@@ -165,7 +168,7 @@ def build_diy_projections_from_frames(
     if coherence_settings.enabled and coherence_settings.pass_protection.enabled:
         stress_by_team = build_team_pass_protection_stress(
             historical_pbp,
-            week,
+            hist_cutoff,
             settings=coherence_settings,
         )
         stats_df = apply_pass_protection_penalties(stats_df, stress_by_team, coherence_settings)
@@ -262,9 +265,19 @@ def _historical_pbp(pbp: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
         return pbp
     frame = pbp.copy()
     if "season" in frame.columns:
-        frame = frame.loc[pd.to_numeric(frame["season"], errors="coerce").fillna(season) == season]
+        season_num = pd.to_numeric(frame["season"], errors="coerce").fillna(season)
+        keep_season = season_num == season
+        if week <= 1:
+            keep_season = keep_season | (season_num == season - 1)
+        frame = frame.loc[keep_season].copy()
+        season_num = pd.to_numeric(frame["season"], errors="coerce").fillna(season)
     if "week" in frame.columns:
-        frame = frame.loc[pd.to_numeric(frame["week"], errors="coerce") < week]
+        week_num = pd.to_numeric(frame["week"], errors="coerce")
+        if "season" in frame.columns:
+            current = season_num == season
+            frame = frame.loc[~current | (week_num < week)].copy()
+        else:
+            frame = frame.loc[week_num < week]
     return frame
 
 
@@ -284,20 +297,13 @@ def _align_roster_to_pbp_ids(
     if roster.empty or pbp.empty:
         return roster
 
-    historical = player_game_stats_from_pbp(pbp)
-    if historical.empty:
-        return roster
-    if "season" in historical.columns:
-        historical = historical.loc[
-            pd.to_numeric(historical["season"], errors="coerce").fillna(season) == season
-        ]
-    if "week" in historical.columns:
-        historical = historical.loc[pd.to_numeric(historical["week"], errors="coerce") < week]
+    historical = player_game_stats_from_pbp(_historical_pbp(pbp, season, week))
     if historical.empty:
         return roster
 
     id_by_exact_key: dict[str, str] = {}
     id_by_name_team: dict[str, str] = {}
+    id_by_abbrev_team: dict[str, str] = {}
     for _, row in historical.sort_values(["week", "game_id"]).iterrows():
         name = row.get("player_name", "")
         team = row.get("team", "")
@@ -307,24 +313,95 @@ def _align_roster_to_pbp_ids(
             continue
         id_by_exact_key[normalize_join_key(name, team, position)] = player_id
         id_by_name_team[_name_team_key(name, team)] = player_id
+        id_by_abbrev_team[_name_team_key(name, team)] = player_id
+
+    roster_by_name_team, roster_by_name = _gsis_lookups_from_weekly_rosters(season, week)
 
     aligned = roster.copy()
     aligned["player_id"] = aligned.apply(
-        lambda row: id_by_exact_key.get(
-            normalize_join_key(
-                row.get("player_name", ""), row.get("team", ""), row.get("position", "")
-            ),
-            id_by_name_team.get(
-                _name_team_key(row.get("player_name", ""), row.get("team", "")), row["player_id"]
-            ),
+        lambda row: _resolve_pbp_player_id(
+            row,
+            id_by_exact_key,
+            id_by_name_team,
+            id_by_abbrev_team,
+            roster_by_name_team,
+            roster_by_name,
         ),
         axis=1,
     )
     return aligned
 
 
+_NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
+
+
+def _resolve_pbp_player_id(
+    row: pd.Series,
+    id_by_exact_key: dict[str, str],
+    id_by_name_team: dict[str, str],
+    id_by_abbrev_team: dict[str, str],
+    roster_by_name_team: dict[str, str],
+    roster_by_name: dict[str, str],
+) -> str:
+    name = row.get("player_name", "")
+    team = row.get("team", "")
+    position = row.get("position", "")
+    fallback = str(row.get("player_id", "") or "")
+    if str(position or "").upper() in {"D", "DEF", "DST"}:
+        return fallback
+    return (
+        id_by_exact_key.get(normalize_join_key(name, team, position))
+        or id_by_name_team.get(_name_team_key(name, team))
+        or roster_by_name_team.get(_name_team_key(name, team))
+        or roster_by_name.get(_normalize_token(name))
+        or id_by_abbrev_team.get(_name_team_key(_abbrev_last_name(name), team))
+        or fallback
+    )
+
+
+def _gsis_lookups_from_weekly_rosters(season: int, week: int) -> tuple[dict[str, str], dict[str, str]]:
+    frames: list[pd.DataFrame] = []
+    seasons = (season, season - 1) if week <= 1 and season > 0 else (season,)
+    for roster_season in seasons:
+        try:
+            frame = load_season_rosters(roster_season)
+        except (ImportError, FileNotFoundError, OSError, AttributeError, ValueError):
+            continue
+        if not frame.empty:
+            frames.append(frame)
+    if not frames:
+        return {}, {}
+
+    rosters = pd.concat(frames, ignore_index=True)
+    if "week" in rosters.columns:
+        rosters = rosters.sort_values(by="week")
+    by_name_team: dict[str, str] = {}
+    ids_by_name: dict[str, set[str]] = {}
+    last_id_by_name: dict[str, str] = {}
+    for _, row in rosters.iterrows():
+        gsis_id = str(row.get("gsis_id") or "").strip()
+        full_name = str(row.get("full_name") or "").strip()
+        team = str(row.get("team") or "").strip()
+        if not gsis_id or not full_name:
+            continue
+        by_name_team[_name_team_key(full_name, team)] = gsis_id
+        name_key = _normalize_token(full_name)
+        ids_by_name.setdefault(name_key, set()).add(gsis_id)
+        last_id_by_name[name_key] = gsis_id
+    by_name = {name: gid for name, gid in last_id_by_name.items() if len(ids_by_name.get(name, ())) == 1}
+    return by_name_team, by_name
+
+
+def _abbrev_last_name(name: Any) -> str:
+    parts = [part for part in str(name or "").replace("'", "").split() if part]
+    parts = [part for part in parts if part.lower().rstrip(".") not in _NAME_SUFFIXES]
+    if len(parts) < 2:
+        return ""
+    return f"{parts[0][0]}.{parts[-1]}"
+
+
 def _name_team_key(name: Any, team: Any) -> str:
-    return "|".join((_normalize_token(name), _normalize_token(team)))
+    return "|".join((_normalize_token(name), _normalize_token(normalize_team_abbr(team))))
 
 
 def _normalize_token(value: Any) -> str:

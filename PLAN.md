@@ -210,14 +210,16 @@ Operational and v3 enhancements — not blockers for live slate use:
 
 **Workspace:** `/Users/claudiobarone/Projects/CeminiDFS`
 
-**State:** Phases 0–5 + BBM extension (through Phase 3 overlay) complete. **203 tests**, CI green on `main` (includes `[bbm]` extra).
+**State:** Phases 0–5 + BBM extension (through Phase 3 overlay) complete. **349 tests** locally (1 skip), K257 showdown on `main`.
+
+**Week 1 (2026):** DIY projections use prior-season PBP and the last prior-season roster week when same-season history is empty. SoFi (LAC/LAR) is indoor — Open-Meteo is skipped. Retractable HOU/IND stay weather-exposed until a roof decision exists. Operator still supplies a fresh Sunday-afternoon FanDuel salary CSV. Do not commit `data/slates/`.
 
 **Profiles:** Base `config/nfl_dfs.yaml` (conservative, backtest/research); GPP profile extends with `simulate`, `sim_rerank`, `ownership` enabled via `--profile gpp` CLI flag.
 
 **Typical live workflow:**
 
 1. `ceminidfs fetch --season YYYY --week N`
-2. Export FanDuel salary CSV manually
+2. Export FanDuel salary CSV manually (fresh Sunday-afternoon list for Week 1)
 3. `ceminidfs run --season YYYY --week N --salary FILE --stages all`
 4. Optional: `--sim-rerank`, enable simulate/ownership in yaml
 5. Upload lineups; use `late-swap` after early locks

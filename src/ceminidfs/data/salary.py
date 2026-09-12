@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ceminidfs.data.stadiums import normalize_team_abbr
 from ceminidfs.export.canonical import write_canonical_csv
 from ceminidfs.export.normalize import normalize_site
 
@@ -95,8 +96,8 @@ def _parse_fanduel_row(row: Mapping[str, str], season: int, week: int) -> dict[s
         last = _first(row, "Last Name", "LastName", "last_name")
         name = " ".join(part for part in (first, last) if part).strip()
 
-    team = _first(row, "Team", "TEAM", "team", "TeamAbbrev")
-    opp = _first(row, "Opponent", "OPP", "opponent")
+    team = normalize_team_abbr(_first(row, "Team", "TEAM", "team", "TeamAbbrev"))
+    opp = normalize_team_abbr(_first(row, "Opponent", "OPP", "opponent"))
     game = _first(row, "Game", "game", "Game Info")
     if not game and team and opp:
         game = f"{team}@{opp}"

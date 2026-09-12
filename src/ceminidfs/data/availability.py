@@ -15,6 +15,10 @@ UNAVAILABLE_STATUSES = frozenset(
         "IR",
         "PUP",
         "NFI",
+        "NA",
+        "EXEMPT",
+        "COMMISSIONER EXEMPT",
+        "SUSPENDED",
         "DOUBTFUL",
         "D",
         "DOUBTFUL TO PLAY",
@@ -40,9 +44,13 @@ def normalize_injury_status(value: Any) -> str:
         return ""
     if token in UNAVAILABLE_STATUSES:
         return token
-    for prefix in ("OUT", "DOUBTFUL", "IR", "PUP"):
+    for prefix in ("OUT", "DOUBTFUL", "IR", "PUP", "EXEMPT", "SUSPENDED"):
         if token.startswith(prefix):
             return prefix
+    if "EXEMPT" in token:
+        return "EXEMPT"
+    if "SUSPENDED" in token:
+        return "SUSPENDED"
     return token
 
 
@@ -52,9 +60,16 @@ def is_unavailable_status(status: Any) -> bool:
     token = normalize_injury_status(status)
     if not token:
         return False
-    if token in {"O", "OUT", "IR", "PUP", "NFI", "D"}:
+    if token in {"O", "OUT", "IR", "PUP", "NFI", "NA", "D", "EXEMPT", "SUSPENDED"}:
         return True
-    return token.startswith("DOUBTFUL")
+    if token in UNAVAILABLE_STATUSES:
+        return True
+    return (
+        token.startswith("DOUBTFUL")
+        or token.startswith("EXEMPT")
+        or token.startswith("SUSPENDED")
+        or "EXEMPT" in token
+    )
 
 
 def unavailable_player_ids_from_salary_rows(rows: list[Mapping[str, Any]]) -> set[str]:

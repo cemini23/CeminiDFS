@@ -19,6 +19,13 @@ def test_is_unavailable_status():
     assert is_unavailable_status("O")
     assert is_unavailable_status("Out")
     assert is_unavailable_status("Doubtful")
+    assert is_unavailable_status("IR")
+    assert is_unavailable_status("PUP")
+    assert is_unavailable_status("NFI")
+    assert is_unavailable_status("NA")
+    assert is_unavailable_status("Exempt")
+    assert is_unavailable_status("Commissioner Exempt")
+    assert is_unavailable_status("Suspended")
     assert not is_unavailable_status("Q")
     assert not is_unavailable_status("")
 

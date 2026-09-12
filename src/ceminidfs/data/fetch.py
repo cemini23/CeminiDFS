@@ -36,7 +36,12 @@ def _fetch_cached(kind: str, season: int, loader_names: Iterable[str]) -> pd.Dat
         return pd.read_parquet(cache_path)
 
     nflreadpy = _require_nflreadpy()
-    data = _call_loader(nflreadpy, loader_names, season)
+    try:
+        data = _call_loader(nflreadpy, loader_names, season)
+    except ValueError as exc:
+        if "Season must be between" not in str(exc):
+            raise
+        return pd.DataFrame()
     frame = _to_pandas(data)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +135,11 @@ def fetch_week_datasets(
     for kind, fetcher in fetchers.items():
         frame = fetcher(season)
         scope = "season"
+        # Week 1 has no same-season prior weeks; keep last season for DIY usage.
+        if kind == "pbp" and week <= 1 and season > 0:
+            prior = fetcher(season - 1)
+            if not prior.empty:
+                frame = pd.concat([prior, frame], ignore_index=True)
         # PBP must retain prior weeks for DIY walk-forward projection cutoff.
         if kind != "pbp" and week > 0 and _week_column(frame) is not None:
             frame = filter_by_week(frame, week)

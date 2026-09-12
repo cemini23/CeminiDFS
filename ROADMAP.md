@@ -46,6 +46,8 @@
 | Sweep 07-11 | Research triage — zero adopts (DUP of 07-10) | `briefs/2026-07-11_research-triage-plan.md` |
 | K163 | Optional maths-cs-ai-compendium local knowledge MCP (agent assist only; no runtime/`src/` dep) | `briefs/2026-07-14_k163-maths-compendium-mcp-extract.md` |
 | K159 | Pipeline cost discipline — fable-advisor + implementer lane (process/docs only) | `briefs/2026-07-11_k159-fable-advisor-pipeline-cost-steal.md` |
+| K175 | FiveThirtyEight tidy CSVs — extract-only backtest fixtures, **not** a live feed | `briefs/2026-07-20_k175-fivethirtyeight-data-extract.md` |
+| Week 1 readiness | Prior-season PBP/roster fallback, FD team aliases, SoFi indoor skip | `briefs/handoffs/2026-09-11_week1-pipeline-readiness.md` |
 
 ## K159 — pipeline cost discipline (2026-07-19)
 

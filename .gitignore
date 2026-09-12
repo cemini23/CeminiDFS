@@ -32,6 +32,7 @@ htmlcov/
 
 # Local salary drops (manual FD/DK exports — never commit)
 salaries/
+data/slates/
 research/
 
 # BBM runtime data (ledger, registry snapshots)

@@ -31,7 +31,12 @@ def load_season_rosters(season: int) -> pd.DataFrame:
         "load_rosters",
         "import_rosters",
     )
-    data = _call_loader(nflreadpy, loader_names, season)
+    try:
+        data = _call_loader(nflreadpy, loader_names, season)
+    except ValueError as exc:
+        if "Season must be between" not in str(exc):
+            raise
+        return pd.DataFrame()
     frame = _to_pandas(data)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(cache_path, index=False)
@@ -43,17 +48,29 @@ def position_lookup_for_week(season: int, week: int) -> dict[str, str]:
 
     try:
         rosters = load_season_rosters(season)
-    except (ImportError, FileNotFoundError, OSError, AttributeError):
-        return {}
+    except (ImportError, FileNotFoundError, OSError, AttributeError, ValueError):
+        rosters = pd.DataFrame()
+    roster_season = season
+    if rosters.empty and week <= 1 and season > 0:
+        try:
+            rosters = load_season_rosters(season - 1)
+            roster_season = season - 1
+        except (ImportError, FileNotFoundError, OSError, AttributeError, ValueError):
+            return {}
     if rosters.empty:
         return {}
 
     frame = rosters.copy()
     if "season" in frame.columns:
-        frame = frame.loc[pd.to_numeric(frame["season"], errors="coerce") == season]
+        frame = frame.loc[pd.to_numeric(frame["season"], errors="coerce") == roster_season]
     week_col = _first_col(frame, WEEK_COLUMNS)
     if week_col:
-        frame = frame.loc[pd.to_numeric(frame[week_col], errors="coerce") == week]
+        weeks = pd.to_numeric(frame[week_col], errors="coerce")
+        if roster_season == season:
+            frame = frame.loc[weeks == week]
+        else:
+            last_week = weeks.max()
+            frame = frame.loc[weeks == last_week]
     if frame.empty:
         return {}
 

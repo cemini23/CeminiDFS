@@ -54,6 +54,23 @@ def test_parse_fanduel_salary_row():
     assert parsed["injury_status"] == ""
 
 
+def test_parse_fanduel_salary_row_normalizes_team_aliases():
+    aliases = (("JAC", "JAX"), ("WSH", "WAS"), ("ARZ", "ARI"), ("LA", "LAR"))
+    for raw, expected in aliases:
+        row = {
+            "Id": "1",
+            "Nickname": "Player One",
+            "Position": "WR",
+            "Team": raw,
+            "Opponent": "KC",
+            "Salary": "5000",
+        }
+        parsed = parse_salary_row(row, "fd", 2026, 1)
+        assert parsed["team"] == expected
+        assert parsed["opp"] == "KC"
+        assert parsed["game"] == f"{expected}@KC"
+
+
 def test_parse_draftkings_salary_row():
     row = {
         "Position": "QB",
