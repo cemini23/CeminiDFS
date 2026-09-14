@@ -98,6 +98,7 @@ def test_lineup_stack_badges_qb_and_bring_back():
     assert "QB+2 CIN" in badges
     assert "BRING-BACK TB x2" in badges
     assert "GAME CIN-TB 3-2" in badges
+    assert "CHALK-QB-WR-WR" in badges
 
 
 def test_exposure_and_report_text():

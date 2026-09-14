@@ -1,0 +1,15 @@
+lineup_id,players_csv,total_fd,entry_fee,won,cashed,entries,csv_match,screenshot_keys
+L01,Josh Allen|D'Andre Swift|Derrick Henry|Khalil Shakir|Luther Burden III|Xavier Hutchinson|Dalton Kincaid|James Cook|Jacksonville Jaguars,169.96,5.00,9.00,Y,1,CSV3,"a,b"
+L02,Daniel Jones|Derrick Henry|Jahmyr Gibbs|Alec Pierce|Josh Downs|Ladd McConkey|Colston Loveland|D'Andre Swift|Philadelphia Eagles,149.34,5.00,7.50,Y,1,CSV6~ (Odunze→McConkey; History FLEX=Swift vs CSV Monangai),d
+L03,Joe Burrow|Bijan Robinson|Brian Robinson Jr.|Chris Olave|Malik Washington|Tetairoa McMillan|Dalton Kincaid|Jonathan Taylor|Arizona Cardinals,148.66,5.05,7.60,Y,2,NOT IN CSV,e
+L04,Josh Allen|D'Andre Swift|James Cook|Amon-Ra St. Brown|Khalil Shakir|Xavier Hutchinson|Dalton Kincaid|Jo'quavious Marks|Philadelphia Eagles,143.36,5.00,0.00,N,1,CSV1,e
+L05,Josh Allen|D'Andre Swift|James Cook|Ja'Marr Chase|Khalil Shakir|Xavier Hutchinson|Dalton Kincaid|Jo'quavious Marks|Pittsburgh Steelers,136.86,5.00,0.00,N,1,CSV2,d
+L06,Daniel Jones|Ashton Jeanty|Bijan Robinson|Alec Pierce|Amon-Ra St. Brown|Josh Downs|Dawson Knox|Jonathan Taylor|Tennessee Titans,131.34,5.00,0.00,N,1,CSV8,b
+L07,Joe Burrow|Ashton Jeanty|Devon Achane|Andrei Iosivas|Chris Olave|Tee Higgins|Dawson Knox|Jonathan Taylor|New York Jets,126.06,5.00,0.00,N,1,CSV10,c
+L08,Justin Herbert|MarShawn Lloyd|Omarion Hampton|Devaughn Vele|Ladd McConkey|Ja'Marr Chase|Tyler Warren|Jahmyr Gibbs|Jacksonville Jaguars,117.46,5.00,0.00,N,1,NOT IN CSV,d
+L09,Daniel Jones|Devon Achane|Jahmyr Gibbs|Alec Pierce|Josh Downs|Ladd McConkey|Dawson Knox|Jonathan Taylor|New York Jets,116.04,5.00,0.00,N,1,CSV7 (Odunze→McConkey),"b,d"
+L10,Jacoby Brissett|Brian Robinson Jr.|Chase Brown|Chris Olave|Michael Wilson|Tetairoa McMillan|Trey McBride|Devon Achane|New York Jets,115.78,5.00,0.00,N,1,CSV9,"a,b"
+L11,Joe Burrow|D'Andre Swift|James Cook|Amon-Ra St. Brown|Tetairoa McMillan|Xavier Hutchinson|Colston Loveland|Jo'quavious Marks|Jacksonville Jaguars,112.36,5.05,0.00,N,2,NOT IN CSV,c
+L12,Baker Mayfield|Travis Etienne|MarShawn Lloyd|Emeka Egbuka|Tetairoa McMillan|Tee Higgins|Tucker Kraft|Jahmyr Gibbs|Pittsburgh Steelers,110.94,5.00,0.00,N,1,NOT IN CSV,c
+L13,Joe Burrow|Derrick Henry|Kyle Monangai|Ja'Marr Chase|Luther Burden III|Tee Higgins|Colston Loveland|Jo'quavious Marks|Tennessee Titans,96.46,5.00,0.00,N,1,CSV4,a
+L14,Joe Burrow|Brian Robinson Jr.|Jahmyr Gibbs|Ja'Marr Chase|Luther Burden III|Tee Higgins|Colston Loveland|Kyle Monangai|Tennessee Titans,91.36,5.00,0.00,N,1,CSV5,a

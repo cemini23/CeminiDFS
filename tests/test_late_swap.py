@@ -10,6 +10,7 @@ pytest.importorskip("pydfs_lineup_optimizer")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.export.late_swap import (
+    _load_simple_lineups,
     _normalize_teams,
     _optimize_existing_lineups,
     _players_on_locked_teams,
@@ -236,6 +237,40 @@ def test_late_swap_two_lineups_two_lock_teams_keep_locked_names(tmp_path: Path):
     rows = list(csv.reader(out_path.open(encoding="utf-8")))
     assert set(rows[1]) == set(first)
     assert set(rows[2]) == set(second)
+
+
+def test_simple_lineup_loader_uses_csv_reader_not_dict_reader(tmp_path: Path):
+    header = LINEUP_HEADERS["fanduel"]
+    names = [
+        "Patrick Mahomes",
+        "Isiah Pacheco",
+        "Ray Davis",
+        "Rashee Rice",
+        "Mack Hollins",
+        "Marquez Valdes-Scantling",
+        "Travis Kelce",
+        "Noah Gray",
+        "Kansas City Chiefs",
+    ]
+    path = tmp_path / "lineups.csv"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerow(names)
+
+    with path.open(encoding="utf-8") as f:
+        dict_row = next(csv.DictReader(f))
+    assert list(dict_row.keys()).count("RB") == 1
+
+    players_path = _normalized_players(tmp_path)
+    from pydfs_lineup_optimizer import Site, Sport, get_optimizer
+
+    optimizer = get_optimizer(Site.FANDUEL, Sport.FOOTBALL)
+    optimizer.load_players_from_csv(str(players_path))
+    loaded = _load_simple_lineups(path, optimizer.player_pool.all_players, "fanduel")
+    loaded_names = [player.full_name for player in loaded[0].players]
+    assert "Isiah Pacheco" in loaded_names
+    assert "Ray Davis" in loaded_names
 
 
 def test_optimize_existing_lineups_keeps_original_when_one_fails():

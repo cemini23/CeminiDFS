@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import math
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from .lineup_report import format_lineup_report, write_lineup_report
-from .optimize import generate_lineups, lineup_to_row, write_lineup_rows
+from .optimize import generate_lineups, select_with_exposure_caps, write_lineup_artifacts
 
 NAME_KEYS = (
     "name",
@@ -146,6 +145,7 @@ def rerank_lineups(
     ownership_lookup: Mapping[str, float] | None = None,
     ownership_penalty: float = 0.0,
     max_exposure: float | None = None,
+    max_team_exposure: float | None = None,
 ) -> list[Any]:
     """Score candidates by simulated tail quantile and return the top unique lineups."""
 
@@ -179,29 +179,30 @@ def rerank_lineups(
 
     ranked.sort(reverse=True)
     ordered = [lineup for _, _, _, lineup in ranked]
-    if max_exposure is None:
+    if max_exposure is None and max_team_exposure is None:
         return ordered[:final_count]
-    return _select_with_exposure_cap(ordered, final_count, max_exposure)
+    return _select_with_exposure_cap(
+        ordered,
+        final_count,
+        max_exposure,
+        max_team_exposure=max_team_exposure,
+    )
 
 
-def _select_with_exposure_cap(lineups: list[Any], final_count: int, max_exposure: float) -> list[Any]:
-    """Greedily keep lineups that do not push any player above max_exposure of final_count."""
+def _select_with_exposure_cap(
+    lineups: list[Any],
+    final_count: int,
+    max_exposure: float | None,
+    max_team_exposure: float | None = None,
+) -> list[Any]:
+    """Greedily keep lineups that do not push player or team share above the caps."""
 
-    cap = math.floor(float(max_exposure) * final_count + 1e-9)
-    if max_exposure > 0:
-        cap = max(cap, 1)
-    selected: list[Any] = []
-    counts: dict[str, int] = {}
-    for lineup in lineups:
-        names = [_normalize_name(name) for name in lineup_player_names(lineup) if str(name).strip()]
-        if any(counts.get(name, 0) + 1 > cap for name in names):
-            continue
-        selected.append(lineup)
-        for name in names:
-            counts[name] = counts.get(name, 0) + 1
-        if len(selected) >= final_count:
-            break
-    return selected
+    return select_with_exposure_caps(
+        lineups,
+        final_count,
+        max_exposure=max_exposure,
+        max_team_exposure=max_team_exposure,
+    )
 
 
 def optimize_with_sim_rerank(
@@ -220,6 +221,7 @@ def optimize_with_sim_rerank(
 ) -> int:
     """Generate candidate lineups, rerank by simulated score, and write final CSV."""
 
+    team_exposure = kwargs.pop("max_team_exposure", None)
     candidate_lineups = generate_lineups(csv_path, site=site, count=candidates, **kwargs)
     exposure = kwargs["max_exposure"] if "max_exposure" in kwargs else 0.35
     selected = rerank_lineups(
@@ -231,9 +233,9 @@ def optimize_with_sim_rerank(
         ownership_lookup=ownership_lookup,
         ownership_penalty=ownership_penalty,
         max_exposure=exposure,
+        max_team_exposure=team_exposure,
     )
-    rows = [lineup_to_row(lineup, site=site) for lineup in selected]
-    written = write_lineup_rows(rows, out_path, site=site)
+    written = write_lineup_artifacts(selected, out_path, site=site)
     stacks = kwargs.get("stacks")
     locks = kwargs.get("locks")
     excludes = kwargs.get("excludes")
@@ -246,6 +248,7 @@ def optimize_with_sim_rerank(
         one_rb_per_team=bool(kwargs.get("one_rb_per_team")),
         projection_floor=kwargs.get("projection_floor"),
         uniques=kwargs.get("uniques"),
+        max_team_exposure=team_exposure,
     )
     write_lineup_report(report, Path(out_path).with_suffix(".report.txt"))
     print(report)

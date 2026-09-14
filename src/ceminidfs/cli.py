@@ -654,6 +654,7 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
         locks=overrides.get("locks"),
         excludes=overrides.get("excludes"),
         max_exposure=overrides.get("max_exposure"),
+        max_team_exposure=overrides.get("max_team_exposure"),
         no_offense_vs_dst=bool(overrides.get("no_offense_vs_dst")),
         one_rb_per_team=bool(overrides.get("one_rb_per_team")),
         projection_floor=overrides.get("projection_floor"),
@@ -1058,6 +1059,12 @@ def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--exclude", action="append", default=[], help="Remove a player from the pool")
     parser.add_argument("--max-exposure", type=float, default=None, help="Max player exposure 0-1")
     parser.add_argument(
+        "--max-team-exposure",
+        type=float,
+        default=None,
+        help="Max share of lineups that may include any one team (0-1; default off)",
+    )
+    parser.add_argument(
         "--max-repeating-players",
         type=int,
         default=None,
@@ -1122,6 +1129,8 @@ def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["excludes"] = list(args.exclude)
     if getattr(args, "max_exposure", None) is not None:
         overrides["max_exposure"] = args.max_exposure
+    if getattr(args, "max_team_exposure", None) is not None:
+        overrides["max_team_exposure"] = args.max_team_exposure
     if getattr(args, "max_repeating_players", None) is not None:
         overrides["max_repeating_players"] = args.max_repeating_players
     if getattr(args, "uniques", None) is not None:

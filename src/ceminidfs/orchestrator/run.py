@@ -95,6 +95,13 @@ def run_pipeline(
                 players_csv=normalized_csv,
             )
             manifest.record_artifact("lineups_csv", lineups_csv)
+            from ceminidfs.export.optimize import fanduel_artifact_paths
+
+            upload_path, ids_path = fanduel_artifact_paths(lineups_csv)
+            if upload_path.is_file():
+                manifest.record_artifact("lineups_fanduel_upload_csv", upload_path)
+            if ids_path.is_file():
+                manifest.record_artifact("lineups_fanduel_ids_csv", ids_path)
             projection_mode = str(cfg.get("projection_mode", "auto")).lower()
             manifest.input_artifacts.update(
                 {
@@ -226,6 +233,8 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["excludes"] = list(excludes)
     if config.get("max_exposure") is not None:
         kwargs["max_exposure"] = config.get("max_exposure")
+    if config.get("max_team_exposure") is not None:
+        kwargs["max_team_exposure"] = config.get("max_team_exposure")
     if config.get("min_salary") is not None:
         kwargs["min_salary"] = config.get("min_salary")
     if config.get("max_repeating_players") is not None:

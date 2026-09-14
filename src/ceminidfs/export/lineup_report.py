@@ -6,7 +6,8 @@ from collections import Counter
 from typing import Any, Iterable
 
 DST_POSITIONS = frozenset({"D", "DEF", "DST"})
-
+QUESTIONABLE_TOKENS = frozenset({"Q", "QUESTIONABLE"})
+DEFAULT_TEAM_EXPOSURE_WARN = 0.5
 
 def lineup_players(lineup: Any) -> list[Any]:
     players = getattr(lineup, "players", None)
@@ -83,6 +84,15 @@ def lineup_stack_badges(lineup: Any) -> list[str]:
                 left = team_counts.get(home, 0)
                 right = team_counts.get(away, 0)
                 badges.append(f"GAME {home}-{away} {left}-{right}")
+        same_team_wrs = [
+            player
+            for player in players
+            if player is not qb
+            and player_team(player) == qb_team
+            and "WR" in player_positions(player)
+        ]
+        if len(same_team_wrs) >= 2:
+            badges.append("CHALK-QB-WR-WR")
 
     for team, count in team_counts.most_common():
         if count >= 2 and all(team not in badge for badge in badges):
@@ -121,6 +131,35 @@ def team_exposure_rows(lineups: Iterable[Any]) -> list[tuple[str, int, float]]:
     return rows
 
 
+def player_is_questionable(player: Any) -> bool:
+    """True when the player carries a Questionable tag (or pydfs is_injured)."""
+
+    for attr in ("injury_indicator", "injury_status", "injury"):
+        token = str(getattr(player, attr, "") or "").strip().upper()
+        if token in QUESTIONABLE_TOKENS:
+            return True
+        if token:
+            return False
+    return bool(getattr(player, "is_injured", False))
+
+
+def questionable_exposure_rows(lineups: Iterable[Any]) -> list[tuple[str, int]]:
+    """Return (name, lineup_count) for rostered Questionable players."""
+
+    pool = list(lineups)
+    counts: Counter[str] = Counter()
+    for lineup in pool:
+        names = {
+            player_name(player)
+            for player in lineup_players(lineup)
+            if player_name(player) and player_is_questionable(player)
+        }
+        counts.update(names)
+    rows = [(name, count) for name, count in counts.items()]
+    rows.sort(key=lambda row: (-row[1], row[0]))
+    return rows
+
+
 def format_lineup_report(
     lineups: Iterable[Any],
     *,
@@ -131,6 +170,7 @@ def format_lineup_report(
     one_rb_per_team: bool = False,
     projection_floor: float | None = None,
     uniques: int | None = None,
+    max_team_exposure: float | None = None,
     preview: int = 8,
 ) -> str:
     """Plain-text report for the operator before FanDuel submit."""
@@ -151,15 +191,19 @@ def format_lineup_report(
         build_flags.append(f"projection-floor={projection_floor}")
     if uniques is not None:
         build_flags.append(f"uniques={uniques}")
+    if max_team_exposure is not None:
+        build_flags.append(f"max-team-exposure={max_team_exposure}")
     if build_flags:
         lines.append(f"Build: {', '.join(build_flags)}")
+    shown = len(pool) if len(pool) <= 20 else min(preview, len(pool))
+    heading = f"All {shown} lineups" if len(pool) <= 20 else f"First {shown} lineups"
     lines.extend(
         [
             "",
-            f"First {min(preview, len(pool))} lineups",
+            heading,
         ]
     )
-    for index, lineup in enumerate(pool[:preview], start=1):
+    for index, lineup in enumerate(pool[:shown], start=1):
         badges = lineup_stack_badges(lineup)
         names = ", ".join(player_name(player) for player in lineup_players(lineup) if player_name(player))
         salary = getattr(lineup, "salary_costs", None)
@@ -179,9 +223,22 @@ def format_lineup_report(
         lines.append(f"  {share:5.0%}  {count:3d}  {name}")
 
     lines.extend(["", "Team exposure (lineups that used the team)"])
+    threshold = DEFAULT_TEAM_EXPOSURE_WARN if max_team_exposure is None else max_team_exposure
     for team, count, share in team_exposure_rows(pool):
         lines.append(f"  {share:5.0%}  {count:3d}  {team}")
-    lines.append("")
+        if share > threshold:
+            lines.append(
+                f"WARNING: {team} in {share:.0%} of lineups (above {threshold:.0%})"
+            )
+
+    q_rows = questionable_exposure_rows(pool)
+    if not q_rows:
+        lines.extend(["", "Questionable in book: none", ""])
+    else:
+        lines.extend(["", "Questionable in book"])
+        for name, count in q_rows:
+            lines.append(f"  {count:3d}  {name}")
+        lines.append("")
     return "\n".join(lines)
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,12 +19,13 @@ from ceminidfs.data.stadiums import normalize_team_abbr
 from .normalize import normalize_site
 from .optimize import LINEUP_HEADERS
 from .optimize import (
-    _lineup_row,
     _load_pydfs,
     _relax_tiny_slate_limits,
     _site_enum,
     assert_locked_players_eligible,
     keep_injury_tagged_players,
+    select_with_exposure_caps,
+    write_lineup_artifacts,
 )
 from .stack_rules import (
     apply_locks_and_excludes,
@@ -34,6 +36,9 @@ from .stack_rules import (
     resolve_pool_player,
     resolve_repeating_players,
 )
+
+_CELL_ID_SUFFIX = re.compile(r"\s*\(([^)]+)\)\s*$")
+_ID_ONLY = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
 
 
 def _normalize_team(team: str) -> str:
@@ -66,6 +71,7 @@ def late_swap_lineups(
     projection_floor: float | None = None,
     uniques: int | None = None,
     max_repeating_players: int | None = None,
+    max_team_exposure: float | None = None,
 ) -> int:
     """Late-swap existing lineups and return the number written.
 
@@ -135,15 +141,14 @@ def late_swap_lineups(
     if not swapped:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and locked teams")
 
-    header = LINEUP_HEADERS[site_key]
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    with out_file.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        for lineup in swapped:
-            writer.writerow(_lineup_row(lineup.players, header))
+    if max_team_exposure is not None:
+        swapped = select_with_exposure_caps(
+            swapped,
+            target_count,
+            max_team_exposure=max_team_exposure,
+        )
 
-    return len(swapped)
+    return write_lineup_artifacts(swapped, out_file, site_key)
 
 
 def _warn_unmatched_lock_teams(players: list[Any], locked_teams: set[str]) -> None:
@@ -281,6 +286,11 @@ def _load_simple_lineups(lineups_file: Path, players: list[Any], site_key: str) 
 
     header = LINEUP_HEADERS[site_key]
     players_by_name = {_normalize_name(player.full_name): player for player in players}
+    players_by_id: dict[str, Any] = {}
+    for player in players:
+        player_id = str(getattr(player, "id", "") or "").strip()
+        if player_id and player_id not in players_by_id:
+            players_by_id[player_id] = player
     lineups: list[Any] = []
 
     with lineups_file.open(newline="", encoding="utf-8-sig") as f:
@@ -301,7 +311,7 @@ def _load_simple_lineups(lineups_file: Path, players: list[Any], site_key: str) 
                 clean_name = name.strip()
                 if not clean_name:
                     continue
-                player = players_by_name.get(_normalize_name(clean_name))
+                player = _resolve_lineup_cell(clean_name, players_by_name, players_by_id)
                 if player is None:
                     raise ValueError(f"Lineup player not found in players pool: {clean_name}")
                 lineup_players.append(LineupPlayer(player, position))
@@ -314,8 +324,34 @@ def _load_simple_lineups(lineups_file: Path, players: list[Any], site_key: str) 
     return lineups
 
 
+def _parse_lineup_cell(cell: str) -> tuple[str, str]:
+    """Return (name, player_id) from name-only, ``Name (id)``, or id-only cells."""
+
+    text = cell.strip()
+    match = _CELL_ID_SUFFIX.search(text)
+    if match:
+        return text[: match.start()].strip(), match.group(1).strip()
+    if _ID_ONLY.fullmatch(text):
+        return "", text
+    return text, ""
+
+
+def _resolve_lineup_cell(
+    cell: str,
+    players_by_name: dict[str, Any],
+    players_by_id: dict[str, Any],
+) -> Any | None:
+    name, player_id = _parse_lineup_cell(cell)
+    if player_id and player_id in players_by_id:
+        return players_by_id[player_id]
+    if name:
+        return players_by_name.get(_normalize_name(name))
+    return None
+
+
 def _normalize_name(name: str) -> str:
-    return " ".join(name.lower().split())
+    stripped = _CELL_ID_SUFFIX.sub("", name).strip()
+    return " ".join(stripped.lower().split())
 
 
 def main() -> int:
@@ -330,6 +366,12 @@ def main() -> int:
     parser.add_argument("--lock", action="append", default=[], help="Force a player into every lineup")
     parser.add_argument("--exclude", action="append", default=[], help="Remove an unlocked player from the swap pool")
     parser.add_argument("--max-exposure", type=float, default=None, help="Max player exposure 0-1")
+    parser.add_argument(
+        "--max-team-exposure",
+        type=float,
+        default=None,
+        help="Max share of lineups that may include any one team (0-1; default off)",
+    )
     parser.add_argument("--max-repeating-players", type=int, default=None)
     parser.add_argument("--uniques", type=int, default=None)
     parser.add_argument("--no-offense-vs-dst", action="store_true", default=False)
@@ -359,6 +401,7 @@ def main() -> int:
             projection_floor=args.projection_floor,
             uniques=args.uniques,
             max_repeating_players=args.max_repeating_players,
+            max_team_exposure=args.max_team_exposure,
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

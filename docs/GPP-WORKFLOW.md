@@ -61,11 +61,28 @@ ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp 
 
 Config keys on `ceminidfs run`: `no_offense_vs_dst`, `one_rb_per_team`, `projection_floor`, `uniques`.
 
+Optional `--max-team-exposure 0.4` caps how many lineups may include any one team.
+If the flag is unset, the report still warns when a team is in more than 50% of lineups.
+
 The profile deep-merges `config/nfl_dfs_gpp.yaml` over the base config and enables:
 
 - `simulate.enabled: true` with the `copula` method.
 - `sim_rerank.enabled: true` with 500 candidates, 150 final lineups, and p85 scoring.
 - `ownership.enabled: true` with heuristic ownership unless a calibration path is supplied.
+
+## Upload
+
+`optimize` and `late-swap` write three files next to `--out` (example: `lineups.csv`):
+
+1. `lineups.csv` — name-only, for human review. Do **not** paste this into FanDuel.
+2. `lineups_fanduel_upload.csv` — cells are `Full Name (id)`, e.g. `Josh Allen (133104-62239)`.
+3. `lineups_fanduel_ids.csv` — ID-only cells, e.g. `133104-62239`.
+
+**Upload** `lineups_fanduel_upload.csv` (or paste the ID file). Never upload name-only `lineups.csv`.
+
+Operator pastes the ID file and submits. Agent does not Enter.
+
+Do not reuse last week’s contest IDs. Use this week’s FanDuel player-list export.
 
 ## Ownership Calibration
 

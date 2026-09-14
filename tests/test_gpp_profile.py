@@ -197,6 +197,56 @@ def test_optimize_and_run_accept_min_salary_and_force_and_research_csv(tmp_path:
     assert fetch.force is True
 
 
+def test_optimize_run_late_swap_accept_max_team_exposure():
+    from ceminidfs.cli import _optimizer_build_overrides
+
+    parser = build_parser()
+    optimize = parser.parse_args(
+        [
+            "optimize",
+            "--csv",
+            "players.csv",
+            "--out",
+            "lineups.csv",
+            "--max-team-exposure",
+            "0.4",
+        ]
+    )
+    run = parser.parse_args(
+        [
+            "run",
+            "--season",
+            "2026",
+            "--week",
+            "1",
+            "--salary",
+            "slate.csv",
+            "--max-team-exposure",
+            "0.4",
+        ]
+    )
+    late_swap = parser.parse_args(
+        [
+            "late-swap",
+            "--lineups",
+            "lineups.csv",
+            "--players",
+            "players.csv",
+            "--lock-team",
+            "KC",
+            "--max-team-exposure",
+            "0.4",
+        ]
+    )
+
+    assert optimize.max_team_exposure == pytest.approx(0.4)
+    assert run.max_team_exposure == pytest.approx(0.4)
+    assert late_swap.max_team_exposure == pytest.approx(0.4)
+    assert _optimizer_build_overrides(optimize)["max_team_exposure"] == pytest.approx(0.4)
+    assert _optimizer_build_overrides(run)["max_team_exposure"] == pytest.approx(0.4)
+    assert _optimizer_build_overrides(late_swap)["max_team_exposure"] == pytest.approx(0.4)
+
+
 def test_simulation_inputs_keep_coherence_columns_after_projection_merge(tmp_path: Path):
     salary_rows = [
         {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,8 @@ POSITION_ALIASES = {
     "MVP": ("MVP", "CPT"),
 }
 
+CELL_FORMATS = ("name", "name_id", "id")
+
 
 def _load_pydfs() -> tuple[Any, Any, Any, Any]:
     try:
@@ -66,20 +69,144 @@ def _site_enum(site_key: str, site_cls: Any) -> Any:
     raise ValueError(f"Unsupported site: {site_key}")
 
 
-def _lineup_row(players: list[Any], header: list[str]) -> list[str]:
-    by_pos: dict[str, list[str]] = {}
+def _player_id(player: Any) -> str:
+    for attr in ("id", "player_id"):
+        value = getattr(player, attr, None)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def cell_format(player: Any, fmt: str = "name") -> str:
+    """Format one lineup seat as name, ``Name (id)``, or id-only."""
+
+    if fmt not in CELL_FORMATS:
+        raise ValueError(f"unsupported cell format: {fmt}")
+    name = str(getattr(player, "full_name", "") or "").strip()
+    if fmt == "name":
+        return name
+    player_id = _player_id(player)
+    if not player_id:
+        raise ValueError(f"missing FanDuel id for player: {name or '?'}")
+    if fmt == "id":
+        return player_id
+    return f"{name} ({player_id})"
+
+
+def _lineup_row(players: list[Any], header: list[str], fmt: str = "name") -> list[str]:
+    by_pos: dict[str, list[Any]] = {}
     for player in players:
-        by_pos.setdefault(player.lineup_position, []).append(player.full_name)
+        by_pos.setdefault(player.lineup_position, []).append(player)
 
     row: list[str] = []
     for column in header:
-        names: list[str] = []
+        bucket: list[Any] = []
         for alias in POSITION_ALIASES.get(column, (column,)):
             if by_pos.get(alias):
-                names = by_pos[alias]
+                bucket = by_pos[alias]
                 break
-        row.append(names.pop(0) if names else "")
+        row.append(cell_format(bucket.pop(0), fmt) if bucket else "")
     return row
+
+
+def fanduel_artifact_paths(out_path: str | Path) -> tuple[Path, Path]:
+    """Return ``*_fanduel_upload.csv`` and ``*_fanduel_ids.csv`` next to ``out_path``."""
+
+    out_file = Path(out_path)
+    stem = out_file.stem
+    return (
+        out_file.with_name(f"{stem}_fanduel_upload.csv"),
+        out_file.with_name(f"{stem}_fanduel_ids.csv"),
+    )
+
+
+def write_lineup_artifacts(lineups: list[Any], out_path: str | Path, site: str = "fanduel") -> int:
+    """Write name-only, FanDuel upload, and id-only lineup CSVs. Return row count."""
+
+    site_key = normalize_site(site)
+    header = LINEUP_HEADERS[site_key]
+    out_file = Path(out_path)
+    upload_path, ids_path = fanduel_artifact_paths(out_file)
+    name_rows = [_lineup_row(lineup.players, header, fmt="name") for lineup in lineups]
+    upload_rows = [_lineup_row(lineup.players, header, fmt="name_id") for lineup in lineups]
+    id_rows = [_lineup_row(lineup.players, header, fmt="id") for lineup in lineups]
+    write_lineup_rows(name_rows, out_file, site_key)
+    write_lineup_rows(upload_rows, upload_path, site_key)
+    write_lineup_rows(id_rows, ids_path, site_key)
+    print(f"FanDuel upload -> {upload_path}")
+    print(f"FanDuel ids -> {ids_path}")
+    return len(lineups)
+
+
+def _exposure_player_names(lineup: Any) -> list[str]:
+    players = getattr(lineup, "players", None)
+    if players is not None:
+        return [str(getattr(player, "full_name", "") or "").strip() for player in players]
+    if isinstance(lineup, dict):
+        return [str(value).strip() for value in lineup.values() if str(value).strip()]
+    try:
+        return [str(value).strip() for value in lineup if str(value).strip()]
+    except TypeError:
+        return []
+
+
+def _exposure_teams(lineup: Any) -> list[str]:
+    players = getattr(lineup, "players", None)
+    if players is None:
+        return []
+    teams: list[str] = []
+    seen: set[str] = set()
+    for player in players:
+        team = str(getattr(player, "team", "") or "").strip().upper()
+        if team and team not in seen:
+            seen.add(team)
+            teams.append(team)
+    return teams
+
+
+def _exposure_cap(limit: float, final_count: int) -> int:
+    cap = math.floor(float(limit) * final_count + 1e-9)
+    if limit > 0:
+        cap = max(cap, 1)
+    return cap
+
+
+def select_with_exposure_caps(
+    lineups: list[Any],
+    final_count: int,
+    max_exposure: float | None = None,
+    max_team_exposure: float | None = None,
+) -> list[Any]:
+    """Greedily keep lineups that stay under player and/or team exposure caps."""
+
+    player_cap = _exposure_cap(max_exposure, final_count) if max_exposure is not None else None
+    team_cap = (
+        _exposure_cap(max_team_exposure, final_count) if max_team_exposure is not None else None
+    )
+    selected: list[Any] = []
+    player_counts: dict[str, int] = {}
+    team_counts: dict[str, int] = {}
+    for lineup in lineups:
+        names = [
+            " ".join(name.lower().split())
+            for name in _exposure_player_names(lineup)
+            if str(name).strip()
+        ]
+        teams = _exposure_teams(lineup)
+        if player_cap is not None and any(
+            player_counts.get(name, 0) + 1 > player_cap for name in names
+        ):
+            continue
+        if team_cap is not None and any(team_counts.get(team, 0) + 1 > team_cap for team in teams):
+            continue
+        selected.append(lineup)
+        for name in names:
+            player_counts[name] = player_counts.get(name, 0) + 1
+        for team in teams:
+            team_counts[team] = team_counts.get(team, 0) + 1
+        if len(selected) >= final_count:
+            break
+    return selected
 
 
 def generate_lineups(
@@ -97,6 +224,7 @@ def generate_lineups(
     one_rb_per_team: bool = False,
     projection_floor: float | None = None,
     uniques: int | None = None,
+    max_team_exposure: float | None = None,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -147,6 +275,12 @@ def generate_lineups(
     lineups = _optimize_or_raise(optimizer, n=count, max_exposure=max_exposure or None)
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
+    if max_team_exposure is not None:
+        lineups = select_with_exposure_caps(
+            lineups,
+            count,
+            max_team_exposure=max_team_exposure,
+        )
     return lineups
 
 
@@ -187,6 +321,7 @@ def optimize_lineups(
     one_rb_per_team: bool = False,
     projection_floor: float | None = None,
     uniques: int | None = None,
+    max_team_exposure: float | None = None,
     report_path: str | Path | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
@@ -206,8 +341,9 @@ def optimize_lineups(
         one_rb_per_team=one_rb_per_team,
         projection_floor=projection_floor,
         uniques=uniques,
+        max_team_exposure=max_team_exposure,
     )
-    written = write_lineup_rows([lineup_to_row(lineup, site_key) for lineup in lineups], out_path, site_key)
+    written = write_lineup_artifacts(lineups, out_path, site_key)
     _write_build_report(
         lineups,
         out_path,
@@ -218,6 +354,7 @@ def optimize_lineups(
         one_rb_per_team=one_rb_per_team,
         projection_floor=projection_floor,
         uniques=uniques,
+        max_team_exposure=max_team_exposure,
         report_path=report_path,
     )
     return written
@@ -234,6 +371,7 @@ def _write_build_report(
     one_rb_per_team: bool = False,
     projection_floor: float | None = None,
     uniques: int | None = None,
+    max_team_exposure: float | None = None,
     report_path: str | Path | None,
 ) -> None:
     text = format_lineup_report(
@@ -245,6 +383,7 @@ def _write_build_report(
         one_rb_per_team=one_rb_per_team,
         projection_floor=projection_floor,
         uniques=uniques,
+        max_team_exposure=max_team_exposure,
     )
     target = Path(report_path) if report_path is not None else Path(out_path).with_suffix(".report.txt")
     write_lineup_report(text, target)
@@ -351,6 +490,12 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=150, help="Number of lineups")
     parser.add_argument("--min-salary", type=int, default=None, help="Min salary cap used (0=disable)")
     parser.add_argument("--max-exposure", type=float, default=0.35, help="Max player exposure 0-1")
+    parser.add_argument(
+        "--max-team-exposure",
+        type=float,
+        default=None,
+        help="Max share of lineups that may include any one team (0-1; default off)",
+    )
     parser.add_argument("--max-repeating-players", type=int, default=7)
     parser.add_argument("--uniques", type=int, default=None, help="Alias: max_repeating = slate_size - N")
     parser.add_argument(
@@ -397,6 +542,7 @@ def main() -> int:
             one_rb_per_team=args.one_rb_per_team,
             projection_floor=args.projection_floor,
             uniques=args.uniques,
+            max_team_exposure=args.max_team_exposure,
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
