@@ -84,6 +84,36 @@ Operator pastes the ID file and submits. Agent does not Enter.
 
 Do not reuse last week’s contest IDs. Use this week’s FanDuel player-list export.
 
+## Review reports
+
+Human gate. Flags default off. `do_not_auto_apply`. Agent does not Enter.
+
+After Upload (or from an existing `lineups.csv`), opt in to three diagnostic CSVs.
+The files sit next to the lineup `--out` file, or in `ceminidfs review --out DIR`
+(default: lineup parent dir). Empty match still writes the header and 0 data rows.
+
+```bash
+ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp \
+  --flag-wr-triples --late-swap-audit --ownership-fade-report
+
+ceminidfs review --lineups lineups.csv --players normalized_players.csv --out . \
+  --flag-wr-triples --late-swap-audit --ownership-fade-report
+```
+
+`optimize`, `run`, and `late-swap` honor the same flags after they write lineups.
+`review` reads the CSVs and does not re-solve.
+
+| Flag | File | Operator next step |
+|------|------|--------------------|
+| `--flag-wr-triples` | `stack_fragility_report.csv` | Same-game WR triples and `CHALK-QB-WR-WR`. May then `--exclude` or opt-in PlayersGroup `max_from_group`. |
+| `--late-swap-audit` | `late_swap_alert_report.csv` | Rostered Q/D. Q stays in the pool. Confirm, then existing `late-swap`. Do not auto-swap. |
+| `--ownership-fade-report` | `leverage_fade_matrix.csv` | Exposure vs projected own%. `NEGATIVE_LEVERAGE` is a flag only. May then `--max-exposure` / `--exclude`. |
+
+Read the CSVs. Then you may `--exclude` / `--max-exposure` / `late-swap`. Do not auto-drop Q.
+Do not retune FPPG. Optional `--ownership-calibration` scales report own% only.
+
+KEEP/REJECT and TG01–TG07: `briefs/2026-09-15_gemini-dfs-improve.md`.
+
 ## Ownership Calibration
 
 Heuristic ownership works without paid labels, but a calibrated file is preferred

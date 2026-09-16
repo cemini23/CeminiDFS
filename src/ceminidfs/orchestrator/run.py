@@ -207,6 +207,7 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
             ownership_lookup=ownership_lookup,
             ownership_penalty=ownership_penalty,
             **_optimize_build_kwargs(config),
+            **_review_report_kwargs(config),
         )
         return output_path
 
@@ -216,6 +217,7 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
         site=str(config.get("site", "fanduel")),
         count=count,
         **_optimize_build_kwargs(config),
+        **_review_report_kwargs(config),
     )
     return output_path
 
@@ -247,6 +249,19 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["one_rb_per_team"] = True
     if config.get("projection_floor") is not None:
         kwargs["projection_floor"] = config.get("projection_floor")
+    return kwargs
+
+
+def _review_report_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if config.get("flag_wr_triples"):
+        kwargs["flag_wr_triples"] = True
+    if config.get("late_swap_audit"):
+        kwargs["late_swap_audit"] = True
+    if config.get("ownership_fade_report"):
+        kwargs["ownership_fade_report"] = True
+    if config.get("ownership_calibration"):
+        kwargs["ownership_calibration"] = config.get("ownership_calibration")
     return kwargs
 
 

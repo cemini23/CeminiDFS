@@ -323,6 +323,10 @@ def optimize_lineups(
     uniques: int | None = None,
     max_team_exposure: float | None = None,
     report_path: str | Path | None = None,
+    flag_wr_triples: bool = False,
+    late_swap_audit: bool = False,
+    ownership_fade_report: bool = False,
+    ownership_calibration: str | Path | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -344,6 +348,18 @@ def optimize_lineups(
         max_team_exposure=max_team_exposure,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
+    # Circular: review_reports imports LINEUP_HEADERS from this module.
+    from ceminidfs.export.review_reports import maybe_write_review_reports
+
+    maybe_write_review_reports(
+        out_path,
+        csv_path,
+        site=site_key,
+        flag_wr_triples=flag_wr_triples,
+        late_swap_audit=late_swap_audit,
+        ownership_fade_report=ownership_fade_report,
+        ownership_calibration=ownership_calibration,
+    )
     _write_build_report(
         lineups,
         out_path,

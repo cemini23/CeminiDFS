@@ -11,6 +11,7 @@ import numpy as np
 
 from .lineup_report import format_lineup_report, write_lineup_report
 from .optimize import generate_lineups, select_with_exposure_caps, write_lineup_artifacts
+from .review_reports import maybe_write_review_reports, pop_review_kwargs
 
 NAME_KEYS = (
     "name",
@@ -222,6 +223,7 @@ def optimize_with_sim_rerank(
     """Generate candidate lineups, rerank by simulated score, and write final CSV."""
 
     team_exposure = kwargs.pop("max_team_exposure", None)
+    review_kwargs = pop_review_kwargs(kwargs)
     candidate_lineups = generate_lineups(csv_path, site=site, count=candidates, **kwargs)
     exposure = kwargs["max_exposure"] if "max_exposure" in kwargs else 0.35
     selected = rerank_lineups(
@@ -236,6 +238,7 @@ def optimize_with_sim_rerank(
         max_team_exposure=team_exposure,
     )
     written = write_lineup_artifacts(selected, out_path, site=site)
+    maybe_write_review_reports(out_path, csv_path, site=site, **review_kwargs)
     stacks = kwargs.get("stacks")
     locks = kwargs.get("locks")
     excludes = kwargs.get("excludes")

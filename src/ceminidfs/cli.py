@@ -143,6 +143,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     late_swap_lineups = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.export.review_reports import maybe_write_review_reports
+except ImportError:  # pragma: no cover - defensive for partial installs
+    maybe_write_review_reports = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.data.sleeper import fetch_trending_players, trending_with_names
 except ImportError:  # pragma: no cover - defensive for partial installs
     fetch_trending_players = None  # type: ignore[assignment]
@@ -228,6 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     _add_optimizer_build_arguments(optimize)
+    _add_review_report_arguments(optimize)
     _add_profile_argument(optimize)
     optimize.set_defaults(handler=_cmd_optimize)
 
@@ -261,7 +267,25 @@ def build_parser() -> argparse.ArgumentParser:
     late_swap.add_argument("--site", default="fanduel")
     late_swap.add_argument("--count", type=int, default=None)
     _add_optimizer_build_arguments(late_swap)
+    _add_review_report_arguments(late_swap)
     late_swap.set_defaults(handler=_cmd_late_swap)
+
+    review = subparsers.add_parser(
+        "review",
+        help="Write human-gate review CSVs from existing lineups (no re-solve)",
+    )
+    review.add_argument("--lineups", dest="lineups_path", type=Path, required=True)
+    review.add_argument("--players", dest="players_path", type=Path, required=True)
+    review.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=None,
+        help="Directory for report CSVs (default: lineup parent dir)",
+    )
+    review.add_argument("--site", default="fanduel")
+    _add_review_report_arguments(review)
+    review.set_defaults(handler=_cmd_review)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
     run.add_argument("--season", type=int, required=True)
@@ -298,6 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ignore parquet cache TTL and refetch",
     )
     _add_optimizer_build_arguments(run)
+    _add_review_report_arguments(run)
     _add_profile_argument(run)
     run.set_defaults(handler=_cmd_run)
 
@@ -609,6 +634,7 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
         site=args.site,
         sim_rerank=rerank_override,
         **_optimizer_build_overrides(args),
+        **_review_report_overrides(args),
     )
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
@@ -643,6 +669,7 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
         f"{args.lineups_path.stem}_late_swap.csv"
     )
     overrides = _optimizer_build_overrides(args)
+    review = _review_report_overrides(args)
     late_swap_lineups(
         args.lineups_path,
         args.players_path,
@@ -660,8 +687,33 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
         projection_floor=overrides.get("projection_floor"),
         uniques=overrides.get("uniques"),
         max_repeating_players=overrides.get("max_repeating_players"),
+        flag_wr_triples=bool(review.get("flag_wr_triples")),
+        late_swap_audit=bool(review.get("late_swap_audit")),
+        ownership_fade_report=bool(review.get("ownership_fade_report")),
+        ownership_calibration=review.get("ownership_calibration"),
     )
     print(output_path)
+    return 0
+
+
+def _cmd_review(args: argparse.Namespace) -> int:
+    if maybe_write_review_reports is None:
+        raise RuntimeError("Review reports unavailable: review_reports import failed")
+
+    out_dir = args.output_path
+    if out_dir is None:
+        out_dir = args.lineups_path.parent
+    maybe_write_review_reports(
+        args.lineups_path,
+        args.players_path,
+        site=args.site,
+        out_dir=out_dir,
+        flag_wr_triples=bool(getattr(args, "flag_wr_triples", False)),
+        late_swap_audit=bool(getattr(args, "late_swap_audit", False)),
+        ownership_fade_report=bool(getattr(args, "ownership_fade_report", False)),
+        ownership_calibration=getattr(args, "ownership_calibration", None),
+    )
+    print(out_dir)
     return 0
 
 
@@ -676,6 +728,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         sim_rerank=rerank_override,
         fetch={"force": True} if args.force else None,
         **_optimizer_build_overrides(args),
+        **_review_report_overrides(args),
     )
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
@@ -1046,6 +1099,47 @@ def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:
     if rows and rows[0].get("dk_id") and not rows[0].get("fd_id"):
         return "draftkings"
     return "fanduel"
+
+
+def _add_review_report_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--flag-wr-triples",
+        action="store_true",
+        default=False,
+        help="Write stack_fragility_report.csv (same-game WR triples / CHALK-QB-WR-WR)",
+    )
+    parser.add_argument(
+        "--late-swap-audit",
+        action="store_true",
+        default=False,
+        help="Write late_swap_alert_report.csv (rostered Q/D). Does not auto-swap",
+    )
+    parser.add_argument(
+        "--ownership-fade-report",
+        action="store_true",
+        default=False,
+        help="Write leverage_fade_matrix.csv (exposure vs projected own%%)",
+    )
+    parser.add_argument(
+        "--ownership-calibration",
+        type=Path,
+        default=None,
+        help="Optional calibration JSON; scales report own%% only, never FPPG",
+    )
+
+
+def _review_report_overrides(args: argparse.Namespace) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    if getattr(args, "flag_wr_triples", False):
+        overrides["flag_wr_triples"] = True
+    if getattr(args, "late_swap_audit", False):
+        overrides["late_swap_audit"] = True
+    if getattr(args, "ownership_fade_report", False):
+        overrides["ownership_fade_report"] = True
+    calibration = getattr(args, "ownership_calibration", None)
+    if calibration is not None:
+        overrides["ownership_calibration"] = calibration
+    return overrides
 
 
 def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:

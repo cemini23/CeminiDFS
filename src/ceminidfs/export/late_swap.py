@@ -18,6 +18,7 @@ from ceminidfs.data.stadiums import normalize_team_abbr
 
 from .normalize import normalize_site
 from .optimize import LINEUP_HEADERS
+from .review_reports import maybe_write_review_reports
 from .optimize import (
     _load_pydfs,
     _relax_tiny_slate_limits,
@@ -72,6 +73,10 @@ def late_swap_lineups(
     uniques: int | None = None,
     max_repeating_players: int | None = None,
     max_team_exposure: float | None = None,
+    flag_wr_triples: bool = False,
+    late_swap_audit: bool = False,
+    ownership_fade_report: bool = False,
+    ownership_calibration: str | Path | None = None,
 ) -> int:
     """Late-swap existing lineups and return the number written.
 
@@ -148,7 +153,17 @@ def late_swap_lineups(
             max_team_exposure=max_team_exposure,
         )
 
-    return write_lineup_artifacts(swapped, out_file, site_key)
+    written = write_lineup_artifacts(swapped, out_file, site_key)
+    maybe_write_review_reports(
+        out_file,
+        players_file,
+        site=site_key,
+        flag_wr_triples=flag_wr_triples,
+        late_swap_audit=late_swap_audit,
+        ownership_fade_report=ownership_fade_report,
+        ownership_calibration=ownership_calibration,
+    )
+    return written
 
 
 def _warn_unmatched_lock_teams(players: list[Any], locked_teams: set[str]) -> None:
