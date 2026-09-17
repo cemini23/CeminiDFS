@@ -1,43 +1,32 @@
 # Handoff to CeminiParlays
 
-CeminiDFS and CeminiParlays stay two CLIs. CeminiDFS builds DFS projections and
-GPP lineups. CeminiParlays builds sportsbook tickets. Neither CLI calls the other.
+CeminiDFS writes a handoff CSV that CeminiParlays can read. The two CLIs stay split; the operator copies the file by hand.
 
-The handoff is a file copy by the operator. There is no live pipe and no shared
-database.
+CeminiDFS now writes this file next to the lineup output after `optimize`, `late-swap`, or `sim-rerank`, and also on `ceminidfs review` (even when the three review flags are off).
 
-## CeminiParlays may read
+The handoff CSV columns are: `player,team,projection,lineup_exposure_pct,game,implied_total`. `implied_total` may be blank. No FanDuel contest IDs, no salary.
 
-The operator copies a file and CeminiParlays reads the copy.
+## Artifact
 
 | Artifact | Typical path | Columns to use |
 |----------|--------------|----------------|
-| Canonical / project CSV | `runs/{season}_week_{N}/canonical_projections_{season}_w{N}.csv` | player, team, projection |
-| Implied team totals / Vegas columns | same canonical CSV, if present | implied team total, spread, total |
-| Weather / stadium fields | same canonical CSV, if present | weather, wind, roof type |
+| Handoff CSV | `runs/{season}_week_{N}/ceminidfs_handoff.csv` | player, team, projection, lineup_exposure_pct, game, implied_total |
 
-Use the projection, the implied team totals, and the weather fields as research
-inputs. Do not treat a projection as a price.
+## CeminiParlays may read
 
-## CeminiParlays must not read
+The operator copies the handoff CSV and CeminiParlays reads the copy.
 
-- Committed salary CSVs (FanDuel / DraftKings manual exports).
-- `.env` or any other secret.
-- FanDuel contest IDs.
-- Lineup upload files as a product (`*_fanduel_upload.csv`, `*_fanduel_ids.csv`).
+## `--from-ceminidfs` (Parlays reads; DFS only writes)
 
-## `--from-ceminidfs` (specified, not built)
+Copy `ceminidfs_handoff.csv` into the Parlays slate folder. Then:
 
-A future CeminiParlays flag could read a CeminiDFS projection file in one step.
-The flag is **specified, not built**. Do not implement it in CeminiDFS. Do not
-add a live pipe from CeminiParlays into CeminiDFS.
+```bash
+ceminiparlays compose --lines runs/slate/lines.csv --auto \
+  --from-ceminidfs runs/slate/ceminidfs_handoff.csv
+```
 
-Until that flag ships, the operator copies the CSV by hand. The two CLIs stay
-split.
+Missing file prints `CEMINIDFS_HANDOFF_MISSING` and continues. High DFS lineup share prints an exposure note. The flag does not drop legs, reprice, or submit. No live pipe. The two CLIs stay split.
 
 ## What CeminiDFS gives back
 
-Nothing at runtime. CeminiDFS does not read CeminiParlays output. After the slate,
-the operator may paste the Recap Desk notes from
-[`GROK-BOTS.md`](GROK-BOTS.md) into a local brief. The Recap Desk does not write
-this repo.
+Nothing at runtime. CeminiDFS does not read CeminiParlays output. After the slate, the operator may paste the Recap Desk notes from `GROK-BOTS.md` into a local brief. The Recap Desk is live in Grok Bot.app; it still does not write this repo.

@@ -122,7 +122,8 @@ players file.
 ## 7. After the slate: Recap Desk paste
 
 Paste the scored lineups and the tool gaps into the DFS Recap Desk. The protocol
-is in [`GROK-BOTS.md`](GROK-BOTS.md). The Recap Desk does not write this repo.
+is in [`GROK-BOTS.md`](GROK-BOTS.md). The Recap Desk is live in Grok Bot.app; it
+still does not write this repo. Still no Enter.
 
 ## Keep and refuse
 

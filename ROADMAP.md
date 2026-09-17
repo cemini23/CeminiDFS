@@ -48,6 +48,7 @@
 | K159 | Pipeline cost discipline — fable-advisor + implementer lane (process/docs only) | `briefs/2026-07-11_k159-fable-advisor-pipeline-cost-steal.md` |
 | K175 | FiveThirtyEight tidy CSVs — extract-only backtest fixtures, **not** a live feed | `briefs/2026-07-20_k175-fivethirtyeight-data-extract.md` |
 | Week 1 readiness | Prior-season PBP/roster fallback, FD team aliases, SoFi indoor skip | `briefs/handoffs/2026-09-11_week1-pipeline-readiness.md` |
+| Grok Recap Desk | Post-slate lineup scoring + tool-gap list (Grok Bot.app; no Enter) | `docs/GROK-BOTS.md` |
 
 ## K159 — pipeline cost discipline (2026-07-19)
 

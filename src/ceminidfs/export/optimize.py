@@ -348,7 +348,6 @@ def optimize_lineups(
         max_team_exposure=max_team_exposure,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
-    # Circular: review_reports imports LINEUP_HEADERS from this module.
     from ceminidfs.export.review_reports import maybe_write_review_reports
 
     maybe_write_review_reports(

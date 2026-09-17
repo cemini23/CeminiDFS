@@ -24,6 +24,10 @@ from ceminidfs.models.ownership import (
     project_ownership_calibrated,
 )
 
+
+PARLAYS_HANDOFF_NAME = "ceminidfs_handoff.csv"
+PARLAYS_HANDOFF_HEADER = ["player", "team", "projection", "lineup_exposure_pct", "game", "implied_total"]
+
 STACK_FRAGILITY_NAME = "stack_fragility_report.csv"
 LATE_SWAP_ALERT_NAME = "late_swap_alert_report.csv"
 LEVERAGE_FADE_NAME = "leverage_fade_matrix.csv"
@@ -104,9 +108,6 @@ def maybe_write_review_reports(
 ) -> list[Path]:
     """Write the selected review CSVs next to the lineup file (or into ``out_dir``)."""
 
-    if not (flag_wr_triples or late_swap_audit or ownership_fade_report):
-        return []
-
     lineups_file = Path(lineups_path)
     players_file = Path(players_path)
     if not lineups_file.is_file():
@@ -122,6 +123,8 @@ def maybe_write_review_reports(
     lineups = parse_lineup_csv(lineups_file, site=site_key, players=players)
 
     written: list[Path] = []
+    written.append(write_parlays_handoff(dest / PARLAYS_HANDOFF_NAME, lineups, players))
+
     if flag_wr_triples:
         written.append(write_stack_fragility_report(dest / STACK_FRAGILITY_NAME, lineups, players))
     if late_swap_audit:
@@ -466,6 +469,66 @@ def _ownership_input_row(meta: PlayerMeta, *, site: str) -> dict[str, Any]:
     if meta.projected_own:
         row["Projected Ownership"] = meta.projected_own
     return row
+
+
+def _extract_lineup_names(lineups: Any) -> list[list[tuple[str, str]]]:
+    """Convert pydfs Lineup objects or CeminiDFS tuple lineups to CeminiDFS format."""
+
+    result: list[list[tuple[str, str]]] = []
+    for lineup in (lineups if isinstance(lineups, list) else [lineups]):
+        if not lineup:
+            continue
+        players = getattr(lineup, "players", None)
+        if players is not None:
+            seats = [(getattr(player, "slot", ""), str(getattr(player, "full_name", "") or "").strip())
+                     for player in players if getattr(player, "full_name", None)]
+        else:
+            seats = lineup if isinstance(lineup, list) else []
+        result.append([(slot, name) for slot, name in seats if name])
+    return result
+
+
+def write_parlays_handoff(
+    path: str | Path,
+    lineups: Any,
+    players: Mapping[str, PlayerMeta],
+) -> Path:
+    """Write the parlays handoff CSV next to the lineup file.
+
+    Columns: player, team, projection, lineup_exposure_pct, game, implied_total.
+    implied_total may be blank. No FanDuel contest IDs, no salary.
+    Exposure = 100 * (lineups containing the player) / n_lineups, one decimal.
+    """
+
+    normalized_lineups = _extract_lineup_names(lineups)
+    total = len(normalized_lineups)
+    counts: Counter[str] = Counter()
+    display: dict[str, str] = {}
+    for seats in normalized_lineups:
+        names = {_canonical_name(players, name) for _slot, name in seats if name}
+        counts.update(names)
+        for name in names:
+            display.setdefault(name, name)
+
+    rows: list[list[str]] = []
+    for name in sorted(counts.keys()):
+        meta = _lookup(players, name)
+        exposure = (counts[name] / total * 100.0) if total else 0.0
+        team = meta.team if meta is not None else ""
+        projection = meta.projection if meta is not None else ""
+        game = meta.game_raw if meta is not None else ""
+        implied_total = ""
+        rows.append(
+            [
+                display.get(name, name),
+                team,
+                projection if projection else "",
+                f"{exposure:.1f}",
+                game,
+                implied_total,
+            ]
+        )
+    return _write_report(path, PARLAYS_HANDOFF_HEADER, rows)
 
 
 def _write_report(path: str | Path, header: list[str], rows: Iterable[Sequence[str]]) -> Path:
