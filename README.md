@@ -4,9 +4,36 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-DIY **NFL DFS projection pipeline** (FanDuel-primary) plus a **Best Ball Mania draft copilot** for Underdog slow drafts. The core pipeline builds player projections from nflverse play-by-play, Vegas lines, and weather; exports canonical CSVs; normalizes for [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer); and generates MME lineup pools with optional simulation reranking. The BBM tool (`ceminidfs bbm`) tracks exposure across 150 entries and surfaces top-3 picks during live drafts.
+CeminiDFS is a DIY **NFL DFS projection pipeline**. It is **FanDuel-primary**. The pipeline is for the self-directed GPP operator who exports a salary CSV and runs Python. It builds player projections from **nflverse** play-by-play, **Vegas** lines, and **weather**; exports canonical CSVs; normalizes for [pydfs-lineup-optimizer](https://github.com/DimaKudosh/pydfs-lineup-optimizer); and generates GPP lineup pools with optional simulation reranking. The project uses the **MIT** license. **The operator submits every lineup. The agent does not Enter.**
+
+The optional **Best Ball Mania** draft copilot (`ceminidfs bbm`) is an extra for Underdog slow drafts. It tracks exposure across 150 entries and surfaces top-3 picks during live drafts.
 
 Architecture and research: [Gambling wiki — DIY NFL DFS model (K125)](https://github.com/cemini23/gambling-wiki/blob/main/wiki/concepts/diy-nfl-dfs-model-architecture.md).
+
+## Sunday GPP
+
+**Who:** self-directed FanDuel GPP operator. You export this week's salary CSV and run Python.
+
+**Clock (20 minutes):** [docs/SUNDAY.md](docs/SUNDAY.md) runs the full Sunday path in clock order: fetch → `--profile gpp` → review flags → upload the ID CSV → you submit → optional late-swap.
+
+**Detail:** [docs/GPP-WORKFLOW.md](docs/GPP-WORKFLOW.md) for the GPP profile, stacks, and late swap; [docs/REVIEW-REPORTS.md](docs/REVIEW-REPORTS.md) for the human gate.
+
+**Review flags (default off):**
+
+| Flag | Report CSV | Operator next step |
+|------|------------|--------------------|
+| `--flag-wr-triples` | `stack_fragility_report.csv` | Read, then may `--exclude` |
+| `--late-swap-audit` | `late_swap_alert_report.csv` | Confirm, then `late-swap` |
+| `--ownership-fade-report` | `leverage_fade_matrix.csv` | Read, then may `--exclude` / `--max-exposure` |
+
+The operator reads each report, then may `--exclude`, `--max-exposure`, or `late-swap`. The agent does not Enter.
+
+## What is NOT included
+
+- No salary CSVs in git. Export the CSV yourself.
+- No contest IDs as a product. Use this week's player list only.
+- No `.env` and no secrets in the repo.
+- The agent does not Enter, Submit, or late-swap. The operator submits.
 
 ## Status
 
@@ -22,7 +49,7 @@ The **weekly DFS pipeline** (phases 0–5) is **complete** — ready for histori
 | **5** | Simulation, ownership, late-swap, copula, sim rerank | Complete |
 | **BBM** | Underdog best-ball draft copilot — REPL, exposure ledger, recommender, audit | Complete |
 
-See [PLAN.md](PLAN.md) for the execution history, [ROADMAP.md](ROADMAP.md) for data-source posture, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping, and [docs/BBM.md](docs/BBM.md) for the best-ball operator guide.
+See [PLAN.md](PLAN.md) for the execution history, [ROADMAP.md](ROADMAP.md) for data-source posture, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module mapping, [docs/BBM.md](docs/BBM.md) for the best-ball operator guide, and [docs/GROK-BOTS.md](docs/GROK-BOTS.md) for DFS Slate Desk + Recap Desk (Grok Bot.app paste).
 
 ## Quick start
 
@@ -37,10 +64,11 @@ pip install -e ".[bbm,dev]"            # + Best Ball Mania draft copilot
 pytest
 
 # Fetch nflverse data for a week (requires nflreadpy + network)
-ceminidfs fetch --season 2024 --week 1
+ceminidfs fetch --season 2026 --week 2
 
-# Full pipeline on a FanDuel salary CSV
-ceminidfs run --season 2024 --week 1 --salary path/to/fanduel_salaries.csv --stages all
+# Full GPP pipeline on a FanDuel salary CSV
+ceminidfs run --season 2026 --week 2 --salary path/to/fanduel_salaries.csv \
+  --stages all --profile gpp
 ```
 
 Outputs land under `runs/{season}_week_{N}/` (canonical CSV, normalized pydfs CSV, lineups, manifest).
@@ -86,6 +114,7 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs optimize` | pydfs lineup generation |
 | `ceminidfs run` | Orchestrated multi-stage run with `RunManifest` |
 | `ceminidfs late-swap` | Re-optimize after teams lock |
+| `ceminidfs review` | Human-gate review CSVs from existing lineups (no re-solve) |
 | `ceminidfs backtest` | Walk-forward MAE / RMSE / Spearman vs realized PBP points |
 | `ceminidfs backtest-prepare` | Batch-fetch nflverse caches for a season range (offseason setup) |
 | `ceminidfs historical-slate` | Synthetic FanDuel salary CSV from nflverse (no live slate export) |
@@ -137,16 +166,19 @@ Template ADP: [`config/espn-ppr-adp.csv`](config/espn-ppr-adp.csv) (FantasyPros 
 **Full slate (DIY projections, 150 lineups):**
 
 ```bash
-ceminidfs fetch --season 2024 --week 5
-ceminidfs run --season 2024 --week 5 --salary path/to/fanduel.csv --stages all
+ceminidfs fetch --season 2026 --week 2
+ceminidfs run --season 2026 --week 2 --salary path/to/fanduel.csv \
+  --stages all --profile gpp
 ```
 
 **Sim rerank (generate 2000 candidates, keep top 150 by mean sim score):**
 
 ```bash
-ceminidfs run --season 2024 --week 5 --salary FILE --stages all \
+ceminidfs run --season 2026 --week 2 --salary FILE --stages all \
   --sim-rerank --candidates 2000 --final-count 150
 ```
+
+The Sunday path probes 25 lineups first. 2,000 candidates can take 35 minutes. See [docs/SUNDAY.md](docs/SUNDAY.md).
 
 **Historical accuracy (no salary CSV):**
 
@@ -197,9 +229,10 @@ ceminidfs benchmark replay --season 2024 --start-week 5 --end-week 10 \
 
 ```bash
 ceminidfs late-swap \
-  --lineups runs/2024_week_5/lineups.csv \
-  --players runs/2024_week_5/normalized_players.csv \
-  --lock-team KC --out runs/2024_week_5/lineups_late_swap.csv
+  --lineups runs/2026_week_2/lineups.csv \
+  --players runs/2026_week_2/normalized_players.csv \
+  --lock-team JAX --lock-team WAS --lock-team LAR \
+  --out runs/2026_week_2/lineups_late_swap.csv
 ```
 
 ## Configuration
@@ -304,6 +337,12 @@ CI (`.github/workflows/ci.yml`) runs pytest + ruff on Python 3.11 and 3.12 with 
 ## Related
 
 - [PLAN.md](PLAN.md) — phased implementation record
+- [docs/SUNDAY.md](docs/SUNDAY.md) — Sunday GPP clock-order path (20 minutes)
+- [docs/GPP-WORKFLOW.md](docs/GPP-WORKFLOW.md) — GPP profile, stacks, upload, late swap
+- [docs/REVIEW-REPORTS.md](docs/REVIEW-REPORTS.md) — human-gate review reports
+- [docs/HANDOFF-PARLAYS.md](docs/HANDOFF-PARLAYS.md) — CSV handoff to CeminiParlays. The two CLIs stay split.
+- [docs/REFUSED.md](docs/REFUSED.md) — refused tools and practices
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution rules
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — wiki layer → module map
 - [docs/BBM.md](docs/BBM.md) — Best Ball Mania draft copilot guide
 - [K125 master research plan](https://github.com/cemini23/gambling-wiki/blob/main/wiki/sources/research-diy-dfs-model-master-plan-2026-06-20.md)
