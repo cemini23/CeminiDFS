@@ -31,12 +31,17 @@ Do not guess on a money slate.
 
 **T-90 (~11:30 ET for 1 p.m. games):** Pittman, Tua, McConkey, Porter Jr.
 
+- **Slate guard:** the FanDuel salary CSV must be the **Sunday-afternoon** slate only. A full-week export also holds SNF IND@KC. Do not import that game.
+- **ATL QB check:** after `fetch`, the nflverse vegas file may still name Tua as the ATL QB. The hub says **Cooper Rush** starts. Keep the fade on the ATL pass game. Do not retune FPPG.
+- **Optional Jev HITL:** after the review CSVs exist, call `jev_verify` on one injury cell. Call `jev_find` on the late-swap rows (`late_swap_alert_report.csv`). Jev does not change projections. No scrape. No Enter.
+
 **Late-swap 1 p.m. ET lock teams (nflverse):** `--lock-team CAR --lock-team ATL --lock-team NO --lock-team BAL --lock-team MIN --lock-team CHI --lock-team CIN --lock-team HOU --lock-team PIT --lock-team NE --lock-team GB --lock-team NYJ --lock-team CLE --lock-team TB --lock-team PHI --lock-team TEN`.
 
 Operator exports the CSV. The agent does not Enter.
 
 ```bash
 # after operator exports THIS week's FanDuel Sunday-afternoon CSV
+# data/slates/2026-09-20_fd_sun.csv holds Sunday-afternoon games only (no SNF IND@KC)
 rm -rf artifacts/cache/2026/week_2
 ceminidfs fetch --season 2026 --week 2 --force
 

@@ -20,7 +20,11 @@ The agent does not Enter FanDuel. Do not auto-apply a report.
 
 ## Jev (optional)
 
-Confirm the jev MCP is on. Pick one review-CSV injury or news cell. Call `jev_verify` with claim = player + status and evidence = that string. Keep or drop the row in HITL. `jev_find` may rank late-swap notes. Jev does not change projections, pydfs, or ownership. No scrape. No Enter.
+The `jev` server is on the project Cursor MCP (`.cursor/mcp.json`) and on the global Cursor MCP. Confirm it is On in Cursor Tools & MCP.
+
+`ceminidfs review` reads the lineup file and the players file. It **does not read the scratch** CSV (`--research-csv`). Pass the scratch CSV to `optimize` or `run`, not to `review`.
+
+Pick one review-CSV injury or news cell. Call `jev_verify` with claim = player + status and evidence = that string. Keep or drop the row in HITL. After the build, call `jev_find` on the late-swap rows in `late_swap_alert_report.csv`. Write optional notes beside the review CSVs. The notes are HITL input only. Jev does not change projections, pydfs, or ownership. No scrape. No Enter.
 
 ## Corrections
 
