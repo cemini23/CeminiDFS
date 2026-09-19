@@ -37,6 +37,11 @@ Use jev-mcp on **review CSVs**, not on the solver. `jev_verify` checks an injury
 - Project MCP: `.cursor/mcp.json` server `jev` (`disabled: false`).
 - Key: `~/.cemini/typesafe-api-key`.
 
+### K265 add
+
+- classifier-dev / Jev citation-selection = injury-note vs player on review CSV (already first trial).
+- Do not use jev-codex-router to swap `/route` or replace the solver.
+
 ## Sources
 
 - @osint-wiki/entities/tools/jev-mcp.md
