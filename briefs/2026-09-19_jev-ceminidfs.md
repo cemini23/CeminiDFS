@@ -42,6 +42,14 @@ Use jev-mcp on **review CSVs**, not on the solver. `jev_verify` checks an injury
 - classifier-dev / Jev citation-selection = injury-note vs player on review CSV (already first trial).
 - Do not use jev-codex-router to swap `/route` or replace the solver.
 
+### K266 add
+
+- **Paper-classify analog** (Hassan, 1,018 papers / $0.08 / 256ms median) = the review-CSV citation pattern: send one item's title and summary, get a category, record it beside the source sentence.
+- **`jev_verify` on the review CSV stays unchanged** — verify a projection or lineup claim against the source sentence before the row is used.
+- **Skill-name classify does not apply** — DFS has no skill router.
+- **No scrape. No book submit. Do not swap `/route`. Do not replace the solver.** A classifier verdict is HITL input, never an automatic lineup change.
+- Pointer: `briefs/2026-09-19_k266-ceminidfs.md`.
+
 ## Sources
 
 - @osint-wiki/entities/tools/jev-mcp.md
