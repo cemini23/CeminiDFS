@@ -18,6 +18,10 @@ The agent does not Enter FanDuel. Do not auto-apply a report.
 3. The agent does not Enter FanDuel.
 4. Do not auto-apply. A report does not change a lineup by itself.
 
+## Jev (optional)
+
+Confirm the jev MCP is on. Pick one review-CSV injury or news cell. Call `jev_verify` with claim = player + status and evidence = that string. Keep or drop the row in HITL. `jev_find` may rank late-swap notes. Jev does not change projections, pydfs, or ownership. No scrape. No Enter.
+
 ## Corrections
 
 - Do not retune CIN, Chase, or weather from Week 1. One sample is not a retune.

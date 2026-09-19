@@ -27,8 +27,11 @@ ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp 
   --stack CIN3-TB2 \
   --lock "Ja'Marr Chase" \
   --exclude "Alvin Kamara" \
+  --research-csv config/2026-w02-sun-scratch.csv \
   --max-exposure 0.35
 ```
+
+Questionable (`Q`) players stay in the pool. The scratch file is OUT / IR / D only.
 
 Stack text:
 

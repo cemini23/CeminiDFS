@@ -19,6 +19,42 @@ lineup. The agent does not Enter.
 **Rule for every step:** if a command fails, read the named rows and fix the CSV.
 Do not guess on a money slate.
 
+## Week 2 Sat card (Sun 20 Sep 2026)
+
+**Slate:** 1 p.m. + 4 p.m. ET. Export a **new** FanDuel Sunday-afternoon CSV. Do not reuse Week 1.
+
+**Scratch:** `--research-csv config/2026-w02-sun-scratch.csv` on the probe and the full GPP. The file is OUT / IR / D only. Questionable (`Q`) players stay in the pool. Do not exclude Tua, Pittman, McConkey, or Porter Jr.
+
+**Stacks (hints only — do not pass `--stack` by default):** WAS@DAL keep. CIN@HOU fade. Jefferson solo / no MIN stack. Fade ATL pass. Fade MIA@SF game stacks. Fade PIT@NE. Do not lock WAS@DAL stacks in Python.
+
+**Weather:** MIN@CHI pass downgrade. GB@NYJ rain screen. SoFi is `semi_open` — not a wind fade. Retractable roofs stay exposed until the 90-min call.
+
+**T-90 (~11:30 ET for 1 p.m. games):** Pittman, Tua, McConkey, Porter Jr.
+
+**Late-swap 1 p.m. ET lock teams (nflverse):** `--lock-team CAR --lock-team ATL --lock-team NO --lock-team BAL --lock-team MIN --lock-team CHI --lock-team CIN --lock-team HOU --lock-team PIT --lock-team NE --lock-team GB --lock-team NYJ --lock-team CLE --lock-team TB --lock-team PHI --lock-team TEN`.
+
+Operator exports the CSV. The agent does not Enter.
+
+```bash
+# after operator exports THIS week's FanDuel Sunday-afternoon CSV
+rm -rf artifacts/cache/2026/week_2
+ceminidfs fetch --season 2026 --week 2 --force
+
+ceminidfs run --season 2026 --week 2 \
+  --salary data/slates/2026-09-20_fd_sun.csv \
+  --stages fetch,project,normalize --profile gpp
+
+ceminidfs optimize --csv runs/2026_week_2/normalized_players.csv \
+  --out runs/2026_week_2/probe.csv --count 25 --min-salary 58500 \
+  --research-csv config/2026-w02-sun-scratch.csv
+
+ceminidfs run --season 2026 --week 2 \
+  --salary data/slates/2026-09-20_fd_sun.csv \
+  --stages all --profile gpp --min-salary 58500 \
+  --research-csv config/2026-w02-sun-scratch.csv \
+  --flag-wr-triples --late-swap-audit --ownership-fade-report
+```
+
 ## 0. Install (once)
 
 ```bash
@@ -31,11 +67,12 @@ pip install -e ".[dev,data,optimize]"
 Open FanDuel, download the player list for the current week, and save the file.
 The file has salaries and player IDs. Do not use last week's contest export.
 
-Name the file so the week is clear, for example `data/slates/2026-09-13_fd_sun.csv`.
+Name the file so the week is clear, for example `data/slates/2026-09-20_fd_sun.csv`.
 
 ## 2. Fetch nflverse data (2 min)
 
 ```bash
+rm -rf artifacts/cache/2026/week_2
 ceminidfs fetch --season 2026 --week 2 --force
 ```
 
@@ -50,17 +87,19 @@ minutes. Stacks such as `qb:3` plus `3-2` can take hours.
 ```bash
 # Write the normalized player CSV first (probe needs this file)
 ceminidfs run --season 2026 --week 2 \
-  --salary data/slates/2026-09-13_fd_sun.csv \
+  --salary data/slates/2026-09-20_fd_sun.csv \
   --stages fetch,project,normalize --profile gpp
 
 # Probe: 25 lineups
 ceminidfs optimize --csv runs/2026_week_2/normalized_players.csv \
-  --out runs/2026_week_2/probe.csv --count 25 --min-salary 58500
+  --out runs/2026_week_2/probe.csv --count 25 --min-salary 58500 \
+  --research-csv config/2026-w02-sun-scratch.csv
 
 # Full GPP build
 ceminidfs run --season 2026 --week 2 \
-  --salary data/slates/2026-09-13_fd_sun.csv \
-  --stages all --profile gpp --min-salary 58500
+  --salary data/slates/2026-09-20_fd_sun.csv \
+  --stages all --profile gpp --min-salary 58500 \
+  --research-csv config/2026-w02-sun-scratch.csv
 ```
 
 The `gpp` profile enables the copula simulation, the simulation rerank, and
@@ -73,8 +112,9 @@ with `ceminidfs review`. The flags default off. `review` does not re-solve.
 
 ```bash
 ceminidfs run --season 2026 --week 2 \
-  --salary data/slates/2026-09-13_fd_sun.csv \
+  --salary data/slates/2026-09-20_fd_sun.csv \
   --stages all --profile gpp \
+  --research-csv config/2026-w02-sun-scratch.csv \
   --flag-wr-triples --late-swap-audit --ownership-fade-report
 
 ceminidfs review --lineups runs/2026_week_2/lineups.csv \
@@ -112,7 +152,10 @@ Lock each 1 p.m. ET club once. Use nflverse abbreviations, not FanDuel aliases:
 ceminidfs late-swap \
   --lineups runs/2026_week_2/lineups.csv \
   --players runs/2026_week_2/normalized_players.csv \
-  --lock-team JAX --lock-team WAS --lock-team LAR \
+  --lock-team CAR --lock-team ATL --lock-team NO --lock-team BAL \
+  --lock-team MIN --lock-team CHI --lock-team CIN --lock-team HOU \
+  --lock-team PIT --lock-team NE --lock-team GB --lock-team NYJ \
+  --lock-team CLE --lock-team TB --lock-team PHI --lock-team TEN \
   --out runs/2026_week_2/lineups_late_swap.csv
 ```
 

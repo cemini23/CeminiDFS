@@ -28,6 +28,8 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model (K125)](https://
 
 The operator reads each report, then may `--exclude`, `--max-exposure`, or `late-swap`. The agent does not Enter.
 
+Week 2 scratch = `--research-csv config/2026-w02-sun-scratch.csv`.
+
 ## What is NOT included
 
 - No salary CSVs in git. Export the CSV yourself.
