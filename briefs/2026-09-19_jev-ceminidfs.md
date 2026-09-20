@@ -50,6 +50,12 @@ Use jev-mcp on **review CSVs**, not on the solver. `jev_verify` checks an injury
 - **No scrape. No book submit. Do not swap `/route`. Do not replace the solver.** A classifier verdict is HITL input, never an automatic lineup change.
 - Pointer: `briefs/2026-09-19_k266-ceminidfs.md`.
 
+### K267 add
+
+- **No new DFS capability this wave.** Thin FILE. No solver swap.
+- beam.cloud Watch skip. `jev_verify` on the review CSV stays unchanged.
+- Pointer: `briefs/2026-09-20_k267-ceminidfs.md`.
+
 ## Sources
 
 - @osint-wiki/entities/tools/jev-mcp.md
