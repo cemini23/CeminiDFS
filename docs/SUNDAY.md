@@ -23,13 +23,13 @@ Do not guess on a money slate.
 
 **Slate:** 1 p.m. + 4 p.m. ET. Export a **new** FanDuel Sunday-afternoon CSV. Do not reuse Week 1.
 
-**Scratch:** `--research-csv config/2026-w02-sun-scratch.csv` on the probe and the full GPP. The file is OUT / IR / D only. Questionable (`Q`) players stay in the pool. Do not exclude Tua, Pittman, McConkey, or Porter Jr.
+**Scratch:** `--research-csv config/2026-w02-sun-scratch.csv` on the probe and the full GPP. The file is OUT / IR / D only (Sat add: Pittman, Porter Jr.). Questionable (`Q`) players stay in the pool. Do not exclude Tua or McConkey.
 
 **Stacks (hints only — do not pass `--stack` by default):** WAS@DAL keep. CIN@HOU fade. Jefferson solo / no MIN stack. Fade ATL pass. Fade MIA@SF game stacks. Fade PIT@NE. Do not lock WAS@DAL stacks in Python.
 
 **Weather:** MIN@CHI pass downgrade. GB@NYJ rain screen. SoFi is `semi_open` — not a wind fade. Retractable roofs stay exposed until the 90-min call.
 
-**T-90 (~11:30 ET for 1 p.m. games):** Pittman, Tua, McConkey, Porter Jr.
+**T-90:** Tua (~11:30 ET) · McConkey (~14:35 ET) · Bowers / Flowers (treat out unless Active). Pittman and Porter Jr. are already OUT.
 
 - **Slate guard:** the FanDuel salary CSV must be the **Sunday-afternoon** slate only. A full-week export also holds SNF IND@KC. Do not import that game.
 - **ATL QB check:** after `fetch`, the nflverse vegas file may still name Tua as the ATL QB. The hub says **Cooper Rush** starts. Keep the fade on the ATL pass game. Do not retune FPPG.

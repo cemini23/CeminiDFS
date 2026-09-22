@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -214,7 +215,16 @@ def apply_locks_and_excludes(
         pool.lock_player(player)
         locked_names.append(player.full_name)
     for query in excludes or []:
-        player = resolve_pool_player(optimizer, query)
+        try:
+            player = resolve_pool_player(optimizer, query)
+        except ValueError as exc:
+            if "not found" in str(exc).lower():
+                print(
+                    f"WARNING: exclude {query!r} is already out of the pool; skip",
+                    file=sys.stderr,
+                )
+                continue
+            raise
         pool.remove_player(player)
         excluded_names.append(player.full_name)
     return locked_names, excluded_names

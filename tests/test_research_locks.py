@@ -52,12 +52,15 @@ WEEK2_SCRATCH_EXCLUDES = [
     "Omar Cooper Jr.",
     "Brock Bowers",
     "Zay Flowers",
+    "Michael Pittman Jr.",
+    "Joey Porter Jr.",
+    "Jauan Jennings",
+    "Marvin Mims Jr.",
+    "Chig Okonkwo",
 ]
 WEEK2_Q_NAMES = [
     "Tua Tagovailoa",
-    "Michael Pittman Jr.",
     "Ladd McConkey",
-    "Joey Porter Jr.",
 ]
 
 
@@ -66,7 +69,7 @@ def test_week2_scratch_csv_is_exclude_only():
 
     assert locks == []
     assert excludes == WEEK2_SCRATCH_EXCLUDES
-    assert len(excludes) == 18
+    assert len(excludes) == 23
     for name in WEEK2_Q_NAMES:
         assert name not in excludes
 

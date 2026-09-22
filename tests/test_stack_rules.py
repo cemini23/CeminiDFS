@@ -9,6 +9,7 @@ from ceminidfs.export.lineup_report import (
 )
 from ceminidfs.export.optimize import LINEUP_HEADERS
 from ceminidfs.export.stack_rules import (
+    apply_locks_and_excludes,
     max_repeating_from_uniques,
     offense_vs_dst_pairs,
     parse_stack_rule,
@@ -181,3 +182,22 @@ def test_report_lists_build_flags_when_set():
         uniques=3,
     )
     assert "Build: no-offense-vs-dst, one-rb-per-team, projection-floor=8.0, uniques=3" in text
+
+
+def test_exclude_already_out_of_pool_skips(capsys):
+    pool = SimpleNamespace(
+        get_player_by_id=lambda _query: None,
+        get_player_by_name=lambda _query: (_ for _ in ()).throw(KeyError("missing")),
+        all_players=[],
+        remove_player=lambda _player: None,
+        lock_player=lambda _player: None,
+    )
+    optimizer = SimpleNamespace(player_pool=pool)
+
+    locks, excludes = apply_locks_and_excludes(optimizer, excludes=["A.J. Brown"])
+
+    assert locks == []
+    assert excludes == []
+    captured = capsys.readouterr()
+    assert "already out of the pool" in captured.err
+    assert "A.J. Brown" in captured.err
