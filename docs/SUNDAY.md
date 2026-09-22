@@ -112,7 +112,7 @@ heuristic ownership. Pass `--candidates 2000` only if you have extra time.
 
 ## 4. Review the human gate (3 min)
 
-Run the GPP build with the three review flags, or read an existing lineup file
+Run the GPP build with the review flags, or read an existing lineup file
 with `ceminidfs review`. The flags default off. `review` does not re-solve.
 
 ```bash
@@ -120,11 +120,13 @@ ceminidfs run --season 2026 --week 2 \
   --salary data/slates/2026-09-20_fd_sun.csv \
   --stages all --profile gpp \
   --research-csv config/2026-w02-sun-scratch.csv \
-  --flag-wr-triples --late-swap-audit --ownership-fade-report
+  --flag-wr-triples --late-swap-audit --ownership-fade-report \
+  --flag-duplicate-cores --dart-ceiling-report
 
 ceminidfs review --lineups runs/2026_week_2/lineups.csv \
   --players runs/2026_week_2/normalized_players.csv \
-  --flag-wr-triples --late-swap-audit --ownership-fade-report
+  --flag-wr-triples --late-swap-audit --ownership-fade-report \
+  --flag-duplicate-cores --dart-ceiling-report
 ```
 
 | Flag | Report CSV | Operator next step |
@@ -132,9 +134,13 @@ ceminidfs review --lineups runs/2026_week_2/lineups.csv \
 | `--flag-wr-triples` | `stack_fragility_report.csv` | Read the same-game WR triples. May then `--exclude`. |
 | `--late-swap-audit` | `late_swap_alert_report.csv` | Read the `Q` and `D` alerts. Confirm, then use `late-swap`. |
 | `--ownership-fade-report` | `leverage_fade_matrix.csv` | Read the leverage. May then `--max-exposure` or `--exclude`. |
+| `--flag-duplicate-cores` | `duplicate_core_report.csv` | Read a QB and the same two RB slots on more than 2 lineups. Do not drop a lineup. |
+| `--dart-ceiling-report` | `dart_ceiling_rank.csv` | Read players with salary at or below 5500. The rank uses the existing mean. A blank ceiling means the file had no ceiling. |
 
 Read the CSVs. Then you may `--exclude`, `--max-exposure`, or `late-swap`. Do not
 auto-apply a report. Do not auto-drop a `Q` player.
+
+Do not append a lock lineup onto `lineups.csv` with a script. Run `ceminidfs merge-lineups --base <book.csv> --extra <lock.csv> --out <merged.csv> --max-exposure 0.20 --count 15`. If the command exits non-zero, that lock lineup breaks the cap. Rebuild the lock lineup. Do not force the file together.
 
 ## 5. Upload the ID file, then submit (3 min)
 

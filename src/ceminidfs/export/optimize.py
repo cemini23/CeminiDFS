@@ -164,11 +164,19 @@ def _exposure_teams(lineup: Any) -> list[str]:
     return teams
 
 
+class ExposureCapError(ValueError):
+    """A merged lineup would put a player over the exposure cap."""
+
+
 def _exposure_cap(limit: float, final_count: int) -> int:
     cap = math.floor(float(limit) * final_count + 1e-9)
     if limit > 0:
         cap = max(cap, 1)
     return cap
+
+
+def _exposure_name_key(name: str) -> str:
+    return " ".join(str(name).lower().split())
 
 
 def select_with_exposure_caps(
@@ -207,6 +215,84 @@ def select_with_exposure_caps(
         if len(selected) >= final_count:
             break
     return selected
+
+
+def _read_lineup_csv_rows(path: str | Path, site: str) -> list[list[str]]:
+    """Read a lineup CSV with ``csv.reader``. Keep every seat, including blanks."""
+
+    site_key = normalize_site(site)
+    header = LINEUP_HEADERS[site_key]
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Lineups CSV not found: {file_path}")
+    rows: list[list[str]] = []
+    with file_path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.reader(handle)
+        try:
+            columns = [cell.strip() for cell in next(reader)]
+        except StopIteration as exc:
+            raise ValueError(f"empty lineups CSV: {file_path}") from exc
+        if columns[: len(header)] != header:
+            raise ValueError(f"unsupported lineup headers: {columns}")
+        width = len(header)
+        for raw in reader:
+            if not any(cell.strip() for cell in raw):
+                continue
+            cells = [cell.strip() for cell in raw[:width]]
+            if len(cells) < width:
+                cells.extend([""] * (width - len(cells)))
+            rows.append(cells)
+    return rows
+
+
+def _seat_name_keys(row: list[str]) -> list[tuple[str, str]]:
+    seats: list[tuple[str, str]] = []
+    for cell in row:
+        display = " ".join(cell.split())
+        if not display:
+            continue
+        seats.append((_exposure_name_key(display), display))
+    return seats
+
+
+def merge_lineup_csvs(
+    base_path: str | Path,
+    extra_path: str | Path,
+    out_path: str | Path,
+    *,
+    max_exposure: float,
+    final_count: int,
+    site: str = "fanduel",
+) -> int:
+    """Append extra rows, or raise before creating ``out_path``.
+
+    The cap is ``floor(max_exposure * final_count)``. ``final_count`` is the
+    book size. It is not the number of rows in the two files. The first extra
+    row that would break the cap raises ``ExposureCapError``. Earlier extra
+    rows are not written.
+    """
+
+    site_key = normalize_site(site)
+    cap = _exposure_cap(max_exposure, final_count)
+    base_rows = _read_lineup_csv_rows(base_path, site_key)
+    extra_rows = _read_lineup_csv_rows(extra_path, site_key)
+    counts: dict[str, int] = {}
+    for row in base_rows:
+        for key, _display in _seat_name_keys(row):
+            counts[key] = counts.get(key, 0) + 1
+
+    accepted: list[list[str]] = []
+    for row in extra_rows:
+        adds: dict[str, int] = {}
+        for key, display in _seat_name_keys(row):
+            would = counts.get(key, 0) + adds.get(key, 0) + 1
+            if would > cap:
+                raise ExposureCapError(f"{display} would appear {would} times; cap is {cap}")
+            adds[key] = adds.get(key, 0) + 1
+        for key, added in adds.items():
+            counts[key] = counts.get(key, 0) + added
+        accepted.append(row)
+    return write_lineup_rows(base_rows + accepted, out_path, site_key)
 
 
 def generate_lineups(
@@ -327,6 +413,8 @@ def optimize_lineups(
     late_swap_audit: bool = False,
     ownership_fade_report: bool = False,
     ownership_calibration: str | Path | None = None,
+    flag_duplicate_cores: bool = False,
+    dart_ceiling_report: bool = False,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -358,6 +446,8 @@ def optimize_lineups(
         late_swap_audit=late_swap_audit,
         ownership_fade_report=ownership_fade_report,
         ownership_calibration=ownership_calibration,
+        flag_duplicate_cores=flag_duplicate_cores,
+        dart_ceiling_report=dart_ceiling_report,
     )
     _write_build_report(
         lineups,

@@ -10,6 +10,8 @@ The agent does not Enter FanDuel. Do not auto-apply a report.
 | `--flag-wr-triples` | `stack_fragility_report.csv` | Read the same-game WR triples. May later opt in to PlayersGroup `max_from_group=1`. |
 | `--late-swap-audit` | `late_swap_alert_report.csv` | Read the Q and D alerts. Confirm a change. Then use the existing `late-swap`. |
 | `--ownership-fade-report` | `leverage_fade_matrix.csv` | Read the leverage. May later pass `--max-exposure` or `--exclude`. |
+| `--flag-duplicate-cores` | `duplicate_core_report.csv` | Read a QB and the same two RB slots on more than 2 lineups. Do not drop a lineup. |
+| `--dart-ceiling-report` | `dart_ceiling_rank.csv` | Read players with salary at or below 5500. The rank uses the existing mean. A blank ceiling means the file had no ceiling. |
 
 ## Human gate
 

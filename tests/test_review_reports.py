@@ -8,6 +8,8 @@ from unittest.mock import patch
 from ceminidfs.cli import build_parser, main
 from ceminidfs.export.optimize import LINEUP_HEADERS
 from ceminidfs.export.review_reports import (
+    DART_CEILING_HEADER,
+    DUPLICATE_CORE_HEADER,
     LATE_SWAP_ALERT_HEADER,
     LEVERAGE_FADE_HEADER,
     STACK_FRAGILITY_HEADER,
@@ -272,11 +274,19 @@ def test_cli_help_lists_flags_and_review_does_not_optimize(tmp_path: Path):
         assert "--flag-wr-triples" in help_text
         assert "--late-swap-audit" in help_text
         assert "--ownership-fade-report" in help_text
+        assert "--flag-duplicate-cores" in help_text
+        assert "--dart-ceiling-report" in help_text
 
     optimize = parser.parse_args(["optimize", "--csv", "p.csv", "--out", "l.csv"])
     assert optimize.flag_wr_triples is False
     assert optimize.late_swap_audit is False
     assert optimize.ownership_fade_report is False
+    assert optimize.flag_duplicate_cores is False
+    assert optimize.dart_ceiling_report is False
+
+    review = parser.parse_args(["review", "--lineups", "l.csv", "--players", "p.csv"])
+    assert review.flag_duplicate_cores is False
+    assert review.dart_ceiling_report is False
 
     src = inspect.getsource(parse_lineup_csv)
     assert "DictReader" not in src
@@ -318,3 +328,131 @@ def test_cli_help_lists_flags_and_review_does_not_optimize(tmp_path: Path):
     late_header, late_rows = _read_csv(out_dir / "late_swap_alert_report.csv")
     assert late_header == LATE_SWAP_ALERT_HEADER
     assert late_rows == []
+
+
+def test_duplicate_core_same_qb_and_two_rb_slots(tmp_path: Path):
+    players = _write_players(tmp_path / "players.csv")
+    same = _classic(
+        "Josh Allen",
+        "Rashee Rice",
+        "Xavier Worthy",
+        "Khalil Shakir",
+        rb1="James Cook",
+        rb2="Ray Davis",
+    )
+    swapped = _classic(
+        "Josh Allen",
+        "Rashee Rice",
+        "Xavier Worthy",
+        "Khalil Shakir",
+        rb1="Ray Davis",
+        rb2="James Cook",
+    )
+    other = _classic(
+        "Josh Allen",
+        "Rashee Rice",
+        "Xavier Worthy",
+        "Khalil Shakir",
+        rb1="Isiah Pacheco",
+        rb2="Kareem Hunt",
+        flex="James Cook",
+    )
+    lineups = _write_lineups(tmp_path / "lineups.csv", [same, swapped, same, other])
+    original = lineups.read_bytes()
+
+    maybe_write_review_reports(lineups, players, flag_duplicate_cores=True)
+
+    assert lineups.read_bytes() == original
+    header, rows = _read_csv(tmp_path / "duplicate_core_report.csv")
+    assert header == DUPLICATE_CORE_HEADER
+    assert len(rows) == 1
+    assert rows[0][0] == "Josh Allen"
+    assert rows[0][1] == "James Cook"
+    assert rows[0][2] == "Ray Davis"
+    assert rows[0][3] == "3"
+    assert rows[0][4] == "1,2,3"
+    assert rows[0][5] == "do_not_auto_apply"
+
+
+def test_duplicate_core_writes_header_when_none_exceed_two(tmp_path: Path):
+    players = _write_players(tmp_path / "players.csv")
+    one = _classic(
+        "Josh Allen",
+        "Rashee Rice",
+        "Xavier Worthy",
+        "Khalil Shakir",
+        rb1="James Cook",
+        rb2="Ray Davis",
+    )
+    lineups = _write_lineups(tmp_path / "lineups.csv", [one, one])
+
+    maybe_write_review_reports(lineups, players, flag_duplicate_cores=True)
+
+    header, rows = _read_csv(tmp_path / "duplicate_core_report.csv")
+    assert header == DUPLICATE_CORE_HEADER
+    assert rows == []
+
+
+def test_dart_ceiling_report_ranks_existing_mean_and_does_not_invent_ceiling(tmp_path: Path):
+    players = tmp_path / "players.csv"
+    fieldnames = PLAYERS_HEADER + ["Ceiling"]
+    pool = [
+        {
+            **_player("101", "Jalen", "Coker", "WR", "CAR", salary="5900", fppg="18"),
+            "Ceiling": "30",
+        },
+        {
+            **_player("102", "Ada", "Twelve", "WR", "CAR", salary="5300", fppg="12"),
+            "Ceiling": "",
+        },
+        {
+            **_player("103", "Bea", "Seven", "RB", "CAR", salary="5400", fppg="7"),
+            "Ceiling": "20",
+        },
+        {
+            **_player("104", "Cam", "Edge", "WR", "CAR", salary="$5,500", fppg="1"),
+            "Ceiling": "",
+        },
+        {
+            **_player("105", "No", "Salary", "WR", "CAR", salary="", fppg="99"),
+            "Ceiling": "40",
+        },
+    ]
+    with players.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(pool)
+    lineups = _write_lineups(
+        tmp_path / "lineups.csv",
+        [_classic("Josh Allen", "Rashee Rice", "Xavier Worthy", "Khalil Shakir")],
+    )
+    original = lineups.read_bytes()
+
+    maybe_write_review_reports(lineups, players, dart_ceiling_report=True)
+
+    assert lineups.read_bytes() == original
+    header, rows = _read_csv(tmp_path / "dart_ceiling_rank.csv")
+    assert header == DART_CEILING_HEADER
+    by_name = {row[0]: row for row in rows}
+    assert "Jalen Coker" not in by_name
+    assert "No Salary" not in by_name
+    high = by_name["Ada Twelve"]
+    low = by_name["Bea Seven"]
+    edge = by_name["Cam Edge"]
+    assert high[1] == "CAR"
+    assert high[2] == "WR"
+    assert high[3] == "5300"
+    assert high[4] == "12"
+    assert high[5] == ""
+    assert high[6] == "1"
+    assert high[7] == ""
+    assert high[8] == "ceiling_missing"
+    assert low[3] == "5400"
+    assert low[4] == "7"
+    assert low[5] == "20"
+    assert low[6] == "2"
+    assert low[7] == "1"
+    assert low[8] == ""
+    assert edge[3] == "$5,500"
+    assert edge[6] == "3"
+    assert edge[8] == "ceiling_missing"

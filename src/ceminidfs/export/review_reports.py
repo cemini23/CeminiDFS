@@ -31,6 +31,9 @@ PARLAYS_HANDOFF_HEADER = ["player", "team", "projection", "lineup_exposure_pct",
 STACK_FRAGILITY_NAME = "stack_fragility_report.csv"
 LATE_SWAP_ALERT_NAME = "late_swap_alert_report.csv"
 LEVERAGE_FADE_NAME = "leverage_fade_matrix.csv"
+DUPLICATE_CORE_NAME = "duplicate_core_report.csv"
+DART_CEILING_NAME = "dart_ceiling_rank.csv"
+DART_SALARY_MAX = 5500
 
 STACK_FRAGILITY_HEADER = [
     "lineup_index",
@@ -47,6 +50,25 @@ LEVERAGE_FADE_HEADER = [
     "projected_own_pct",
     "leverage",
     "flag",
+]
+DUPLICATE_CORE_HEADER = [
+    "qb",
+    "rb_a",
+    "rb_b",
+    "lineup_count",
+    "lineup_indexes",
+    "note",
+]
+DART_CEILING_HEADER = [
+    "player",
+    "team",
+    "position",
+    "salary",
+    "mean",
+    "ceiling",
+    "mean_rank",
+    "ceiling_rank",
+    "note",
 ]
 
 DO_NOT_AUTO_APPLY = "do_not_auto_apply"
@@ -75,7 +97,9 @@ _ID_KEYS = ("id", "player id", "player_id")
 _OWN_KEYS = ("projected ownership", "ownership", "own%", "own")
 _SALARY_KEYS = ("salary",)
 _PROJ_KEYS = ("fppg", "projection", "avgpointspergame", "avg points per game")
+_CEILING_KEYS = ("projection ceil", "ceiling", "ceil", "proj_ceiling")
 _OPP_KEYS = ("opp", "opponent")
+CEILING_MISSING = "ceiling_missing"
 
 
 @dataclass
@@ -105,6 +129,8 @@ def maybe_write_review_reports(
     late_swap_audit: bool = False,
     ownership_fade_report: bool = False,
     ownership_calibration: str | Path | None = None,
+    flag_duplicate_cores: bool = False,
+    dart_ceiling_report: bool = False,
 ) -> list[Path]:
     """Write the selected review CSVs next to the lineup file (or into ``out_dir``)."""
 
@@ -139,6 +165,10 @@ def maybe_write_review_reports(
                 calibration_path=ownership_calibration,
             )
         )
+    if flag_duplicate_cores:
+        written.append(write_duplicate_core_report(dest / DUPLICATE_CORE_NAME, lineups))
+    if dart_ceiling_report:
+        written.append(write_dart_ceiling_rank(dest / DART_CEILING_NAME, players))
     return written
 
 
@@ -150,6 +180,8 @@ def pop_review_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         "late_swap_audit": bool(kwargs.pop("late_swap_audit", False)),
         "ownership_fade_report": bool(kwargs.pop("ownership_fade_report", False)),
         "ownership_calibration": kwargs.pop("ownership_calibration", None),
+        "flag_duplicate_cores": bool(kwargs.pop("flag_duplicate_cores", False)),
+        "dart_ceiling_report": bool(kwargs.pop("dart_ceiling_report", False)),
     }
 
 
@@ -293,6 +325,127 @@ def write_leverage_fade_matrix(
             ]
         )
     return _write_report(path, LEVERAGE_FADE_HEADER, rows)
+
+
+def write_duplicate_core_report(
+    path: str | Path,
+    lineups: Sequence[Sequence[tuple[str, str]]],
+) -> Path:
+    """QB plus the two RB columns. FLEX is ignored. Does not change lineups."""
+
+    groups: dict[tuple[str, str, str], list[int]] = {}
+    labels: dict[tuple[str, str, str], tuple[str, str, str]] = {}
+    for index, seats in enumerate(lineups, start=1):
+        qb_names = [name for slot, name in seats if slot == "QB" and str(name).strip()]
+        rb_names = [name for slot, name in seats if slot == "RB" and str(name).strip()]
+        if not qb_names or len(rb_names) < 2:
+            continue
+        ordered = sorted(rb_names[:2], key=_normalize_name)
+        key = (
+            _normalize_name(qb_names[0]),
+            _normalize_name(ordered[0]),
+            _normalize_name(ordered[1]),
+        )
+        groups.setdefault(key, []).append(index)
+        labels.setdefault(key, (qb_names[0], ordered[0], ordered[1]))
+
+    rows: list[list[str]] = []
+    for key, indexes in groups.items():
+        if len(indexes) <= 2:
+            continue
+        qb_name, rb_a, rb_b = labels[key]
+        rows.append(
+            [
+                qb_name,
+                rb_a,
+                rb_b,
+                str(len(indexes)),
+                ",".join(str(item) for item in indexes),
+                DO_NOT_AUTO_APPLY,
+            ]
+        )
+    rows.sort(key=lambda row: (-int(row[3]), row[0], row[1], row[2]))
+    return _write_report(path, DUPLICATE_CORE_HEADER, rows)
+
+
+def write_dart_ceiling_rank(
+    path: str | Path,
+    players: Mapping[str, PlayerMeta],
+) -> Path:
+    """Rank salary <= 5500 by the existing mean. Do not invent a ceiling."""
+
+    eligible: list[PlayerMeta] = []
+    seen: set[str] = set()
+    for meta in players.values():
+        if not meta.name:
+            continue
+        key = _normalize_name(meta.name)
+        if key in seen:
+            continue
+        salary = _parse_number(meta.salary)
+        if salary is None or salary > DART_SALARY_MAX:
+            continue
+        seen.add(key)
+        eligible.append(meta)
+
+    mean_values: list[tuple[str, float]] = []
+    ceiling_values: list[tuple[str, float]] = []
+    prepared: list[tuple[PlayerMeta, str, str, str]] = []
+    for meta in eligible:
+        mean_text = str(meta.projection or "").strip()
+        mean_number = _parse_number(mean_text)
+        ceiling_text = _pick(meta.row, _CEILING_KEYS)
+        ceiling_number = _parse_number(ceiling_text)
+        if ceiling_number is None:
+            ceiling_out = ""
+            note = CEILING_MISSING
+        else:
+            ceiling_out = ceiling_text
+            note = ""
+            ceiling_values.append((meta.name, ceiling_number))
+        if mean_number is not None:
+            mean_values.append((meta.name, mean_number))
+        prepared.append((meta, mean_text, ceiling_out, note))
+
+    mean_ranks = _rank_high_to_low(mean_values)
+    ceiling_ranks = _rank_high_to_low(ceiling_values)
+    rows: list[list[str]] = []
+    for meta, mean_text, ceiling_out, note in prepared:
+        rows.append(
+            [
+                meta.name,
+                meta.team,
+                meta.position,
+                meta.salary,
+                mean_text,
+                ceiling_out,
+                str(mean_ranks[meta.name]) if meta.name in mean_ranks else "",
+                str(ceiling_ranks[meta.name]) if meta.name in ceiling_ranks else "",
+                note,
+            ]
+        )
+    rows.sort(key=lambda row: (row[6] == "", int(row[6] or 0), row[0].lower()))
+    return _write_report(path, DART_CEILING_HEADER, rows)
+
+
+def _rank_high_to_low(pairs: Sequence[tuple[str, float]]) -> dict[str, int]:
+    """Rank 1 is the highest value. Equal values break by player name."""
+
+    ordered = sorted(pairs, key=lambda item: (-item[1], item[0].lower(), item[0]))
+    return {name: rank for rank, (name, _value) in enumerate(ordered, start=1)}
+
+
+def _parse_number(value: Any) -> float | None:
+    text = str(value or "").strip().replace("$", "").replace(",", "")
+    if not text:
+        return None
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    if parsed != parsed:  # NaN
+        return None
+    return parsed
 
 
 def _fragility_rows_for_lineup(

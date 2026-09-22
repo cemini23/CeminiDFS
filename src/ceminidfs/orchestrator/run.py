@@ -262,6 +262,10 @@ def _review_report_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["ownership_fade_report"] = True
     if config.get("ownership_calibration"):
         kwargs["ownership_calibration"] = config.get("ownership_calibration")
+    if config.get("flag_duplicate_cores"):
+        kwargs["flag_duplicate_cores"] = True
+    if config.get("dart_ceiling_report"):
+        kwargs["dart_ceiling_report"] = True
     return kwargs
 
 

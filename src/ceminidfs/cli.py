@@ -148,6 +148,12 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     maybe_write_review_reports = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.export.optimize import ExposureCapError, merge_lineup_csvs
+except ImportError:  # pragma: no cover - defensive for partial installs
+    ExposureCapError = None  # type: ignore[assignment]
+    merge_lineup_csvs = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.data.sleeper import fetch_trending_players, trending_with_names
 except ImportError:  # pragma: no cover - defensive for partial installs
     fetch_trending_players = None  # type: ignore[assignment]
@@ -286,6 +292,29 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--site", default="fanduel")
     _add_review_report_arguments(review)
     review.set_defaults(handler=_cmd_review)
+
+    merge = subparsers.add_parser(
+        "merge-lineups",
+        help="Merge lineup CSVs and refuse when a player would exceed the exposure cap",
+    )
+    merge.add_argument("--base", dest="base_path", type=Path, required=True)
+    merge.add_argument("--extra", dest="extra_path", type=Path, required=True)
+    merge.add_argument("--out", dest="output_path", type=Path, required=True)
+    merge.add_argument(
+        "--max-exposure",
+        dest="max_exposure",
+        type=float,
+        required=True,
+        help="Max player exposure 0-1. Cap is floor(max-exposure * count)",
+    )
+    merge.add_argument(
+        "--count",
+        type=int,
+        required=True,
+        help="Final book size used for the exposure cap",
+    )
+    merge.add_argument("--site", default="fanduel")
+    merge.set_defaults(handler=_cmd_merge_lineups)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
     run.add_argument("--season", type=int, required=True)
@@ -691,8 +720,30 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
         late_swap_audit=bool(review.get("late_swap_audit")),
         ownership_fade_report=bool(review.get("ownership_fade_report")),
         ownership_calibration=review.get("ownership_calibration"),
+        flag_duplicate_cores=bool(review.get("flag_duplicate_cores")),
+        dart_ceiling_report=bool(review.get("dart_ceiling_report")),
     )
     print(output_path)
+    return 0
+
+
+def _cmd_merge_lineups(args: argparse.Namespace) -> int:
+    if merge_lineup_csvs is None or ExposureCapError is None:
+        print("Error: lineup merge unavailable", file=sys.stderr)
+        return 1
+    try:
+        merge_lineup_csvs(
+            args.base_path,
+            args.extra_path,
+            args.output_path,
+            max_exposure=args.max_exposure,
+            final_count=args.count,
+            site=args.site,
+        )
+    except ExposureCapError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(args.output_path)
     return 0
 
 
@@ -712,6 +763,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
         late_swap_audit=bool(getattr(args, "late_swap_audit", False)),
         ownership_fade_report=bool(getattr(args, "ownership_fade_report", False)),
         ownership_calibration=getattr(args, "ownership_calibration", None),
+        flag_duplicate_cores=bool(getattr(args, "flag_duplicate_cores", False)),
+        dart_ceiling_report=bool(getattr(args, "dart_ceiling_report", False)),
     )
     print(out_dir)
     return 0
@@ -1126,6 +1179,21 @@ def _add_review_report_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional calibration JSON; scales report own%% only, never FPPG",
     )
+    parser.add_argument(
+        "--flag-duplicate-cores",
+        action="store_true",
+        default=False,
+        help=(
+            "Write duplicate_core_report.csv when one QB and two RB slots "
+            "repeat on more than 2 lineups"
+        ),
+    )
+    parser.add_argument(
+        "--dart-ceiling-report",
+        action="store_true",
+        default=False,
+        help="Write dart_ceiling_rank.csv for salary at or below 5500. Does not invent a ceiling",
+    )
 
 
 def _review_report_overrides(args: argparse.Namespace) -> dict[str, Any]:
@@ -1136,6 +1204,10 @@ def _review_report_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["late_swap_audit"] = True
     if getattr(args, "ownership_fade_report", False):
         overrides["ownership_fade_report"] = True
+    if getattr(args, "flag_duplicate_cores", False):
+        overrides["flag_duplicate_cores"] = True
+    if getattr(args, "dart_ceiling_report", False):
+        overrides["dart_ceiling_report"] = True
     calibration = getattr(args, "ownership_calibration", None)
     if calibration is not None:
         overrides["ownership_calibration"] = calibration

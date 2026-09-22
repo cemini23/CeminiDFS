@@ -77,6 +77,8 @@ def late_swap_lineups(
     late_swap_audit: bool = False,
     ownership_fade_report: bool = False,
     ownership_calibration: str | Path | None = None,
+    flag_duplicate_cores: bool = False,
+    dart_ceiling_report: bool = False,
 ) -> int:
     """Late-swap existing lineups and return the number written.
 
@@ -162,6 +164,8 @@ def late_swap_lineups(
         late_swap_audit=late_swap_audit,
         ownership_fade_report=ownership_fade_report,
         ownership_calibration=ownership_calibration,
+        flag_duplicate_cores=flag_duplicate_cores,
+        dart_ceiling_report=dart_ceiling_report,
     )
     return written
 
