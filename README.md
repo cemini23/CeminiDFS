@@ -25,8 +25,14 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model (K125)](https://
 | `--flag-wr-triples` | `stack_fragility_report.csv` | Read, then may `--exclude` |
 | `--late-swap-audit` | `late_swap_alert_report.csv` | Confirm, then `late-swap` |
 | `--ownership-fade-report` | `leverage_fade_matrix.csv` | Read, then may `--exclude` / `--max-exposure` |
+| `--flag-duplicate-cores` | `duplicate_core_report.csv` | Read a QB and same two RB slots on >2 lineups. Do not drop a lineup. |
+| `--dart-ceiling-report` | `dart_ceiling_rank.csv` | Read players with salary ≤5500. Blank ceiling means file had no ceiling column. |
 
 The operator reads each report, then may `--exclude`, `--max-exposure`, or `late-swap`. The agent does not Enter.
+
+**Merge lineups:** `ceminidfs merge-lineups --base <book.csv> --extra <lock.csv> --out <merged.csv> --max-exposure 0.20 --count 15` refuses to write when a later lock lineup would break the player cap.
+
+After the solver, `generate_lineups` keeps the written CSV under the player cap (default 0.35) and the team cap.
 
 Week 2 scratch = `--research-csv config/2026-w02-sun-scratch.csv`.
 

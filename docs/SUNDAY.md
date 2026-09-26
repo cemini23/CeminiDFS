@@ -11,7 +11,7 @@ lineup. The agent does not Enter.
 >
 > 1. Use this week's FanDuel player-list CSV. Do not reuse last week's contest IDs.
 > 2. Run the 25-lineup probe before the full GPP build.
-> 3. The three review flags default off. Read each report before you solve again.
+> 3. The five review flags default off. Read each report before you solve again.
 > 4. Questionable (`Q`) players stay in the pool. Do not drop them.
 > 5. Do not retune FPPG, CIN, Chase, or weather from one Sunday.
 > 6. The agent does not Enter, Submit, or late-swap.

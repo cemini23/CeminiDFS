@@ -1,6 +1,6 @@
 # Review reports (human gate)
 
-This sheet names three review flags and three report files. Flags default off.
+This sheet names five review flags and five report files. Flags default off.
 
 The operator reads the CSV files. Then the operator may `--exclude`, `--max-exposure`, or `late-swap` on a later solve.
 The agent does not Enter FanDuel. Do not auto-apply a report.

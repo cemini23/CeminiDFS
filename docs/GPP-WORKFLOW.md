@@ -91,16 +91,18 @@ Do not reuse last week’s contest IDs. Use this week’s FanDuel player-list ex
 
 Human gate. Flags default off. `do_not_auto_apply`. Agent does not Enter.
 
-After Upload (or from an existing `lineups.csv`), opt in to three diagnostic CSVs.
+After Upload (or from an existing `lineups.csv`), opt in to five diagnostic CSVs.
 The files sit next to the lineup `--out` file, or in `ceminidfs review --out DIR`
 (default: lineup parent dir). Empty match still writes the header and 0 data rows.
 
 ```bash
 ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp \
-  --flag-wr-triples --late-swap-audit --ownership-fade-report
+  --flag-wr-triples --late-swap-audit --ownership-fade-report \
+  --flag-duplicate-cores --dart-ceiling-report
 
 ceminidfs review --lineups lineups.csv --players normalized_players.csv --out . \
-  --flag-wr-triples --late-swap-audit --ownership-fade-report
+  --flag-wr-triples --late-swap-audit --ownership-fade-report \
+  --flag-duplicate-cores --dart-ceiling-report
 ```
 
 `optimize`, `run`, and `late-swap` honor the same flags after they write lineups.
@@ -111,9 +113,15 @@ ceminidfs review --lineups lineups.csv --players normalized_players.csv --out . 
 | `--flag-wr-triples` | `stack_fragility_report.csv` | Same-game WR triples and `CHALK-QB-WR-WR`. May then `--exclude` or opt-in PlayersGroup `max_from_group`. |
 | `--late-swap-audit` | `late_swap_alert_report.csv` | Rostered Q/D. Q stays in the pool. Confirm, then existing `late-swap`. Do not auto-swap. |
 | `--ownership-fade-report` | `leverage_fade_matrix.csv` | Exposure vs projected own%. `NEGATIVE_LEVERAGE` is a flag only. May then `--max-exposure` / `--exclude`. |
+| `--flag-duplicate-cores` | `duplicate_core_report.csv` | Read a QB and the same two RB slots on more than 2 lineups. Do not drop a lineup. |
+| `--dart-ceiling-report` | `dart_ceiling_rank.csv` | Read players with salary at or below 5500. The rank uses the existing mean. A blank ceiling means the file had no ceiling. |
 
 Read the CSVs. Then you may `--exclude` / `--max-exposure` / `late-swap`. Do not auto-drop Q.
 Do not retune FPPG. Optional `--ownership-calibration` scales report own% only.
+
+**Merge lineups:** `ceminidfs merge-lineups --base <book.csv> --extra <lock.csv> --out <merged.csv> --max-exposure 0.20 --count 15` refuses to write when a later lock lineup would break the player cap.
+
+After the solver, `generate_lineups` keeps the written CSV under the player cap (default 0.35) and the team cap.
 
 KEEP/REJECT and TG01–TG07: `briefs/2026-09-15_gemini-dfs-improve.md`.
 

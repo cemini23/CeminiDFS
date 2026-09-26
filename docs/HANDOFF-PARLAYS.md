@@ -2,7 +2,7 @@
 
 CeminiDFS writes a handoff CSV that CeminiParlays can read. The two CLIs stay split; the operator copies the file by hand.
 
-CeminiDFS now writes this file next to the lineup output after `optimize`, `late-swap`, or `sim-rerank`, and also on `ceminidfs review` (even when the three review flags are off).
+CeminiDFS now writes this file next to the lineup output after `optimize`, `late-swap`, or `sim-rerank`, and also on `ceminidfs review` (even when the five review flags are off).
 
 The handoff CSV columns are: `player,team,projection,lineup_exposure_pct,game,implied_total`. `implied_total` may be blank. No FanDuel contest IDs, no salary.
 
