@@ -361,10 +361,11 @@ def generate_lineups(
     lineups = _optimize_or_raise(optimizer, n=count, max_exposure=max_exposure or None)
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
-    if max_team_exposure is not None:
+    if max_exposure is not None or max_team_exposure is not None:
         lineups = select_with_exposure_caps(
             lineups,
             count,
+            max_exposure=max_exposure,
             max_team_exposure=max_team_exposure,
         )
     return lineups
