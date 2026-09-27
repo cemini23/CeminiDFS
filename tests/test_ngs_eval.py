@@ -6,9 +6,14 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 
-from ceminidfs.data.ngs_eval import load_ngs_passing_sample
+from ceminidfs.data.ngs_eval import (
+    apply_ngs_passing_residual,
+    extract_ngs_passing_features,
+    load_ngs_passing_sample,
+)
 
 
 class TestLoadNgsPassingSample:
@@ -95,3 +100,68 @@ class TestNgsEvalModule:
 
         assert ngs_eval.load_ngs_passing_sample.__doc__ is not None
         assert "NGS" in ngs_eval.load_ngs_passing_sample.__doc__
+
+
+class TestNgsPassingResidual:
+    """The NGS passing column sits on the row with a zero live coefficient."""
+
+    def test_extract_features_reads_cpoe_and_separation(self) -> None:
+        features = extract_ngs_passing_features(_ngs_frame())
+
+        assert features["player_id"].tolist() == ["qb1"]
+        assert features["ngs_cpoe"].iloc[0] == pytest.approx(4.0)
+        assert features["ngs_avg_separation"].iloc[0] == pytest.approx(2.5)
+
+    def test_default_coefficient_stores_column_and_keeps_projection(self) -> None:
+        rows = apply_ngs_passing_residual(_passing_rows(), _ngs_frame())
+
+        assert rows[0]["ngs_cpoe"] == pytest.approx(4.0)
+        assert rows[0]["ngs_avg_separation"] == pytest.approx(2.5)
+        assert rows[0]["fd_projection"] == pytest.approx(20.0)
+
+    def test_config_enabled_default_coefficient_keeps_projection(self) -> None:
+        rows = apply_ngs_passing_residual(
+            _passing_rows(),
+            _ngs_frame(),
+            config={"ngs_eval": {"enabled": True}},
+        )
+
+        assert rows[0]["ngs_cpoe"] == pytest.approx(4.0)
+        assert rows[0]["fd_projection"] == pytest.approx(20.0)
+
+    def test_explicit_coefficient_moves_the_passing_projection(self) -> None:
+        rows = apply_ngs_passing_residual(_passing_rows(), _ngs_frame(), coefficient=1.0)
+
+        assert rows[0]["fd_projection"] == pytest.approx(24.0)
+
+    def test_missing_ngs_columns_is_a_noop(self) -> None:
+        frame = pd.DataFrame([{"player_gsis_id": "qb1", "attempts": 30}])
+
+        assert apply_ngs_passing_residual(_passing_rows(), frame) == _passing_rows()
+
+    def test_none_frame_is_a_noop(self) -> None:
+        assert apply_ngs_passing_residual(_passing_rows(), None) == _passing_rows()
+
+
+def _ngs_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "player_gsis_id": "qb1",
+                "player_display_name": "QB One",
+                "completion_percentage_above_expectation": 4.0,
+                "avg_separation": 2.5,
+            }
+        ]
+    )
+
+
+def _passing_rows() -> list[dict[str, object]]:
+    return [
+        {
+            "player_id": "qb1",
+            "player_name": "QB One",
+            "fd_position": "QB",
+            "fd_projection": 20.0,
+        }
+    ]

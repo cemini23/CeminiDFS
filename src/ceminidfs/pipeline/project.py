@@ -66,6 +66,12 @@ def project_week(
                 raise
             rows = apply_salary_fppg_placeholder(rows, site or _site_from_rows(rows))
 
+    if _ngs_eval_enabled(cfg):
+        rows = _apply_ngs_passing_overlay(rows, season, cfg)
+
+    if _rookie_prior_enabled(cfg):
+        rows = _apply_rookie_prior_overlay(rows, cfg)
+
     if _simulation_enabled(cfg):
         rows = _add_simulation_to_rows(rows, cfg)
 
@@ -101,6 +107,61 @@ def _espn_enabled(config: Mapping[str, Any]) -> bool:
     if isinstance(espn_cfg, Mapping):
         return bool(espn_cfg.get("enabled"))
     return bool(config.get("espn_adjunct_enabled"))
+
+
+def _ngs_eval_enabled(config: Mapping[str, Any]) -> bool:
+    ngs_cfg = config.get("ngs_eval", {})
+    if isinstance(ngs_cfg, Mapping):
+        return bool(ngs_cfg.get("enabled"))
+    return bool(config.get("ngs_eval_enabled"))
+
+
+def _rookie_prior_enabled(config: Mapping[str, Any]) -> bool:
+    rookie_cfg = config.get("rookie_prior", {})
+    if isinstance(rookie_cfg, Mapping):
+        return bool(rookie_cfg.get("enabled"))
+    return bool(config.get("rookie_prior_enabled"))
+
+
+def _apply_ngs_passing_overlay(
+    rows: list[dict[str, Any]],
+    season: int,
+    config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Store NGS passing columns on the rows. The live coefficient stays zero."""
+
+    try:
+        from ceminidfs.data.ngs_eval import apply_ngs_passing_residual, load_ngs_passing_sample
+
+        ngs_df = load_ngs_passing_sample(season=season)
+        return apply_ngs_passing_residual(rows, ngs_df, config=config)
+    except Exception as exc:
+        print(f"WARNING: NGS passing overlay failed; continuing without it: {exc}", file=sys.stderr)
+        return rows
+
+
+def _apply_rookie_prior_overlay(
+    rows: list[dict[str, Any]],
+    config: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Add the rookie prior from a local college CSV. The default prior is zero."""
+
+    try:
+        from ceminidfs.models.rookie_prior import (
+            RookiePriorSettings,
+            apply_rookie_prior,
+            load_college_features_csv,
+        )
+
+        rookie_cfg = config.get("rookie_prior", {})
+        rookie_cfg = rookie_cfg if isinstance(rookie_cfg, Mapping) else {}
+        csv_path = rookie_cfg.get("csv_path")
+        features = load_college_features_csv(csv_path) if csv_path else {}
+        settings = RookiePriorSettings.from_config(config)
+        return apply_rookie_prior(rows, features, settings)
+    except Exception as exc:
+        print(f"WARNING: rookie prior overlay failed; continuing without it: {exc}", file=sys.stderr)
+        return rows
 
 
 def _buzz_enabled(config: Mapping[str, Any]) -> bool:
@@ -225,4 +286,56 @@ def _write_projection_base(stats_df: pd.DataFrame, config: Mapping[str, Any]) ->
     work_dir.mkdir(parents=True, exist_ok=True)
     path = work_dir / "player_projection_base.parquet"
     stats_df.to_parquet(path, index=False)
+    _write_projection_partitions(stats_df, work_dir)
     return path
+
+
+def projection_partition_dir(work_dir: str | Path, season: int, week: int) -> Path:
+    """Return the season/week partition directory for our own projection rows."""
+
+    return (
+        Path(work_dir)
+        / "player_projection_base"
+        / f"season={int(season)}"
+        / f"week={int(week)}"
+    )
+
+
+def _write_projection_partitions(stats_df: pd.DataFrame, work_dir: Path) -> list[Path]:
+    """Write one parquet file per season/week partition. Empty frames write nothing."""
+
+    if stats_df.empty or "season" not in stats_df.columns or "week" not in stats_df.columns:
+        return []
+
+    seasons = pd.to_numeric(stats_df["season"], errors="coerce")
+    weeks = pd.to_numeric(stats_df["week"], errors="coerce")
+    frame = stats_df.loc[seasons.notna() & weeks.notna()].copy()
+    if frame.empty:
+        return []
+
+    frame["season"] = pd.to_numeric(frame["season"], errors="coerce").astype(int)
+    frame["week"] = pd.to_numeric(frame["week"], errors="coerce").astype(int)
+
+    written: list[Path] = []
+    for (season, week), partition in frame.groupby(["season", "week"], dropna=False):
+        partition_dir = projection_partition_dir(work_dir, int(season), int(week))
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        partition_path = partition_dir / "player_projection_base.parquet"
+        partition.to_parquet(partition_path, index=False)
+        written.append(partition_path)
+    return written
+
+
+def load_projection_partitions(work_dir: str | Path) -> pd.DataFrame:
+    """Read all season/week projection partitions. Return an empty frame if absent."""
+
+    root = Path(work_dir) / "player_projection_base"
+    if not root.is_dir():
+        return pd.DataFrame()
+
+    files = sorted(root.glob("season=*/week=*/player_projection_base.parquet"))
+    if not files:
+        return pd.DataFrame()
+
+    frames = [pd.read_parquet(path) for path in files]
+    return pd.concat(frames, ignore_index=True, sort=False)

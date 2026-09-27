@@ -141,6 +141,32 @@ def test_project_week_diy_with_cache(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert float(rows[0]["fd_projection"]) > 0
     assert rows[0]["fd_projection"] != "22.5"
     assert (tmp_path / "player_projection_base.parquet").is_file()
+    partition = (
+        tmp_path / "player_projection_base" / "season=2024" / "week=4" / "player_projection_base.parquet"
+    )
+    assert partition.is_file()
+
+
+def test_engine_applies_wind_pass_yards_haircut(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """One wind haircut lowers the passing-yards mean and leaves pass TD unchanged."""
+    week_dir = _write_week_cache(tmp_path)
+    monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
+
+    monkeypatch.setattr(
+        engine, "build_wind_pass_yards_multipliers", lambda *args, **kwargs: {"KC": 1.0, "BUF": 1.0}
+    )
+    baseline = engine.build_diy_projections(2024, 4, _salary_rows(), {"work_dir": tmp_path})
+
+    monkeypatch.setattr(
+        engine, "build_wind_pass_yards_multipliers", lambda *args, **kwargs: {"KC": 0.5, "BUF": 0.5}
+    )
+    windy = engine.build_diy_projections(2024, 4, _salary_rows(), {"work_dir": tmp_path})
+
+    baseline_qb = baseline.loc[baseline["position"] == "QB"].iloc[0]
+    windy_qb = windy.loc[windy["position"] == "QB"].iloc[0]
+
+    assert windy_qb["pass_yds"] == pytest.approx(baseline_qb["pass_yds"] * 0.5)
+    assert windy_qb["pass_td"] == pytest.approx(baseline_qb["pass_td"])
 
 
 def _salary_rows() -> list[dict[str, object]]:

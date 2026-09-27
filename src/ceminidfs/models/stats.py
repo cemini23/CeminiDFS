@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from ceminidfs.data.stadiums import get_stadium, normalize_team_abbr, roof_type_is_weather_exposed
 from ceminidfs.models.defense import build_defense_ratings, defense_multiplier
 from ceminidfs.models.usage import history_week_cutoff
 from ceminidfs.models.stats_settings import (
@@ -23,6 +24,14 @@ from ceminidfs.models.stats_settings import (
     LEAGUE_YPT,
     StatsSettings,
 )
+
+
+# One passing-yards wind haircut. It reuses stadiums.roof_type and the weather
+# wind field. It does not change pass rate. Indoor roofs return 1.0.
+LEAGUE_WIND_PASS_YDS_START_MPH = 10.0
+LEAGUE_WIND_PASS_YDS_HEAVY_MPH = 15.0
+WIND_PASS_YDS_LIGHT_MULTIPLIER = 0.96
+WIND_PASS_YDS_HEAVY_MULTIPLIER = 0.90
 
 
 @dataclass(frozen=True)
@@ -166,6 +175,94 @@ def project_player_stats(
     )
 
 
+def passing_yards_wind_multiplier(
+    wind_mph: Any,
+    roof_type: str,
+    *,
+    start_mph: float = LEAGUE_WIND_PASS_YDS_START_MPH,
+    heavy_mph: float = LEAGUE_WIND_PASS_YDS_HEAVY_MPH,
+    light_multiplier: float = WIND_PASS_YDS_LIGHT_MULTIPLIER,
+    heavy_multiplier: float = WIND_PASS_YDS_HEAVY_MULTIPLIER,
+) -> float:
+    """Return a passing-yards multiplier from wind and the venue roof type.
+
+    An open or retractable roof is weather-exposed. A dome, an indoor venue, a
+    semi-open canopy, and a closed retractable roof return 1.0.
+    """
+
+    if not roof_type_is_weather_exposed(roof_type):
+        return 1.0
+    wind_value = pd.to_numeric(pd.Series([wind_mph]), errors="coerce").iloc[0]
+    if pd.isna(wind_value):
+        return 1.0
+    if float(wind_value) >= heavy_mph:
+        return heavy_multiplier
+    if float(wind_value) >= start_mph:
+        return light_multiplier
+    return 1.0
+
+
+def build_wind_pass_yards_multipliers(
+    vegas: pd.DataFrame,
+    weather: pd.DataFrame | None,
+) -> dict[str, float]:
+    """Return one passing-yards wind multiplier per team in each Vegas game."""
+
+    if vegas is None or vegas.empty or "home_team" not in vegas.columns:
+        return {}
+
+    wind_by_home = _wind_by_home_team(weather)
+    multipliers: dict[str, float] = {}
+    for _, game in vegas.iterrows():
+        home_team = normalize_team_abbr(game.get("home_team", ""))
+        away_team = normalize_team_abbr(game.get("away_team", ""))
+        if not home_team:
+            continue
+        try:
+            stadium = get_stadium(home_team)
+        except KeyError:
+            continue
+        multiplier = passing_yards_wind_multiplier(wind_by_home.get(home_team), stadium.roof_type)
+        multipliers[home_team] = multiplier
+        if away_team:
+            multipliers[away_team] = multiplier
+    return multipliers
+
+
+def apply_wind_passing_haircut(
+    stats_df: pd.DataFrame,
+    multipliers: Mapping[str, float],
+) -> pd.DataFrame:
+    """Lower the passing-yards mean for an exposed venue with high wind.
+
+    This haircut changes only ``pass_yds``. It does not change pass rate.
+    """
+
+    if stats_df.empty or not multipliers or "pass_yds" not in stats_df.columns:
+        return stats_df.copy()
+
+    output = stats_df.copy()
+    team = output.get("team", pd.Series("", index=output.index)).astype(str)
+    multiplier = team.map(lambda value: float(multipliers.get(value, 1.0)))
+    output["pass_yds"] = (
+        pd.to_numeric(output["pass_yds"], errors="coerce").fillna(0.0) * multiplier
+    )
+    return output
+
+
+def _wind_by_home_team(weather: pd.DataFrame | None) -> dict[str, float | None]:
+    if weather is None or weather.empty:
+        return {}
+    if not {"home_team", "wind_speed_10m_mph"}.issubset(weather.columns):
+        return {}
+
+    wind: dict[str, float | None] = {}
+    for _, row in weather.iterrows():
+        value = pd.to_numeric(row["wind_speed_10m_mph"], errors="coerce")
+        wind[normalize_team_abbr(row["home_team"])] = None if pd.isna(value) else float(value)
+    return wind
+
+
 def build_week_stats(
     usage_df: pd.DataFrame,
     pbp: pd.DataFrame,
@@ -224,7 +321,12 @@ def build_week_stats(
         rows.append(projection.to_dict())
 
     output = pd.DataFrame(rows, columns=columns)
-    for column in ("workload_index", "workload_risk_flag"):
+    for column in (
+        "workload_index",
+        "workload_risk_flag",
+        "goal_line_carry_share",
+        "goal_line_target_share",
+    ):
         if column not in week_usage.columns:
             continue
         values_by_player = week_usage.drop_duplicates(subset=["player_id"], keep="first").set_index(

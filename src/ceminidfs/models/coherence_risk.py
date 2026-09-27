@@ -386,6 +386,135 @@ def apply_red_zone_usage_adjustments(
     return output
 
 
+def build_player_goal_line_shares(
+    pbp: pd.DataFrame,
+    through_week: int,
+    *,
+    settings: CoherenceRiskSettings,
+) -> dict[str, dict[str, float]]:
+    """Return player carry and target shares inside the goal line.
+
+    The goal-line zone is ``yardline_100 <= settings.goal_line.yardline_100``.
+    A player share is the player count divided by the team count in that zone.
+    """
+
+    historical = _historical_scrimmage(pbp, through_week)
+    if historical.empty or "posteam" not in historical.columns:
+        return {}
+
+    yardline = _yardline_100(historical)
+    frame = historical.loc[yardline.le(settings.goal_line.yardline_100)].copy()
+    if frame.empty:
+        return {}
+
+    frame["team"] = frame["posteam"].fillna("").astype(str)
+    frame = frame.loc[frame["team"] != ""]
+    if frame.empty:
+        return {}
+
+    shares: dict[str, dict[str, float]] = {}
+    _accumulate_goal_line_share(
+        frame,
+        shares,
+        mask=_rush_flag(frame).eq(1),
+        id_aliases=("rusher_player_id", "rusher_id"),
+        name_aliases=("rusher_player_name", "rusher"),
+        field="carry_share",
+    )
+    _accumulate_goal_line_share(
+        frame,
+        shares,
+        mask=_pass_flag(frame).eq(1),
+        id_aliases=("receiver_player_id", "receiver_id", "player_id"),
+        name_aliases=("receiver_player_name", "receiver", "player_name"),
+        field="target_share",
+    )
+    return shares
+
+
+def apply_goal_line_usage_adjustments(
+    usage_df: pd.DataFrame,
+    goal_line_by_player: Mapping[str, Mapping[str, float]],
+    settings: CoherenceRiskSettings,
+) -> pd.DataFrame:
+    """Attach goal-line shares and apply the optional coefficients.
+
+    The carry-share and target-share coefficients default to zero, so the
+    default path leaves every projection unchanged.
+    """
+
+    if usage_df.empty:
+        return usage_df.copy()
+
+    output = usage_df.copy()
+    cfg = settings.goal_line
+    if not cfg.enabled:
+        return output
+    player_ids = output.get("player_id", pd.Series("", index=output.index)).astype(str)
+    output["goal_line_carry_share"] = player_ids.map(
+        lambda player_id: float((goal_line_by_player.get(player_id) or {}).get("carry_share", 0.0))
+    )
+    output["goal_line_target_share"] = player_ids.map(
+        lambda player_id: float((goal_line_by_player.get(player_id) or {}).get("target_share", 0.0))
+    )
+
+    if cfg.carry_share_coefficient and "projected_carries" in output.columns:
+        output["projected_carries"] = pd.to_numeric(
+            output["projected_carries"], errors="coerce"
+        ).fillna(0.0) * (1.0 + cfg.carry_share_coefficient * output["goal_line_carry_share"])
+    if cfg.target_share_coefficient and "projected_targets" in output.columns:
+        output["projected_targets"] = pd.to_numeric(
+            output["projected_targets"], errors="coerce"
+        ).fillna(0.0) * (1.0 + cfg.target_share_coefficient * output["goal_line_target_share"])
+    return output
+
+
+def _accumulate_goal_line_share(
+    frame: pd.DataFrame,
+    shares: dict[str, dict[str, float]],
+    *,
+    mask: pd.Series,
+    id_aliases: tuple[str, ...],
+    name_aliases: tuple[str, ...],
+    field: str,
+) -> None:
+    players = frame.loc[mask].copy()
+    if players.empty:
+        return
+
+    players["player_key"] = _player_identity(players, id_aliases, name_aliases)
+    players = players.loc[players["player_key"] != ""]
+    if players.empty:
+        return
+
+    team_totals = players.groupby("team").size()
+    player_counts = players.groupby(["team", "player_key"]).size()
+    for (team, player_key), count in player_counts.items():
+        denominator = float(team_totals.get(team, 0))
+        if denominator <= 0:
+            continue
+        record = shares.setdefault(str(player_key), {"carry_share": 0.0, "target_share": 0.0})
+        record[field] = float(count) / denominator
+
+
+def _player_identity(
+    frame: pd.DataFrame,
+    id_aliases: tuple[str, ...],
+    name_aliases: tuple[str, ...],
+) -> pd.Series:
+    for column in id_aliases:
+        if column in frame.columns:
+            values = frame[column].fillna("").astype(str)
+            if values.ne("").any():
+                return values
+    for column in name_aliases:
+        if column in frame.columns:
+            values = frame[column].fillna("").astype(str)
+            if values.ne("").any():
+                return values
+    return pd.Series("", index=frame.index)
+
+
 def apply_coherence_risk(
     usage_df: pd.DataFrame,
     stats_df: pd.DataFrame,

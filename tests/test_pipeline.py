@@ -2,6 +2,7 @@ import csv
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -9,7 +10,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ceminidfs.export.canonical import CANONICAL_FIELDS
 from ceminidfs.export.normalize import normalize_csv
 from ceminidfs.orchestrator.run import _parse_stages
-from ceminidfs.pipeline.project import project_week
+from ceminidfs.pipeline.project import (
+    _write_projection_base,
+    load_projection_partitions,
+    projection_partition_dir,
+    project_week,
+)
 
 
 SAMPLE_SALARY_CSV = """\
@@ -72,3 +78,29 @@ def test_parse_stages_auto_inserts_normalize_before_optimize():
 def test_parse_stages_rejects_unknown_stage():
     with pytest.raises(ValueError, match="Unknown stage"):
         _parse_stages("fetch,invalid")
+
+
+def test_projection_base_writes_season_week_partitions(tmp_path: Path):
+    stats = pd.DataFrame(
+        [
+            {"season": 2024, "week": 4, "player_id": "qb1", "pass_yds": 250.0},
+            {"season": 2024, "week": 5, "player_id": "qb1", "pass_yds": 260.0},
+        ]
+    )
+
+    _write_projection_base(stats, {"work_dir": tmp_path})
+
+    assert (tmp_path / "player_projection_base.parquet").is_file()
+    week_four = projection_partition_dir(tmp_path, 2024, 4) / "player_projection_base.parquet"
+    week_five = projection_partition_dir(tmp_path, 2024, 5) / "player_projection_base.parquet"
+    assert week_four.is_file()
+    assert week_five.is_file()
+
+    loaded = load_projection_partitions(tmp_path)
+    assert len(loaded) == 2
+    assert set(loaded["week"]) == {4, 5}
+    assert set(loaded["season"]) == {2024}
+
+
+def test_projection_partitions_absent_returns_empty_frame(tmp_path: Path):
+    assert load_projection_partitions(tmp_path).empty

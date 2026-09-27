@@ -34,6 +34,14 @@ class FourthDownSettings:
 
 
 @dataclass(frozen=True)
+class GoalLineSettings:
+    enabled: bool
+    yardline_100: float
+    carry_share_coefficient: float
+    target_share_coefficient: float
+
+
+@dataclass(frozen=True)
 class WorkloadSettings:
     enabled: bool
     rolling_weeks: int
@@ -54,6 +62,7 @@ class CoherenceRiskSettings:
     pass_protection: PassProtectionSettings
     red_zone_playcall: RedZonePlaycallSettings
     fourth_down: FourthDownSettings
+    goal_line: GoalLineSettings
     workload: WorkloadSettings
     sim_variance: CoherenceSimVarianceSettings
 
@@ -63,6 +72,7 @@ class CoherenceRiskSettings:
         pass_protection = dict(coherence.get("pass_protection") or {})
         red_zone_playcall = dict(coherence.get("red_zone_playcall") or {})
         fourth_down = dict(coherence.get("fourth_down") or {})
+        goal_line = dict(coherence.get("goal_line") or {})
         workload = dict(coherence.get("workload") or {})
         sim_variance = dict(coherence.get("sim_variance") or {})
         return cls(
@@ -87,6 +97,12 @@ class CoherenceRiskSettings:
                 aggression_threshold=float(fourth_down.get("aggression_threshold", 1.15)),
                 pass_attempt_boost=float(fourth_down.get("pass_attempt_boost", 0.03)),
                 target_boost=float(fourth_down.get("target_boost", 0.02)),
+            ),
+            goal_line=GoalLineSettings(
+                enabled=bool(goal_line.get("enabled", True)),
+                yardline_100=float(goal_line.get("yardline_100", 5.0)),
+                carry_share_coefficient=float(goal_line.get("carry_share_coefficient", 0.0)),
+                target_share_coefficient=float(goal_line.get("target_share_coefficient", 0.0)),
             ),
             workload=WorkloadSettings(
                 enabled=bool(workload.get("enabled", False)),

@@ -103,4 +103,10 @@ def load_stadiums_df() -> pd.DataFrame:
 def is_weather_exposed(stadium: Stadium) -> bool:
     """True for open and retractable roofs. Domes and SoFi (semi_open) are indoor."""
 
-    return stadium.roof_type in {"open", "retractable"}
+    return roof_type_is_weather_exposed(stadium.roof_type)
+
+
+def roof_type_is_weather_exposed(roof_type: str) -> bool:
+    """True for open and retractable roofs. Domes and semi_open are indoor."""
+
+    return str(roof_type or "").strip().lower() in {"open", "retractable"}

@@ -10,9 +10,11 @@ from ceminidfs.data.rosters import load_season_rosters
 from ceminidfs.data.stadiums import normalize_team_abbr
 from ceminidfs.models.coherence_risk import (
     apply_fourth_down_aggressiveness_adjustments,
+    apply_goal_line_usage_adjustments,
     apply_pass_protection_penalties,
     apply_red_zone_usage_adjustments,
     apply_workload_risk_flags,
+    build_player_goal_line_shares,
     build_player_workload_index,
     build_team_fourth_down_aggressiveness,
     build_team_pass_protection_stress,
@@ -20,7 +22,11 @@ from ceminidfs.models.coherence_risk import (
 )
 from ceminidfs.models.coherence_settings import CoherenceRiskSettings
 from ceminidfs.models.scoring import add_fantasy_points
-from ceminidfs.models.stats import build_week_stats
+from ceminidfs.models.stats import (
+    apply_wind_passing_haircut,
+    build_week_stats,
+    build_wind_pass_yards_multipliers,
+)
 from ceminidfs.models.dst import build_week_dst_projections
 from ceminidfs.models.usage import build_week_usage, history_week_cutoff, player_game_stats_from_pbp
 from ceminidfs.models.volume import build_week_volume
@@ -159,6 +165,17 @@ def build_diy_projections_from_frames(
         raise ValueError(f"No player usage projections built for {season} week {week}")
 
     hist_cutoff = history_week_cutoff(historical_pbp, season, week)
+    if coherence_settings.enabled and coherence_settings.goal_line.enabled:
+        goal_line_by_player = build_player_goal_line_shares(
+            historical_pbp,
+            hist_cutoff,
+            settings=coherence_settings,
+        )
+        usage_df = apply_goal_line_usage_adjustments(
+            usage_df,
+            goal_line_by_player,
+            coherence_settings,
+        )
     if coherence_settings.enabled and coherence_settings.red_zone_playcall.enabled:
         rz_by_team = build_team_red_zone_run_tendency(
             historical_pbp,
@@ -188,6 +205,11 @@ def build_diy_projections_from_frames(
     stats_df = build_week_stats(usage_df, historical_pbp, season=season, week=week, config=config)
     if stats_df.empty:
         raise ValueError(f"No player stat projections built for {season} week {week}")
+
+    stats_df = apply_wind_passing_haircut(
+        stats_df,
+        build_wind_pass_yards_multipliers(vegas, weather),
+    )
 
     if coherence_settings.enabled and coherence_settings.pass_protection.enabled:
         stress_by_team = build_team_pass_protection_stress(
