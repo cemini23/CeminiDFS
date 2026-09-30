@@ -216,7 +216,9 @@ def format_lineup_report(
         if proj is not None:
             extra.append(f"{float(proj):.1f} proj")
             if float(proj) >= 120.0:
-                extra.append("strong, and often still non-cash in the Sunday Million")
+                extra.append(
+                    "Sunday Million min-cash was 113.78 in Week 2 and 130.3 in Week 3"
+                )
         meta = f" ({', '.join(extra)})" if extra else ""
         badge_text = " | ".join(badges) if badges else "no stack"
         lines.append(f"{index}. {badge_text}{meta}")

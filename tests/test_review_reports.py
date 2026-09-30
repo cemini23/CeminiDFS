@@ -491,8 +491,8 @@ def test_format_lineup_report_120_label():
         _make_lineup(["Josh Allen", "Khalil Shakir", "Dalton Kincaid", "Stefon Diggs", "James Cook", "Ray Davis", "Rashee Rice", "Noah Gray", "Buffalo Bills"], proj=115.0),
     ]
     report = format_lineup_report(lineups)
-    assert "strong, and often still non-cash in the Sunday Million" in report
-    assert report.count("strong, and often still non-cash in the Sunday Million") == 1
+    assert "Sunday Million min-cash was 113.78 in Week 2 and 130.3 in Week 3" in report
+    assert report.count("Sunday Million min-cash was 113.78 in Week 2 and 130.3 in Week 3") == 1
 
 
 def test_format_lineup_report_exposure_cap_stays_two_of_four():
