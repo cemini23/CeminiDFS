@@ -21,7 +21,7 @@ class CountingStats(TypedDict, total=False):
     fumbles_lost: float
     dst_sacks: float
     dst_int: float
-    dst_fumbles_recovered: float
+    dst_opp_fumbles_lost: float
     dst_td: float
     dst_safety: float
     dst_blocked_kick: float
@@ -59,12 +59,16 @@ def _yardage_bonuses(stats: StatsMapping) -> float:
 
 
 def _dst_stub_points(stats: StatsMapping) -> float:
-    """Basic DST event scoring stub; points-allowed tiers can be layered later."""
+    """Basic DST event scoring stub; points-allowed tiers can be layered later.
+
+    Defensive fumble recoveries are scored from opponent fumbles lost only.
+    An own-team fumblesRecovered value does not add points.
+    """
 
     points = (
         _stat(stats, "dst_sacks") * 1.0
         + _stat(stats, "dst_int") * 2.0
-        + _stat(stats, "dst_fumbles_recovered") * 2.0
+        + _stat(stats, "dst_opp_fumbles_lost") * 2.0
         + _stat(stats, "dst_td") * 6.0
         + _stat(stats, "dst_safety") * 2.0
         + _stat(stats, "dst_blocked_kick") * 2.0

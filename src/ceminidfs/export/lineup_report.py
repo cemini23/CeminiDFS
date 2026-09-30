@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import combinations
 from typing import Any, Iterable
 
 DST_POSITIONS = frozenset({"D", "DEF", "DST"})
@@ -203,7 +204,8 @@ def format_lineup_report(
             heading,
         ]
     )
-    for index, lineup in enumerate(pool[:shown], start=1):
+    shown_lineups = pool[:shown]
+    for index, lineup in enumerate(shown_lineups, start=1):
         badges = lineup_stack_badges(lineup)
         names = ", ".join(player_name(player) for player in lineup_players(lineup) if player_name(player))
         salary = getattr(lineup, "salary_costs", None)
@@ -213,10 +215,21 @@ def format_lineup_report(
             extra.append(f"${int(salary)}")
         if proj is not None:
             extra.append(f"{float(proj):.1f} proj")
+            if float(proj) >= 120.0:
+                extra.append("strong, and often still non-cash in the Sunday Million")
         meta = f" ({', '.join(extra)})" if extra else ""
         badge_text = " | ".join(badges) if badges else "no stack"
         lines.append(f"{index}. {badge_text}{meta}")
         lines.append(f"   {names}")
+
+    lines.extend(["", "Lineup overlap (shared players)"])
+    shown_names = [
+        [player_name(player) for player in lineup_players(lp) if player_name(player)]
+        for lp in shown_lineups
+    ]
+    for i, j in combinations(range(len(shown_names)), 2):
+        shared = set(shown_names[i]).intersection(shown_names[j])
+        lines.append(f"  lineups {i+1} & {j+1}: {len(shared)} shared")
 
     lines.extend(["", "Player exposure"])
     for name, count, share in player_exposure_rows(pool)[:25]:

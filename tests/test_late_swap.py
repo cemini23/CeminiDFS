@@ -14,10 +14,12 @@ from ceminidfs.export.late_swap import (
     _normalize_teams,
     _optimize_existing_lineups,
     _players_on_locked_teams,
+    format_prelock_swap_checklist,
     late_swap_lineups,
 )
 from ceminidfs.export.normalize import normalize_csv
 from ceminidfs.export.optimize import LINEUP_HEADERS
+from ceminidfs.data.availability import is_unavailable_status
 
 
 def test_late_swap_module_imports():
@@ -286,3 +288,70 @@ def test_optimize_existing_lineups_keeps_original_when_one_fails():
 
     assert result[0].id == 10
     assert result[1].id == 2
+
+
+def test_format_prelock_swap_checklist_inactive_confirmed_with_replacement():
+    text = format_prelock_swap_checklist(
+        player_name="Rome Odunze",
+        inactive_confirmed=True,
+        replacement_name="Xavier Worthy",
+        replacement_team="KC",
+        lineup_qb_team="KC",
+        recent_targets=8,
+        recent_snaps=45,
+    )
+    assert "player: Rome Odunze" in text
+    assert "inactive_confirmed: yes" in text
+    assert "replacement: Xavier Worthy" in text
+    assert "replacement_team: KC" in text
+    assert "recent_targets: 8" in text
+    assert "recent_snaps: 45" in text
+    assert "replacement team matches lineup QB" in text
+    assert "swap_complete: yes" in text
+
+
+def test_format_prelock_swap_checklist_inactive_not_confirmed():
+    text = format_prelock_swap_checklist(
+        player_name="Rome Odunze",
+        inactive_confirmed=False,
+        replacement_name="Xavier Worthy",
+        replacement_team="KC",
+        lineup_qb_team="KC",
+    )
+    assert "inactive_confirmed: no" in text
+    assert "recent_targets: NO_EVIDENCE" in text
+    assert "recent_snaps: NO_EVIDENCE" in text
+    assert "swap_complete: no" in text
+
+
+def test_format_prelock_swap_checklist_no_replacement():
+    text = format_prelock_swap_checklist(
+        player_name="Rome Odunze",
+        inactive_confirmed=True,
+        replacement_name="",
+        replacement_team="KC",
+        lineup_qb_team="KC",
+    )
+    assert "replacement: none" in text
+    assert "swap_complete: no" in text
+
+
+def test_format_prelock_swap_checklist_q_flag_alone_no_swap():
+    text = format_prelock_swap_checklist(
+        player_name="Rome Odunze",
+        inactive_confirmed=False,
+        replacement_name="Xavier Worthy",
+        replacement_team="KC",
+        lineup_qb_team="KC",
+    )
+    assert "inactive_confirmed: no" in text
+    assert "swap_complete: no" in text
+
+
+def test_questionable_status_stays_available():
+    assert is_unavailable_status("Q") is False
+    assert is_unavailable_status("QUESTIONABLE") is False
+
+
+def test_inactive_status_is_unavailable():
+    assert is_unavailable_status("INACTIVE") is True

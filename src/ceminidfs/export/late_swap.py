@@ -38,6 +38,40 @@ from .stack_rules import (
     resolve_repeating_players,
 )
 
+
+def format_prelock_swap_checklist(
+    player_name: str,
+    inactive_confirmed: bool,
+    replacement_name: str,
+    replacement_team: str,
+    lineup_qb_team: str,
+    recent_targets: int | None = None,
+    recent_snaps: int | None = None,
+) -> str:
+    """Return a pre-lock swap checklist for a Questionable player replacement.
+
+    Prints one fact per line. A salary-file Q flag alone does not complete a swap;
+    ``inactive_confirmed`` must be explicitly True.
+    """
+    lines: list[str] = []
+    lines.append(f"player: {player_name}")
+    lines.append(f"inactive_confirmed: {'yes' if inactive_confirmed else 'no'}")
+    lines.append(f"replacement: {replacement_name if replacement_name else 'none'}")
+    lines.append(f"replacement_team: {replacement_team if replacement_team else 'none'}")
+    if recent_targets is not None:
+        lines.append(f"recent_targets: {recent_targets}")
+    else:
+        lines.append("recent_targets: NO_EVIDENCE")
+    if recent_snaps is not None:
+        lines.append(f"recent_snaps: {recent_snaps}")
+    else:
+        lines.append("recent_snaps: NO_EVIDENCE")
+    if replacement_team and lineup_qb_team and replacement_team.upper() == lineup_qb_team.upper():
+        lines.append("replacement team matches lineup QB")
+    swap_complete = inactive_confirmed and bool(replacement_name)
+    lines.append(f"swap_complete: {'yes' if swap_complete else 'no'}")
+    return "\n".join(lines)
+
 _CELL_ID_SUFFIX = re.compile(r"\s*\(([^)]+)\)\s*$")
 _ID_ONLY = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
 

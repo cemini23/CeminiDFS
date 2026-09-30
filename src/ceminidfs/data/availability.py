@@ -22,6 +22,7 @@ UNAVAILABLE_STATUSES = frozenset(
         "DOUBTFUL",
         "D",
         "DOUBTFUL TO PLAY",
+        "INACTIVE",
     }
 )
 

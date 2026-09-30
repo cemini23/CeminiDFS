@@ -78,7 +78,7 @@ def test_dst_stub_event_points():
     stats = {
         "dst_sacks": 3,
         "dst_int": 1,
-        "dst_fumbles_recovered": 1,
+        "dst_opp_fumbles_lost": 1,
         "dst_td": 1,
         "dst_safety": 1,
         "dst_blocked_kick": 1,
@@ -86,6 +86,19 @@ def test_dst_stub_event_points():
 
     assert fd_points(stats) == 17.0
     assert dk_points(stats) == 17.0
+
+
+def test_dst_fumble_recovery_from_opp_fumbles_lost_only():
+    stats_with_opp = {"dst_opp_fumbles_lost": 2}
+    stats_own = {"dst_fumbles_recovered": 2}
+    stats_both = {"dst_opp_fumbles_lost": 1, "dst_fumbles_recovered": 5}
+
+    assert fd_points(stats_with_opp) == pytest.approx(4.0)
+    assert fd_points(stats_own) == 0.0
+    assert fd_points(stats_both) == pytest.approx(2.0)
+    assert dk_points(stats_with_opp) == pytest.approx(4.0)
+    assert dk_points(stats_own) == 0.0
+    assert dk_points(stats_both) == pytest.approx(2.0)
 
 
 def test_fantasy_points_from_projected_stat_row():

@@ -3,9 +3,11 @@ import csv
 import inspect
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from ceminidfs.cli import build_parser, main
+from ceminidfs.export.lineup_report import format_lineup_report
 from ceminidfs.export.optimize import LINEUP_HEADERS
 from ceminidfs.export.review_reports import (
     DART_CEILING_HEADER,
@@ -456,3 +458,51 @@ def test_dart_ceiling_report_ranks_existing_mean_and_does_not_invent_ceiling(tmp
     assert edge[3] == "$5,500"
     assert edge[6] == "3"
     assert edge[8] == "ceiling_missing"
+
+
+def _make_lineup(names: list[str], proj: float | None = None) -> SimpleNamespace:
+    players = [SimpleNamespace(full_name=n, positions=["FLEX"], team="KC", game_info=None) for n in names]
+    lineup = SimpleNamespace(players=players)
+    if proj is not None:
+        lineup.fantasy_points_projection = proj
+    return lineup
+
+
+def test_format_lineup_report_pair_overlap_counts():
+    lineups = [
+        _make_lineup(["Joe Burrow", "Ja'Marr Chase", "Tee Higgins", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Rashee Rice", "Noah Gray", "Kansas City Chiefs"]),
+        _make_lineup(["Joe Burrow", "Ja'Marr Chase", "Tee Higgins", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Xavier Worthy", "Noah Gray", "Kansas City Chiefs"]),
+        _make_lineup(["Josh Allen", "Khalil Shakir", "Dalton Kincaid", "Stefon Diggs", "James Cook", "Ray Davis", "Rashee Rice", "Noah Gray", "Buffalo Bills"]),
+        _make_lineup(["Patrick Mahomes", "Rashee Rice", "Xavier Worthy", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Khalil Shakir", "Noah Gray", "Kansas City Chiefs"]),
+    ]
+    report = format_lineup_report(lineups)
+    assert "Lineup overlap (shared players)" in report
+    assert "lineups 1 & 2: 8 shared" in report
+    assert "lineups 1 & 3: 3 shared" in report
+    assert "lineups 1 & 4: 6 shared" in report
+    assert "lineups 2 & 3: 2 shared" in report
+    assert "lineups 2 & 4: 6 shared" in report
+    assert "lineups 3 & 4: 4 shared" in report
+
+
+def test_format_lineup_report_120_label():
+    lineups = [
+        _make_lineup(["Joe Burrow", "Ja'Marr Chase", "Tee Higgins", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Rashee Rice", "Noah Gray", "Kansas City Chiefs"], proj=125.5),
+        _make_lineup(["Josh Allen", "Khalil Shakir", "Dalton Kincaid", "Stefon Diggs", "James Cook", "Ray Davis", "Rashee Rice", "Noah Gray", "Buffalo Bills"], proj=115.0),
+    ]
+    report = format_lineup_report(lineups)
+    assert "strong, and often still non-cash in the Sunday Million" in report
+    assert report.count("strong, and often still non-cash in the Sunday Million") == 1
+
+
+def test_format_lineup_report_exposure_cap_stays_two_of_four():
+    lineups = [
+        _make_lineup(["Joe Burrow", "Ja'Marr Chase", "Tee Higgins", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Rashee Rice", "Noah Gray", "Kansas City Chiefs"]),
+        _make_lineup(["Joe Burrow", "Ja'Marr Chase", "Tee Higgins", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Xavier Worthy", "Noah Gray", "Kansas City Chiefs"]),
+        _make_lineup(["Joe Burrow", "Ja'Marr Chase", "Tee Higgins", "Travis Kelce", "Isiah Pacheco", "Ray Davis", "Marquise Brown", "Noah Gray", "Kansas City Chiefs"]),
+        _make_lineup(["Josh Allen", "Khalil Shakir", "Dalton Kincaid", "Stefon Diggs", "James Cook", "Ray Davis", "Rashee Rice", "Noah Gray", "Buffalo Bills"]),
+    ]
+    report = format_lineup_report(lineups)
+    assert " 75%    3  Joe Burrow" in report
+    assert " 25%    1  Josh Allen" in report
+    assert " 75%    3  Ja'Marr Chase" in report
