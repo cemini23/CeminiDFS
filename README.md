@@ -367,7 +367,7 @@ If you’d like to tip, use the **donation-only** addresses below (not trading o
 | **Outlier Weekly** (methodology newsletter) | [outlierweekly.substack.com](https://outlierweekly.substack.com) |
 | **Atto** — organize Italian family documents on your computer | [youratto.com](https://youratto.com) |
 | **GuruWatcher** — Discord alerts for your newsletter’s price levels | [guruwatcher.com](https://guruwatcher.com) |
-| **YouTube** | [@Cemini23](https://www.youtube.com/@Cemini23) |
+| **X** | [@Cemini23](https://x.com/Cemini23) | Build logs and walkthroughs |
 
 wallets: [SUPPORT.md](SUPPORT.md) · canon also in [CCC SUPPORT.md](https://github.com/cemini23/cemini-claude-code-CCC/blob/main/SUPPORT.md).
 
