@@ -63,12 +63,74 @@ def write_synthetic_week_cache(base_dir: Path, season: int = 2024, week: int = 4
     return week_dir
 
 
+# Salary-file skill names that are not in SYNTHETIC_PLAYERS. Each one needs a
+# touch in weeks 1..N-1 or the role gate drops them and the pool can go empty.
+_SLATE_ONLY_TOUCHES: list[dict[str, str]] = [
+    {"name": "Carson Steele", "team": "KC", "opponent": "BUF", "kind": "rush"},
+    {"name": "Jeremy McNichols", "team": "KC", "opponent": "BUF", "kind": "rush"},
+    {"name": "JuJu Smith-Schuster", "team": "KC", "opponent": "BUF", "kind": "target"},
+    {"name": "Kadarius Toney", "team": "KC", "opponent": "BUF", "kind": "target"},
+    {"name": "Montrell Washington", "team": "KC", "opponent": "BUF", "kind": "target"},
+    {"name": "Jody Fortson", "team": "KC", "opponent": "BUF", "kind": "target"},
+    {"name": "Darrynton Evans", "team": "BUF", "opponent": "KC", "kind": "rush"},
+    {"name": "Frank Gore Jr.", "team": "BUF", "opponent": "KC", "kind": "rush"},
+    {"name": "Justin Shorter", "team": "BUF", "opponent": "KC", "kind": "target"},
+    {"name": "Andy Isabella", "team": "BUF", "opponent": "KC", "kind": "target"},
+    {"name": "KJ Hamler", "team": "BUF", "opponent": "KC", "kind": "target"},
+    {"name": "Quintin Morris", "team": "BUF", "opponent": "KC", "kind": "target"},
+]
+
+
 def _synthetic_pbp(season: int, target_week: int) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for game_week in range(1, target_week + 1):
         rows.extend(_team_game_rows(season, game_week, "KC", "BUF"))
         rows.extend(_team_game_rows(season, game_week, "BUF", "KC"))
+        if game_week == 1:
+            rows.extend(_slate_only_touch_rows(season, game_week))
     return pd.DataFrame(rows)
+
+
+def _slate_only_touch_rows(season: int, week: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for player in _SLATE_ONLY_TOUCHES:
+        team = player["team"]
+        qb = _players(team, "QB")[0]
+        kind = player["kind"]
+        is_target = kind == "target"
+        rows.append(
+            {
+                "season": season,
+                "week": week,
+                "game_id": f"{season}_{week:02d}_{team}_{player['opponent']}",
+                "posteam": team,
+                "defteam": player["opponent"],
+                "epa": 0.0,
+                "wp": 0.5,
+                "qtr": 1,
+                "game_seconds_remaining": 3500,
+                "pass": 1 if is_target else 0,
+                "pass_attempt": 1 if is_target else 0,
+                "rush": 0 if is_target else 1,
+                "xpass": 0.5,
+                "passer_player_id": qb["id"] if is_target else None,
+                "passer_player_name": qb["name"] if is_target else None,
+                "receiver_player_id": None,
+                "receiver_player_name": player["name"] if is_target else None,
+                "passing_yards": 0,
+                "receiving_yards": 0,
+                "passing_tds": 0,
+                "receiving_tds": 0,
+                "interceptions": 0,
+                "complete_pass": 0,
+                "air_yards": 0,
+                "rusher_player_id": None,
+                "rusher_player_name": None if is_target else player["name"],
+                "rushing_yards": 0 if is_target else 3,
+                "rushing_tds": 0,
+            }
+        )
+    return rows
 
 
 def _team_game_rows(season: int, week: int, team: str, opponent: str) -> list[dict[str, Any]]:

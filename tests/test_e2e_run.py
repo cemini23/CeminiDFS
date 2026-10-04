@@ -3,6 +3,7 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 pytest.importorskip("pydfs_lineup_optimizer")
@@ -11,14 +12,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ceminidfs.orchestrator.run import run_pipeline
-from ceminidfs.pipeline import engine
+from ceminidfs.pipeline import backtest, engine
 from fixtures.synthetic_cache import write_synthetic_week_cache
 
 
-def test_run_pipeline_diy_to_fanduel_lineups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_run_pipeline_diy_to_fanduel_lineups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
     salary_path = Path(__file__).resolve().parent / "fixtures" / "synthetic_fd_slate.csv"
     week_dir = write_synthetic_week_cache(tmp_path, season=2024, week=4)
     monkeypatch.setattr(engine, "week_cache_dir", lambda season, week: week_dir)
+    synthetic_pbp = pd.read_parquet(week_dir / "pbp.parquet")
+    monkeypatch.setattr(backtest, "load_season_pbp", lambda season: synthetic_pbp)
 
     manifest_path = run_pipeline(
         2024,
@@ -49,3 +56,4 @@ def test_run_pipeline_diy_to_fanduel_lineups(tmp_path: Path, monkeypatch: pytest
     canonical_rows = list(csv.DictReader(canonical_path.open(encoding="utf-8")))
     mahomes = next(row for row in canonical_rows if row["name"] == "Patrick Mahomes")
     assert float(mahomes["fd_projection"]) > 0
+    assert "role gate: floor=1 touch in weeks 1..3; dropped=0" in capsys.readouterr().err

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
 import json
+import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -28,6 +31,8 @@ def run_pipeline(
 ) -> Path:
     """Run the requested CeminiDFS stages and write a JSON manifest."""
     cfg = dict(config or {})
+    # A test may inject a play-by-play frame. It is not a manifest field.
+    participation_pbp = cfg.pop("participation_pbp", None)
     selected_stages = _parse_stages(stages)
     work_dir = Path(cfg.get("work_dir", Path("runs") / f"{season}_week_{week}"))
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -49,10 +54,12 @@ def run_pipeline(
     manifest_path = work_dir / "manifest.json"
     manifest.write(manifest_path)
 
-    canonical_csv = Path(salary_path)
+    canonical_csv: Path | None = None
     normalized_csv = work_dir / "normalized_players.csv"
     lineups_csv = work_dir / "lineups.csv"
-    stage_config = {**cfg, "work_dir": work_dir}
+    stage_config = {**cfg, "work_dir": work_dir, "season": season, "week": week}
+    if participation_pbp is not None:
+        stage_config["participation_pbp"] = participation_pbp
 
     try:
         if "fetch" in selected_stages:
@@ -70,6 +77,9 @@ def run_pipeline(
             manifest.write(manifest_path)
 
         if "normalize" in selected_stages:
+            if canonical_csv is None:
+                canonical_csv = _resolve_canonical_csv(work_dir, season, week)
+            _reject_salary_canonical(canonical_csv, salary_path)
             normalized_csv = _run_normalize(
                 canonical_csv,
                 normalized_csv,
@@ -172,11 +182,105 @@ def _run_fetch(season: int, week: int, config: Mapping[str, Any]) -> Path:
         return _write_fetch_stub(season, week, config)
 
 
+def _resolve_canonical_csv(work_dir: Path, season: int, week: int) -> Path:
+    """Find this week's model file. Never return another week or the salary CSV."""
+
+    preferred_name = f"canonical_projections_{season}_w{week}.csv"
+    preferred = work_dir / preferred_name
+    if preferred.is_file():
+        return preferred
+    others = sorted(
+        path.name
+        for path in work_dir.glob("canonical_projections_*.csv")
+        if path.is_file()
+    )
+    if others:
+        raise FileNotFoundError(
+            f"Missing {preferred_name} in {work_dir}. "
+            f"Refusing to use another canonical file: {', '.join(others)}."
+        )
+    raise FileNotFoundError(
+        f"No canonical projections CSV in {work_dir}. Expected {preferred_name}."
+    )
+
+
+def _reject_salary_canonical(canonical: Path, salary_path: str | Path) -> None:
+    """Raise when normalize would read the FanDuel salary file."""
+
+    if canonical.resolve() == Path(salary_path).resolve():
+        raise ValueError(
+            f"Refusing to normalize the salary CSV {canonical}. "
+            "The run pipeline requires a canonical projections file."
+        )
+
+
+@dataclass(frozen=True)
+class _RoleGatePlan:
+    week: int
+    skip: bool
+    names: set[str]
+
+
+def _role_gate_plan(config: Mapping[str, Any]) -> _RoleGatePlan | None:
+    """Load prior-week touches. Return None when this call is not a week run.
+
+    ``allow_stub`` skips the gate. Week 1 has no prior week. A missing
+    play-by-play cache raises before normalize writes the pool.
+    """
+
+    if config.get("week") is None or config.get("season") is None:
+        return None
+    week = int(config["week"])
+    if bool(config.get("allow_stub")):
+        return _RoleGatePlan(week=week, skip=True, names=set())
+    if week <= 1:
+        return _RoleGatePlan(week=week, skip=False, names=set())
+
+    pbp = config.get("participation_pbp")
+    if pbp is None:
+        from ceminidfs.pipeline.backtest import load_season_pbp
+
+        pbp = load_season_pbp(int(config["season"]))
+    from ceminidfs.export.pool_guards import names_with_participation
+
+    names = names_with_participation(pbp, through_week=week - 1)
+    return _RoleGatePlan(week=week, skip=False, names=names)
+
+
+def _apply_role_gate_file(output_path: Path, plan: _RoleGatePlan) -> None:
+    """Filter the normalized pool. A skipped gate logs and leaves the file."""
+
+    if plan.skip:
+        print(
+            f"role gate: skipped (allow_stub); floor=1 touch in weeks 1..{plan.week - 1}",
+            file=sys.stderr,
+        )
+        return
+
+    from ceminidfs.export.pool_guards import apply_participation_gate
+
+    with output_path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        rows = [dict(row) for row in reader]
+    if not fieldnames:
+        raise ValueError(f"normalized pool has no header: {output_path}")
+    kept = apply_participation_gate(rows, plan.names, week=plan.week)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in kept:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+
 def _run_normalize(input_path: Path, output_path: Path, site: str, config: Mapping[str, Any]) -> Path:
     from ceminidfs.export.normalize import normalize_csv
 
+    plan = _role_gate_plan(config)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     normalize_csv(input_path, output_path, site=site)
+    if plan is not None:
+        _apply_role_gate_file(output_path, plan)
     return output_path
 
 
@@ -249,6 +353,12 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["one_rb_per_team"] = True
     if config.get("projection_floor") is not None:
         kwargs["projection_floor"] = config.get("projection_floor")
+    keep_team_dart = config.get("keep_team_dart")
+    if keep_team_dart:
+        kwargs["keep_team_dart"] = float(keep_team_dart)
+    soft_fade = config.get("soft_fade")
+    if soft_fade:
+        kwargs["soft_fade"] = dict(soft_fade)
     return kwargs
 
 
@@ -266,6 +376,8 @@ def _review_report_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["flag_duplicate_cores"] = True
     if config.get("dart_ceiling_report"):
         kwargs["dart_ceiling_report"] = True
+    if config.get("environment"):
+        kwargs["environment"] = config.get("environment")
     return kwargs
 
 
@@ -353,13 +465,38 @@ def _load_saved_sim_matrix(
 
 
 def _canonical_for_sim(config: Mapping[str, Any]) -> Path | None:
+    """Return this week's model file for sim rerank.
+
+    An explicit ``canonical_path`` wins. A different week's canonical file
+    raises. An empty folder returns ``None`` so the caller can use the
+    normalized pool.
+    """
+
     configured = config.get("canonical_path")
     if configured and Path(configured).is_file():
         return Path(configured)
 
     work_dir = Path(config.get("work_dir", "."))
-    matches = sorted(work_dir.glob("canonical_projections_*.csv"))
-    return matches[-1] if matches else None
+    season = config.get("season")
+    week = config.get("week")
+    if season is None or week is None:
+        others = sorted(
+            path.name
+            for path in work_dir.glob("canonical_projections_*.csv")
+            if path.is_file()
+        )
+        if others:
+            raise FileNotFoundError(
+                f"sim rerank needs season and week to choose a canonical file in {work_dir}. "
+                f"Refusing to use another canonical file: {', '.join(others)}."
+            )
+        return None
+    try:
+        return _resolve_canonical_csv(work_dir, int(season), int(week))
+    except FileNotFoundError as exc:
+        if "Refusing to use another canonical file" in str(exc):
+            raise
+        return None
 
 
 def _simulation_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
