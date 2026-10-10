@@ -16,6 +16,8 @@ ceminidfs optimize --csv normalized_players.csv --out lineups.csv --profile gpp
 ceminidfs run --season 2026 --week 1 --salary slate.csv --stages all --profile gpp
 ```
 
+`project` and `run` also accept `--premium-mode`. The default is `off`. Leave `market` off. See [SUNDAY.md](SUNDAY.md).
+
 ## Stacks, locks, and fades
 
 `optimize` and `run` accept the same build flags. The optimizer writes

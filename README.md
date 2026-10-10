@@ -188,6 +188,8 @@ ceminidfs run --season 2026 --week 2 --salary FILE --stages all \
 
 The Sunday path probes 25 lineups first. 2,000 candidates can take 35 minutes. See [docs/SUNDAY.md](docs/SUNDAY.md).
 
+`project` and `run` accept `--premium-mode off`, `baseline`, or `market`. The default is `off`. `off` leaves the projections unchanged. Do not pass `market` until a later slate measures the coverage report.
+
 **Historical accuracy (no salary CSV):**
 
 ```bash

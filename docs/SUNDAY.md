@@ -164,6 +164,15 @@ ceminidfs optimize --csv runs/2026_week_2/normalized_players.csv \
   or less is not allowed; it becomes the default weight.
 - The optimizer reads the lower weight. The player stays in the pool.
 
+### Premium band (default off)
+
+`project` and `run` accept `--premium-mode off`, `baseline`, or `market`.
+
+- The default is `off`. `off` returns the same projection rows.
+- `market` reorders the $7,000+ band by salary. Leave it off until a later slate measures the coverage report.
+- `baseline` blends that band toward a salary baseline. It is not the default.
+- Do not pass `--premium-mode market` on the Sunday build.
+
 ### Team dart rule (pool guard, default off)
 
 `--keep-team-dart SALARY` keeps at least one player at or below that salary on
