@@ -84,8 +84,56 @@ def project_week(
     if _espn_enabled(cfg):
         rows = _apply_optional_overlay(rows, apply_espn_injury_overlay, "ESPN injury", cfg)
 
+    rows = _dispatch_premium_mode(rows, season, week, cfg)
+
     write_canonical_csv(rows, output_path)
     return output_path
+
+
+def _dispatch_premium_mode(
+    rows: list[dict[str, Any]],
+    season: int,
+    week: int,
+    cfg: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Apply off, baseline, or market. off returns the same rows object."""
+
+    from ceminidfs.models.premium_guard import apply_premium_mode
+
+    mode = str(cfg.get("premium_mode") or "off").strip().lower()
+    if mode == "off" and bool(cfg.get("premium_guard")):
+        mode = "baseline"
+    if mode == "off":
+        adjusted = apply_premium_mode(rows, "off")
+        if not isinstance(adjusted, list):
+            raise TypeError("Expected projection rows from apply_premium_mode")
+        return adjusted
+    if mode == "baseline":
+        return _apply_configured_premium_guard(rows, season, week)
+    if mode == "market":
+        adjusted = apply_premium_mode(rows, "market")
+        if not isinstance(adjusted, list):
+            raise TypeError("Expected projection rows from market_premium_projection")
+        return adjusted
+    raise ValueError("premium_mode must be one of: off, baseline, market")
+
+
+def _apply_configured_premium_guard(
+    rows: list[dict[str, Any]],
+    season: int,
+    week: int,
+) -> list[dict[str, Any]]:
+    """Blend premium salaries toward a baseline fit on earlier weeks only."""
+
+    from ceminidfs.models.premium_guard import apply_premium_guard, salary_implied_baseline
+    from ceminidfs.pipeline.premium_guard_backtest import load_prior_history
+
+    history = load_prior_history(season, week)
+    baseline = salary_implied_baseline(history, season, week)
+    adjusted = apply_premium_guard(rows, baseline)
+    if not isinstance(adjusted, list):
+        raise TypeError("Expected projection rows from apply_premium_guard")
+    return adjusted
 
 
 def _apply_optional_overlay(

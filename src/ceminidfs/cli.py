@@ -210,6 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     project.add_argument("--week", type=int, required=True)
     project.add_argument("--salary", type=Path, required=True)
     _add_profile_argument(project)
+    _add_premium_mode_arguments(project)
     project.set_defaults(handler=_cmd_project)
 
     salary = subparsers.add_parser("salary", help="Ingest a salary CSV into canonical schema")
@@ -397,6 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ignore parquet cache TTL and refetch",
     )
+    _add_premium_mode_arguments(run)
     _add_optimizer_build_arguments(run)
     _add_fade_guard_arguments(run)
     _add_review_report_arguments(run, default_on=True)
@@ -668,12 +670,34 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_premium_mode_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--premium-mode",
+        choices=("off", "baseline", "market"),
+        default="off",
+        help="Premium band mode. off leaves the projections unchanged. The default is off.",
+    )
+    parser.add_argument(
+        "--premium-guard",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+
+
+def _premium_mode_override(args: argparse.Namespace) -> dict[str, Any]:
+    mode = str(getattr(args, "premium_mode", None) or "off").strip().lower()
+    if mode == "off" and getattr(args, "premium_guard", False):
+        mode = "baseline"
+    return {"premium_mode": mode}
+
+
 def _cmd_project(args: argparse.Namespace) -> int:
     if project_week is None:
         raise RuntimeError("Projection stage unavailable: ceminidfs.pipeline.project import failed")
     config = runtime_config(
         profile=args.profile,
         work_dir=Path("runs") / f"{args.season}_week_{args.week}",
+        **_premium_mode_override(args),
     )
     output = project_week(args.season, args.week, args.salary, config)
     print(output)
@@ -894,6 +918,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         allow_stub=args.allow_stub,
         sim_rerank=rerank_override,
         fetch={"force": True} if args.force else None,
+        **_premium_mode_override(args),
         **_optimizer_build_overrides(args),
         **_review_report_overrides(args),
     )
