@@ -247,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_optimizer_build_arguments(optimize)
     _add_fade_guard_arguments(optimize)
     _add_review_report_arguments(optimize, default_on=True)
+    _add_environment_argument(optimize)
     _add_profile_argument(optimize)
     optimize.set_defaults(handler=_cmd_optimize)
 
@@ -298,6 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review.add_argument("--site", default="fanduel")
     _add_review_report_arguments(review)
+    _add_environment_argument(review)
     review.set_defaults(handler=_cmd_review)
 
     merge = subparsers.add_parser(
@@ -329,6 +331,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Players CSV with FanDuel ids. Default: normalized_players.csv next to --out",
     )
     merge.set_defaults(handler=_cmd_merge_lineups)
+
+    research = subparsers.add_parser(
+        "research-export",
+        help="Write environment and injury-status CSVs for CeminiParlays",
+    )
+    research_sub = research.add_subparsers(dest="research_command")
+    research_env = research_sub.add_parser("env", help="Write environment.csv for one slate")
+    research_env.add_argument("--salary", type=Path, required=True)
+    research_env.add_argument("--season", type=int, required=True)
+    research_env.add_argument("--week", type=int, required=True)
+    research_env.add_argument("--out", dest="output_path", type=Path, required=True)
+    research_env.add_argument("--slate-id", default=None)
+    research_env.set_defaults(handler=_cmd_research_env)
+    research_status = research_sub.add_parser(
+        "status",
+        help="Write injury status CSVs from the nflverse injuries cache",
+    )
+    research_status.add_argument("--season", type=int, required=True)
+    research_status.add_argument("--week", type=int, required=True)
+    research_status.add_argument("--out", dest="output_path", type=Path, required=True)
+    research_status.add_argument("--injuries", dest="injuries_path", type=Path, default=None)
+    research_status.set_defaults(handler=_cmd_research_status)
+    research_validate = research_sub.add_parser(
+        "validate",
+        help="Check an environment CSV",
+    )
+    research_validate.add_argument("--slate", dest="slate_path", type=Path, required=True)
+    research_validate.add_argument("--salary", type=Path, default=None)
+    research_validate.add_argument("--season", type=int, default=0)
+    research_validate.add_argument("--week", type=int, default=0)
+    research_validate.set_defaults(handler=_cmd_research_validate)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
     run.add_argument("--season", type=int, required=True)
@@ -367,6 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_optimizer_build_arguments(run)
     _add_fade_guard_arguments(run)
     _add_review_report_arguments(run, default_on=True)
+    _add_environment_argument(run)
     _add_profile_argument(run)
     run.set_defaults(handler=_cmd_run)
 
@@ -795,9 +829,59 @@ def _cmd_review(args: argparse.Namespace) -> int:
         and not bool(getattr(args, "no_review_reports", False)),
         dart_ceiling_report=bool(getattr(args, "dart_ceiling_report", False))
         and not bool(getattr(args, "no_review_reports", False)),
+        environment=getattr(args, "environment", None),
     )
     print(out_dir)
     return 0
+
+
+def _cmd_research_env(args: argparse.Namespace) -> int:
+    from ceminidfs.export.research_export import write_environment_csv
+
+    path = write_environment_csv(
+        args.salary,
+        args.output_path,
+        season=args.season,
+        week=args.week,
+        slate_id=args.slate_id,
+    )
+    print(path)
+    return 0
+
+
+def _cmd_research_status(args: argparse.Namespace) -> int:
+    from ceminidfs.data.fetch import week_cache_dir
+    from ceminidfs.export.research_export import write_status_csvs
+
+    injuries_path = args.injuries_path
+    if injuries_path is None:
+        injuries_path = week_cache_dir(args.season, args.week) / "injuries.parquet"
+    try:
+        dfs_path, parlay_path = write_status_csvs(
+            injuries_path,
+            args.output_path,
+            week=args.week,
+        )
+    except FileNotFoundError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(dfs_path)
+    print(parlay_path)
+    return 0
+
+
+def _cmd_research_validate(args: argparse.Namespace) -> int:
+    from ceminidfs.export.research_export import validate_environment
+
+    errors = validate_environment(
+        args.slate_path,
+        salary_path=args.salary,
+        season=args.season or 0,
+        week=args.week or 0,
+    )
+    for error in errors:
+        print(error, file=sys.stderr)
+    return 1 if errors else 0
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -1252,7 +1336,19 @@ def _review_report_overrides(args: argparse.Namespace) -> dict[str, Any]:
     calibration = getattr(args, "ownership_calibration", None)
     if calibration is not None:
         overrides["ownership_calibration"] = calibration
+    environment = getattr(args, "environment", None)
+    if environment is not None:
+        overrides["environment"] = str(environment)
     return overrides
+
+
+def _add_environment_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--environment",
+        type=Path,
+        default=None,
+        help="Environment CSV. Fills implied_total on the parlays handoff",
+    )
 
 
 def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
