@@ -52,7 +52,7 @@ def test_classic_qb3_stack_composition(tmp_path: Path):
     lineups = generate_lineups(
         players_path,
         site="fanduel",
-        count=3,
+        count=1,
         stacks=["qb:3"],
         max_exposure=1.0,
         min_salary=0,
@@ -92,7 +92,7 @@ def test_questionable_player_stays_eligible_and_can_lock(tmp_path: Path):
     lineups = generate_lineups(
         players_path,
         site="fanduel",
-        count=2,
+        count=1,
         locks=["Isiah Pacheco"],
         max_exposure=1.0,
         min_salary=0,
@@ -104,13 +104,12 @@ def test_questionable_player_stays_eligible_and_can_lock(tmp_path: Path):
         assert "Isiah Pacheco" in names
 
 
-def test_player_exposure_cap_enforced_in_output_csv(tmp_path: Path):
-    """Player exposure cap filters the final CSV, not just the solver."""
+def test_player_exposure_cap_refuses_a_short_book(tmp_path: Path):
+    """A book that cannot meet the requested count raises and writes nothing."""
     salary_path = Path(__file__).resolve().parent / "fixtures" / "synthetic_fd_slate.csv"
     players_path = tmp_path / "players.csv"
     normalize_csv(salary_path, players_path, site="fanduel")
 
-    # Generate one real lineup to copy.
     real_lineups = generate_lineups(
         players_path,
         site="fanduel",
@@ -121,12 +120,14 @@ def test_player_exposure_cap_enforced_in_output_csv(tmp_path: Path):
     assert len(real_lineups) == 1
     template = real_lineups[0]
 
-    # Monkeypatch the optimizer to return 10 identical lineups.
     import ceminidfs.export.optimize as opt_module
 
-    with patch.object(opt_module, "_optimize_or_raise", return_value=[template] * 10):
-        out_csv = tmp_path / "lineups.csv"
-        written = optimize_lineups(
+    out_csv = tmp_path / "lineups.csv"
+    with (
+        patch.object(opt_module, "_optimize_or_raise", return_value=[template] * 10),
+        pytest.raises(ValueError, match=r"wrote 3 lineups; requested 10"),
+    ):
+        optimize_lineups(
             players_path,
             out_csv,
             site="fanduel",
@@ -136,26 +137,8 @@ def test_player_exposure_cap_enforced_in_output_csv(tmp_path: Path):
             min_salary=0,
         )
 
-    # Player cap floor(0.3 * 10) = 3. Team cap floor(0.4 * 10) = 4.
-    # Player cap is tighter, so only 3 lineups should be written.
-    assert written == 3
-
-    # Verify each player appears at most 3 times in the output CSV.
-    with out_csv.open(newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader)
-        rows = list(reader)
-
-    assert len(rows) == 3
-    player_counts: dict[str, int] = {}
-    for row in rows:
-        for cell in row:
-            name = cell.strip()
-            if name:
-                player_counts[name] = player_counts.get(name, 0) + 1
-
-    for name, cnt in player_counts.items():
-        assert cnt <= 3, f"Player {name} appears {cnt} times, cap is 3"
+    assert not out_csv.exists()
+    assert not out_csv.with_name("lineups_fanduel_upload.csv").exists()
 
 
 def test_generate_lineups_default_max_exposure_is_035():

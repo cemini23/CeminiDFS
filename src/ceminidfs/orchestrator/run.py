@@ -353,12 +353,20 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["one_rb_per_team"] = True
     if config.get("projection_floor") is not None:
         kwargs["projection_floor"] = config.get("projection_floor")
+    if config.get("min_skill_pool") is not None:
+        kwargs["min_skill_pool"] = int(config.get("min_skill_pool"))
     keep_team_dart = config.get("keep_team_dart")
     if keep_team_dart:
         kwargs["keep_team_dart"] = float(keep_team_dart)
     soft_fade = config.get("soft_fade")
     if soft_fade:
         kwargs["soft_fade"] = dict(soft_fade)
+    player_soft_fade = config.get("player_soft_fade")
+    if player_soft_fade:
+        kwargs["player_soft_fade"] = list(player_soft_fade)
+    open_qb_teams = config.get("open_qb_teams")
+    if open_qb_teams:
+        kwargs["open_qb_teams"] = list(open_qb_teams)
     return kwargs
 
 

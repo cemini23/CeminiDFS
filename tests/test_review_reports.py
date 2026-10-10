@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ceminidfs.cli import build_parser, main
+from ceminidfs.cli import _review_report_overrides, build_parser, main
 from ceminidfs.export.lineup_report import format_lineup_report
 from ceminidfs.export.optimize import LINEUP_HEADERS
 from ceminidfs.export.review_reports import (
@@ -164,14 +164,20 @@ def test_burrow_chase_higgins_chalk_row(tmp_path: Path):
 
     header, rows = _read_csv(tmp_path / "stack_fragility_report.csv")
     assert header == STACK_FRAGILITY_HEADER
-    assert len(rows) == 1
-    assert rows[0][0] == "1"
-    assert rows[0][1] == "CIN@TB"
-    assert "Ja'Marr Chase" in rows[0][2]
-    assert "Tee Higgins" in rows[0][2]
-    assert rows[0][3] == "2"
-    assert rows[0][4] == "Y"
-    assert rows[0][5] == "do_not_auto_apply"
+    chalk = [row for row in rows if row[4] == "Y" and row[1] == "CIN@TB"]
+    assert len(chalk) == 1
+    assert chalk[0][0] == "1"
+    assert "Ja'Marr Chase" in chalk[0][2]
+    assert "Tee Higgins" in chalk[0][2]
+    assert chalk[0][3] == "2"
+    assert chalk[0][5] == "do_not_auto_apply"
+    same_game = [row for row in rows if row[1] == "CIN@TB" and "Joe Burrow" in row[2]]
+    assert len(same_game) == 1
+    assert "Ja'Marr Chase" in same_game[0][2]
+    assert "Tee Higgins" in same_game[0][2]
+    assert same_game[0][3] == "3"
+    assert same_game[0][4] == "N"
+    assert same_game[0][5] == "do_not_auto_apply"
 
 
 def test_allen_shakir_kincaid_not_chalk(tmp_path: Path):
@@ -193,7 +199,14 @@ def test_allen_shakir_kincaid_not_chalk(tmp_path: Path):
 
     header, rows = _read_csv(tmp_path / "stack_fragility_report.csv")
     assert header == STACK_FRAGILITY_HEADER
-    assert rows == []
+    buf = [row for row in rows if row[1] == "BUF@NYJ"]
+    assert len(buf) == 1
+    assert "Josh Allen" in buf[0][2]
+    assert "Khalil Shakir" in buf[0][2]
+    assert "Dalton Kincaid" in buf[0][2]
+    assert int(buf[0][3]) >= 3
+    assert buf[0][4] == "N"
+    assert buf[0][5] == "do_not_auto_apply"
 
 
 def test_three_wrs_same_game_two_teams(tmp_path: Path):
@@ -207,11 +220,11 @@ def test_three_wrs_same_game_two_teams(tmp_path: Path):
 
     header, rows = _read_csv(tmp_path / "stack_fragility_report.csv")
     assert header == STACK_FRAGILITY_HEADER
-    assert len(rows) == 1
-    assert rows[0][1] == "CIN@TB"
-    assert rows[0][3] == "3"
-    assert rows[0][4] == "N"
-    names = rows[0][2]
+    cin = [row for row in rows if row[1] == "CIN@TB"]
+    assert len(cin) == 1
+    assert cin[0][3] == "3"
+    assert cin[0][4] == "N"
+    names = cin[0][2]
     assert "Ja'Marr Chase" in names
     assert "Tee Higgins" in names
     assert "Mike Evans" in names
@@ -278,13 +291,36 @@ def test_cli_help_lists_flags_and_review_does_not_optimize(tmp_path: Path):
         assert "--ownership-fade-report" in help_text
         assert "--flag-duplicate-cores" in help_text
         assert "--dart-ceiling-report" in help_text
+        assert "--no-review-reports" in help_text
 
     optimize = parser.parse_args(["optimize", "--csv", "p.csv", "--out", "l.csv"])
-    assert optimize.flag_wr_triples is False
+    assert optimize.flag_wr_triples is True
     assert optimize.late_swap_audit is False
     assert optimize.ownership_fade_report is False
-    assert optimize.flag_duplicate_cores is False
-    assert optimize.dart_ceiling_report is False
+    assert optimize.flag_duplicate_cores is True
+    assert optimize.dart_ceiling_report is True
+
+    quiet = parser.parse_args(
+        ["optimize", "--csv", "p.csv", "--out", "l.csv", "--no-review-reports"]
+    )
+    quiet_overrides = _review_report_overrides(quiet)
+    assert "flag_wr_triples" not in quiet_overrides
+    assert "flag_duplicate_cores" not in quiet_overrides
+    assert "dart_ceiling_report" not in quiet_overrides
+    default_overrides = _review_report_overrides(optimize)
+    assert default_overrides["flag_wr_triples"] is True
+    assert default_overrides["flag_duplicate_cores"] is True
+    assert default_overrides["dart_ceiling_report"] is True
+
+    run = parser.parse_args(["run", "--season", "2026", "--week", "4", "--salary", "s.csv"])
+    assert run.flag_wr_triples is True
+    assert run.flag_duplicate_cores is True
+    assert run.dart_ceiling_report is True
+
+    late_swap = parser.parse_args(
+        ["late-swap", "--lineups", "l.csv", "--players", "p.csv"]
+    )
+    assert late_swap.flag_duplicate_cores is False
 
     review = parser.parse_args(["review", "--lineups", "l.csv", "--players", "p.csv"])
     assert review.flag_duplicate_cores is False
@@ -392,12 +428,47 @@ def test_duplicate_core_writes_header_when_none_exceed_two(tmp_path: Path):
 
     header, rows = _read_csv(tmp_path / "duplicate_core_report.csv")
     assert header == DUPLICATE_CORE_HEADER
-    assert rows == []
+    assert len(rows) == 1
+    assert rows[0][0] == "Josh Allen"
+    assert rows[0][1] == "James Cook"
+    assert rows[0][2] == "Ray Davis"
+    assert rows[0][3] == "2"
+    assert rows[0][4] == "1,2"
+
+
+def test_duplicate_core_reports_two_lineups_that_share_four_names(tmp_path: Path):
+    players = _write_players(tmp_path / "players.csv")
+    first = _classic(
+        "Josh Allen",
+        "Rashee Rice",
+        "Xavier Worthy",
+        "Khalil Shakir",
+        rb1="James Cook",
+        rb2="Ray Davis",
+    )
+    second = _classic(
+        "Joe Burrow",
+        "Rashee Rice",
+        "Xavier Worthy",
+        "Khalil Shakir",
+        rb1="Isiah Pacheco",
+        rb2="Kareem Hunt",
+    )
+    lineups = _write_lineups(tmp_path / "lineups.csv", [first, second])
+
+    maybe_write_review_reports(lineups, players, flag_duplicate_cores=True)
+
+    header, rows = _read_csv(tmp_path / "duplicate_core_report.csv")
+    assert header == DUPLICATE_CORE_HEADER
+    assert len(rows) == 1
+    assert rows[0][3] == "2"
+    assert rows[0][4] == "1,2"
+    assert rows[0][5] == "shared_names"
 
 
 def test_dart_ceiling_report_ranks_existing_mean_and_does_not_invent_ceiling(tmp_path: Path):
     players = tmp_path / "players.csv"
-    fieldnames = PLAYERS_HEADER + ["Ceiling"]
+    fieldnames = PLAYERS_HEADER + ["Ceiling", "Projection Ceil", "fd_ceiling"]
     pool = [
         {
             **_player("101", "Jalen", "Coker", "WR", "CAR", salary="5900", fppg="18"),
@@ -418,6 +489,18 @@ def test_dart_ceiling_report_ranks_existing_mean_and_does_not_invent_ceiling(tmp
         {
             **_player("105", "No", "Salary", "WR", "CAR", salary="", fppg="99"),
             "Ceiling": "40",
+        },
+        {
+            **_player("106", "Dee", "Ceil", "WR", "CAR", salary="5200", fppg="9"),
+            "Ceiling": "",
+            "Projection Ceil": "18",
+            "fd_ceiling": "",
+        },
+        {
+            **_player("107", "Guy", "Fdceil", "RB", "CAR", salary="5000", fppg="6"),
+            "Ceiling": "",
+            "Projection Ceil": "",
+            "fd_ceiling": "11",
         },
     ]
     with players.open("w", newline="", encoding="utf-8") as handle:
@@ -452,12 +535,18 @@ def test_dart_ceiling_report_ranks_existing_mean_and_does_not_invent_ceiling(tmp
     assert low[3] == "5400"
     assert low[4] == "7"
     assert low[5] == "20"
-    assert low[6] == "2"
+    assert low[6] == "3"
     assert low[7] == "1"
     assert low[8] == ""
     assert edge[3] == "$5,500"
-    assert edge[6] == "3"
+    assert edge[6] == "5"
     assert edge[8] == "ceiling_missing"
+    filled = by_name["Dee Ceil"]
+    assert filled[5] == "18"
+    assert filled[8] == ""
+    fd_ceil = by_name["Guy Fdceil"]
+    assert fd_ceil[5] == "11"
+    assert fd_ceil[8] == ""
 
 
 def _make_lineup(names: list[str], proj: float | None = None) -> SimpleNamespace:

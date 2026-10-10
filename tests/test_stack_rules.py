@@ -7,7 +7,12 @@ from ceminidfs.export.lineup_report import (
     lineup_stack_badges,
     player_exposure_rows,
 )
-from ceminidfs.export.optimize import LINEUP_HEADERS
+from ceminidfs.export.optimize import (
+    LINEUP_HEADERS,
+    _te_def_pair_message,
+    filter_te_def_pairs,
+    te_def_pair,
+)
 from ceminidfs.export.stack_rules import (
     apply_locks_and_excludes,
     max_repeating_from_uniques,
@@ -201,3 +206,51 @@ def test_exclude_already_out_of_pool_skips(capsys):
     captured = capsys.readouterr()
     assert "already out of the pool" in captured.err
     assert "A.J. Brown" in captured.err
+
+
+def _skill_slot(name: str, position: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        full_name=name,
+        lineup_position=position,
+        positions=[position],
+        original_positions=[position],
+    )
+
+
+def _te_def_lineup(tight_end: str, defense: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        players=[
+            _skill_slot("Quarterback One", "QB"),
+            _skill_slot(tight_end, "TE"),
+            _skill_slot(defense, "DEF"),
+        ]
+    )
+
+
+def test_te_def_pair_filter_keeps_the_first_unique_pair():
+    same = _te_def_lineup("Travis Kelce", "KC Chiefs")
+    repeated = _te_def_lineup("Travis Kelce", "KC Chiefs")
+    new_defense = _te_def_lineup("Travis Kelce", "Buffalo Bills")
+    new_tight_end = _te_def_lineup("Dalton Kincaid", "KC Chiefs")
+
+    kept, repeated_pair = filter_te_def_pairs(
+        [same, repeated, new_defense, new_tight_end],
+        3,
+        "fanduel",
+    )
+
+    assert kept == [same, new_defense, new_tight_end]
+    assert repeated_pair == ("travis kelce", "kc chiefs")
+    assert te_def_pair(same, "fanduel") == ("travis kelce", "kc chiefs")
+
+
+def test_te_def_pair_filter_reports_the_repeated_pair_when_short():
+    same = _te_def_lineup("Travis Kelce", "KC Chiefs")
+    repeated = _te_def_lineup("Travis Kelce", "KC Chiefs")
+
+    kept, repeated_pair = filter_te_def_pairs([same, repeated], 2, "fanduel")
+
+    assert kept == [same]
+    message = _te_def_pair_message(repeated_pair, len(kept), 2)
+    assert "travis kelce" in message
+    assert "kc chiefs" in message

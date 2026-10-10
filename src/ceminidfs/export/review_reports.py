@@ -26,7 +26,15 @@ from ceminidfs.models.ownership import (
 
 
 PARLAYS_HANDOFF_NAME = "ceminidfs_handoff.csv"
-PARLAYS_HANDOFF_HEADER = ["player", "team", "projection", "lineup_exposure_pct", "game", "implied_total"]
+PARLAYS_HANDOFF_HEADER = [
+    "player",
+    "team",
+    "projection",
+    "lineup_exposure_pct",
+    "game",
+    "implied_total",
+    "injury_status",
+]
 
 STACK_FRAGILITY_NAME = "stack_fragility_report.csv"
 LATE_SWAP_ALERT_NAME = "late_swap_alert_report.csv"
@@ -72,6 +80,8 @@ DART_CEILING_HEADER = [
 ]
 
 DO_NOT_AUTO_APPLY = "do_not_auto_apply"
+SHARED_NAMES_NOTE = "shared_names"
+SHARED_NAME_MIN = 4
 NEGATIVE_LEVERAGE = "NEGATIVE_LEVERAGE"
 CHALK_BADGE = "CHALK-QB-WR-WR"
 OWN_FLAG_MIN_PCT = 20.0
@@ -97,7 +107,7 @@ _ID_KEYS = ("id", "player id", "player_id")
 _OWN_KEYS = ("projected ownership", "ownership", "own%", "own")
 _SALARY_KEYS = ("salary",)
 _PROJ_KEYS = ("fppg", "projection", "avgpointspergame", "avg points per game")
-_CEILING_KEYS = ("projection ceil", "ceiling", "ceil", "proj_ceiling")
+_CEILING_KEYS = ("projection ceil", "ceiling", "ceil", "proj_ceiling", "fd_ceiling")
 _OPP_KEYS = ("opp", "opponent")
 CEILING_MISSING = "ceiling_missing"
 
@@ -131,6 +141,7 @@ def maybe_write_review_reports(
     ownership_calibration: str | Path | None = None,
     flag_duplicate_cores: bool = False,
     dart_ceiling_report: bool = False,
+    environment: str | Path | None = None,
 ) -> list[Path]:
     """Write the selected review CSVs next to the lineup file (or into ``out_dir``)."""
 
@@ -147,9 +158,17 @@ def maybe_write_review_reports(
 
     players = load_player_index(players_file)
     lineups = parse_lineup_csv(lineups_file, site=site_key, players=players)
+    implied_totals = _implied_totals_from_environment(environment)
 
     written: list[Path] = []
-    written.append(write_parlays_handoff(dest / PARLAYS_HANDOFF_NAME, lineups, players))
+    written.append(
+        write_parlays_handoff(
+            dest / PARLAYS_HANDOFF_NAME,
+            lineups,
+            players,
+            implied_totals=implied_totals,
+        )
+    )
 
     if flag_wr_triples:
         written.append(write_stack_fragility_report(dest / STACK_FRAGILITY_NAME, lineups, players))
@@ -182,6 +201,7 @@ def pop_review_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         "ownership_calibration": kwargs.pop("ownership_calibration", None),
         "flag_duplicate_cores": bool(kwargs.pop("flag_duplicate_cores", False)),
         "dart_ceiling_report": bool(kwargs.pop("dart_ceiling_report", False)),
+        "environment": kwargs.pop("environment", None),
     }
 
 
@@ -331,11 +351,16 @@ def write_duplicate_core_report(
     path: str | Path,
     lineups: Sequence[Sequence[tuple[str, str]]],
 ) -> Path:
-    """QB plus the two RB columns. FLEX is ignored. Does not change lineups."""
+    """Report a repeated QB-plus-two-RB core, or lineups that share four names.
 
+    FLEX is ignored for the core key. The shared-name rule skips a lineup that a
+    core row already lists. Does not change lineups.
+    """
+
+    seat_lists = [list(seats) for seats in lineups]
     groups: dict[tuple[str, str, str], list[int]] = {}
     labels: dict[tuple[str, str, str], tuple[str, str, str]] = {}
-    for index, seats in enumerate(lineups, start=1):
+    for index, seats in enumerate(seat_lists, start=1):
         qb_names = [name for slot, name in seats if slot == "QB" and str(name).strip()]
         rb_names = [name for slot, name in seats if slot == "RB" and str(name).strip()]
         if not qb_names or len(rb_names) < 2:
@@ -350,9 +375,11 @@ def write_duplicate_core_report(
         labels.setdefault(key, (qb_names[0], ordered[0], ordered[1]))
 
     rows: list[list[str]] = []
+    covered: set[int] = set()
     for key, indexes in groups.items():
-        if len(indexes) <= 2:
+        if len(indexes) < 2:
             continue
+        covered.update(indexes)
         qb_name, rb_a, rb_b = labels[key]
         rows.append(
             [
@@ -364,8 +391,62 @@ def write_duplicate_core_report(
                 DO_NOT_AUTO_APPLY,
             ]
         )
+
+    name_sets = [
+        {_normalize_name(str(name)) for _slot, name in seats if str(name).strip()}
+        for seats in seat_lists
+    ]
+    for component in _shared_name_components(name_sets, covered):
+        first = seat_lists[component[0] - 1]
+        qb_names = [name for slot, name in first if slot == "QB" and str(name).strip()]
+        rb_names = [name for slot, name in first if slot == "RB" and str(name).strip()]
+        rows.append(
+            [
+                qb_names[0] if qb_names else "",
+                rb_names[0] if rb_names else "",
+                rb_names[1] if len(rb_names) > 1 else "",
+                str(len(component)),
+                ",".join(str(item) for item in component),
+                SHARED_NAMES_NOTE,
+            ]
+        )
+
     rows.sort(key=lambda row: (-int(row[3]), row[0], row[1], row[2]))
     return _write_report(path, DUPLICATE_CORE_HEADER, rows)
+
+
+def _shared_name_components(
+    name_sets: Sequence[set[str]],
+    covered: set[int],
+) -> list[list[int]]:
+    """Group uncovered lineups that share ``SHARED_NAME_MIN`` or more names."""
+
+    indexes = [index for index in range(1, len(name_sets) + 1) if index not in covered]
+    parent = {index: index for index in indexes}
+
+    def find(item: int) -> int:
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    def union(left: int, right: int) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for position, left in enumerate(indexes):
+        for right in indexes[position + 1 :]:
+            if len(name_sets[left - 1] & name_sets[right - 1]) >= SHARED_NAME_MIN:
+                union(left, right)
+
+    components: dict[int, list[int]] = defaultdict(list)
+    for index in indexes:
+        components[find(index)].append(index)
+    return sorted(
+        (sorted(members) for members in components.values() if len(members) >= 2),
+        key=lambda members: members[0],
+    )
 
 
 def write_dart_ceiling_rank(
@@ -511,7 +592,59 @@ def _fragility_rows_for_lineup(
                 DO_NOT_AUTO_APPLY,
             ]
         )
+
+    _append_same_game_groups(rows, lineup_index, seats, players)
     return rows
+
+
+_SKILL_POSITIONS = frozenset({"QB", "RB", "WR", "TE"})
+
+
+def _append_same_game_groups(
+    rows: list[list[str]],
+    lineup_index: int,
+    seats: Sequence[tuple[str, str]],
+    players: Mapping[str, PlayerMeta],
+) -> None:
+    """Add a row for each same-game skill group of 3 or more names."""
+
+    seen = {
+        frozenset(part.strip() for part in row[2].split(",") if part.strip())
+        for row in rows
+    }
+    groups: dict[frozenset[str], list[PlayerMeta]] = defaultdict(list)
+    for _slot, name in seats:
+        meta = _lookup(players, name)
+        if meta is None or not (meta.positions & _SKILL_POSITIONS):
+            continue
+        key = meta.game_teams if meta.game_teams else frozenset({meta.team} if meta.team else {name})
+        groups[key].append(meta)
+
+    for game_teams, members in groups.items():
+        unique: list[PlayerMeta] = []
+        seen_names: set[str] = set()
+        for player in members:
+            if not player.name or player.name in seen_names:
+                continue
+            seen_names.add(player.name)
+            unique.append(player)
+        if len(unique) < 3:
+            continue
+        names = sorted(player.name for player in unique)
+        name_set = frozenset(names)
+        if name_set in seen:
+            continue
+        seen.add(name_set)
+        rows.append(
+            [
+                str(lineup_index),
+                _game_label(unique, game_teams),
+                ", ".join(names),
+                str(len(unique)),
+                "N",
+                DO_NOT_AUTO_APPLY,
+            ]
+        )
 
 
 def _lineup_namespace(
@@ -645,14 +778,18 @@ def write_parlays_handoff(
     path: str | Path,
     lineups: Any,
     players: Mapping[str, PlayerMeta],
+    *,
+    implied_totals: Mapping[str, str] | None = None,
 ) -> Path:
     """Write the parlays handoff CSV next to the lineup file.
 
-    Columns: player, team, projection, lineup_exposure_pct, game, implied_total.
-    implied_total may be blank. No FanDuel contest IDs, no salary.
+    projection is fd_projection when that column is present.
+    implied_total stays blank when no cited total exists.
+    DST, DEF, and D rows are omitted. No FanDuel contest IDs, no salary.
     Exposure = 100 * (lineups containing the player) / n_lineups, one decimal.
     """
 
+    totals = implied_totals or {}
     normalized_lineups = _extract_lineup_names(lineups)
     total = len(normalized_lineups)
     counts: Counter[str] = Counter()
@@ -666,22 +803,56 @@ def write_parlays_handoff(
     rows: list[list[str]] = []
     for name in sorted(counts.keys()):
         meta = _lookup(players, name)
+        if _is_defense(meta):
+            continue
         exposure = (counts[name] / total * 100.0) if total else 0.0
         team = meta.team if meta is not None else ""
-        projection = meta.projection if meta is not None else ""
+        projection = _handoff_projection(meta)
         game = meta.game_raw if meta is not None else ""
-        implied_total = ""
+        injury_status = meta.injury if meta is not None else ""
+        implied_total = totals.get(team.upper(), "") if team else ""
         rows.append(
             [
                 display.get(name, name),
                 team,
-                projection if projection else "",
+                projection,
                 f"{exposure:.1f}",
                 game,
                 implied_total,
+                injury_status,
             ]
         )
     return _write_report(path, PARLAYS_HANDOFF_HEADER, rows)
+
+
+def _handoff_projection(meta: PlayerMeta | None) -> str:
+    """Use fd_projection when that column is present. Do not prefer FPPG over it."""
+
+    if meta is None:
+        return ""
+    lowered = {str(key).strip().lower() for key in meta.row}
+    if "fd_projection" in lowered:
+        return _pick(meta.row, ("fd_projection",))
+    return meta.projection
+
+
+def _is_defense(meta: PlayerMeta | None) -> bool:
+    if meta is None:
+        return False
+    tokens = {str(meta.position or "").upper()}
+    tokens.update(str(item).upper() for item in meta.positions)
+    return bool(tokens & {"D", "DEF", "DST"})
+
+
+def _implied_totals_from_environment(environment: str | Path | None) -> dict[str, str] | None:
+    if not environment:
+        return None
+    env_path = Path(environment)
+    if not env_path.is_file():
+        raise FileNotFoundError(f"environment CSV not found: {env_path}")
+    from ceminidfs.export.research_export import load_team_implied_totals
+
+    return load_team_implied_totals(env_path)
 
 
 def _write_report(path: str | Path, header: list[str], rows: Iterable[Sequence[str]]) -> Path:

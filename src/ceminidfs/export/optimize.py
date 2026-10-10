@@ -7,15 +7,23 @@ import csv
 import math
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from .lineup_report import format_lineup_report, write_lineup_report
 from .normalize import SHOWDOWN_SITES, normalize_site
+from .pool_guards import (
+    apply_open_qb_gate,
+    apply_skill_pool_floor,
+    apply_soft_fade,
+    apply_team_dart_guard,
+    open_qb_teams_from_csv,
+)
 from .stack_rules import (
     apply_locks_and_excludes,
     apply_pool_constraints,
     apply_stack_specs,
     attach_csv_original_positions,
+    nfl_positions,
     parse_stack_rules,
     resolve_repeating_players,
 )
@@ -41,6 +49,10 @@ POSITION_ALIASES = {
 }
 
 CELL_FORMATS = ("name", "name_id", "id")
+
+# Log of every team the dart rule kept. ``generate_lineups`` fills the list.
+# The build report reads it after the solve. The list is process-local.
+TEAM_DART_LOG: list[dict[str, Any]] = []
 
 
 def _load_pydfs() -> tuple[Any, Any, Any, Any]:
@@ -295,6 +307,208 @@ def merge_lineup_csvs(
     return write_lineup_rows(base_rows + accepted, out_path, site_key)
 
 
+def _player_ids_by_name(players_csv: str | Path) -> dict[str, str]:
+    """Map a normalized player name to its FanDuel id."""
+
+    path = Path(players_csv)
+    if not path.is_file():
+        raise FileNotFoundError(f"players CSV not found: {path}")
+    mapping: dict[str, str] = {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        for raw in reader:
+            lowered = {
+                str(key).strip().lower(): str(value or "").strip()
+                for key, value in raw.items()
+                if key
+            }
+            player_id = (
+                lowered.get("id")
+                or lowered.get("player id")
+                or lowered.get("player_id")
+                or ""
+            )
+            if not player_id:
+                continue
+            first = lowered.get("first name") or lowered.get("firstname") or ""
+            last = lowered.get("last name") or lowered.get("lastname") or ""
+            full = " ".join(part for part in (first, last) if part).strip()
+            nickname = lowered.get("nickname") or lowered.get("name") or ""
+            for label in (full, nickname):
+                key = _exposure_name_key(label)
+                if key:
+                    mapping[key] = player_id
+    return mapping
+
+
+def write_merged_upload(
+    name_csv: str | Path,
+    players_csv: str | Path,
+    site: str = "fanduel",
+) -> tuple[Path, Path]:
+    """Write FanDuel upload and id files for a merged name-only lineup CSV."""
+
+    site_key = normalize_site(site)
+    name_rows = _read_lineup_csv_rows(name_csv, site_key)
+    id_by_name = _player_ids_by_name(players_csv)
+    upload_rows: list[list[str]] = []
+    id_rows: list[list[str]] = []
+    for row in name_rows:
+        upload: list[str] = []
+        ids: list[str] = []
+        for cell in row:
+            name = " ".join(cell.split())
+            if not name:
+                upload.append("")
+                ids.append("")
+                continue
+            player_id = id_by_name.get(_exposure_name_key(name))
+            if not player_id:
+                raise ValueError(f"missing FanDuel id for player: {name}")
+            upload.append(f"{name} ({player_id})")
+            ids.append(player_id)
+        upload_rows.append(upload)
+        id_rows.append(ids)
+    upload_path, ids_path = fanduel_artifact_paths(name_csv)
+    write_lineup_rows(upload_rows, upload_path, site_key)
+    write_lineup_rows(id_rows, ids_path, site_key)
+    print(f"FanDuel upload -> {upload_path}")
+    print(f"FanDuel ids -> {ids_path}")
+    return upload_path, ids_path
+
+
+def _fold_lineup_name(value: object) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def te_def_pair(lineup: Any, site_key: str = "fanduel") -> tuple[str, str] | None:
+    """Return the folded tight end and defense names on a classic lineup.
+
+    Return ``None`` when either seat is absent. The pair is the rule key.
+    """
+
+    players = list(getattr(lineup, "players", []) or [])
+
+    def slot_name(slots: set[str], position: str) -> str | None:
+        for player in players:
+            slot = str(getattr(player, "lineup_position", "") or "").upper()
+            if slot in slots:
+                name = _fold_lineup_name(getattr(player, "full_name", ""))
+                if name:
+                    return name
+        for player in players:
+            if position in nfl_positions(player):
+                name = _fold_lineup_name(getattr(player, "full_name", ""))
+                if name:
+                    return name
+        return None
+
+    tight_end = slot_name({"TE"}, "TE")
+    defense = slot_name({"DEF", "DST", "D"}, "D")
+    if not tight_end or not defense:
+        return None
+    return (tight_end, defense)
+
+
+def filter_te_def_pairs(
+    lineups: list[Any],
+    count: int,
+    site_key: str = "fanduel",
+) -> tuple[list[Any], tuple[str, str] | None]:
+    """Keep the first ``count`` lineups that carry a new tight end and defense pair.
+
+    Return the kept lineups and the most common repeated pair (or ``None``).
+    """
+
+    seen: set[tuple[str, str]] = set()
+    kept: list[Any] = []
+    pair_counts: dict[tuple[str, str], int] = {}
+    for lineup in lineups:
+        pair = te_def_pair(lineup, site_key)
+        if pair is not None:
+            pair_counts[pair] = pair_counts.get(pair, 0) + 1
+            if pair in seen:
+                continue
+            seen.add(pair)
+        kept.append(lineup)
+        if len(kept) >= count:
+            break
+    repeated: tuple[str, str] | None = None
+    if pair_counts:
+        candidate, hits = max(pair_counts.items(), key=lambda item: item[1])
+        if hits > 1:
+            repeated = candidate
+    return kept, repeated
+
+
+def _te_def_pair_message(
+    repeated_pair: tuple[str, str] | None,
+    found: int,
+    count: int,
+) -> str:
+    if repeated_pair is not None:
+        tight_end, defense = repeated_pair
+        return (
+            f"tight end and defense pair repeated: {tight_end} + {defense}; "
+            f"only {found} unique pairs for {count} lineups"
+        )
+    return f"optimizer wrote {found} lineups; requested {count}"
+
+
+def _lineup_player_names(lineup: Any) -> set[str]:
+    return {
+        _fold_lineup_name(getattr(player, "full_name", ""))
+        for player in getattr(lineup, "players", []) or []
+        if str(getattr(player, "full_name", "")).strip()
+    }
+
+
+def _assert_locks_and_excludes_hold(
+    lineups: list[Any],
+    locks: list[str],
+    excludes: list[str],
+) -> None:
+    """Raise when a requested lock is missing or a hard exclude is present."""
+
+    if not lineups:
+        return
+    wanted = {_fold_lineup_name(name) for name in locks or [] if str(name).strip()}
+    banned = {_fold_lineup_name(name) for name in excludes or [] if str(name).strip()}
+    for index, lineup in enumerate(lineups, start=1):
+        names = _lineup_player_names(lineup)
+        missing = sorted(wanted - names)
+        if missing:
+            raise ValueError(f"requested lock missing from lineup {index}: {', '.join(missing)}")
+        present = sorted(banned & names)
+        if present:
+            raise ValueError(f"hard exclude in lineup {index}: {', '.join(present)}")
+
+
+def _request_lineups(
+    optimizer: Any,
+    *,
+    request_count: int,
+    count: int,
+    max_exposure: float | None,
+) -> list[Any]:
+    """Ask for extra lineups for the pair filter. Fall back to ``count``.
+
+    A tight repeating cap or an exact-size pool can make the larger request
+    infeasible. The original count is the fallback.
+    """
+
+    try:
+        return _optimize_or_raise(optimizer, n=request_count, max_exposure=max_exposure)
+    except ValueError as exc:
+        if request_count == count or "could not build lineups" not in str(exc):
+            raise
+    print(
+        f"optimizer could not build {request_count} lineups; retry with {count}",
+        file=sys.stderr,
+    )
+    return _optimize_or_raise(optimizer, n=count, max_exposure=max_exposure)
+
+
 def generate_lineups(
     csv_path: str | Path,
     site: str = "fanduel",
@@ -311,6 +525,12 @@ def generate_lineups(
     projection_floor: float | None = None,
     uniques: int | None = None,
     max_team_exposure: float | None = None,
+    keep_team_dart: float = 0.0,
+    soft_fade: dict[str, float] | None = None,
+    player_soft_fade: Mapping[str, float] | Iterable[str] | None = None,
+    min_skill_pool: int | None = None,
+    open_qb_teams: Iterable[str] | None = None,
+    require_count: bool = True,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -318,6 +538,13 @@ def generate_lineups(
     csv_file = Path(csv_path)
     if not csv_file.is_file():
         raise FileNotFoundError(f"CSV not found: {csv_file}")
+
+    print(
+        "optimizer request: "
+        f"count={count} locks={list(locks or [])} excludes={list(excludes or [])} "
+        f"stacks={list(stacks or [])}",
+        file=sys.stderr,
+    )
 
     Site, Sport, get_optimizer, _team_stack = _load_pydfs()
     optimizer = get_optimizer(_site_enum(site_key, Site), Sport.FOOTBALL)
@@ -330,7 +557,15 @@ def generate_lineups(
     attach_csv_original_positions(optimizer, csv_file)
     _relax_tiny_slate_limits(optimizer, site_key)
     keep_injury_tagged_players(optimizer)
-    apply_locks_and_excludes(optimizer, locks=locks, excludes=excludes)
+    apply_open_qb_gate(
+        optimizer,
+        set(open_qb_teams or ()) | open_qb_teams_from_csv(csv_file),
+    )
+    resolved_locks, resolved_excludes = apply_locks_and_excludes(
+        optimizer,
+        locks=locks,
+        excludes=excludes,
+    )
     assert_locked_players_eligible(optimizer)
     apply_pool_constraints(
         optimizer,
@@ -338,6 +573,10 @@ def generate_lineups(
         one_rb_per_team=one_rb_per_team,
         projection_floor=projection_floor,
     )
+    apply_soft_fade(optimizer, soft_fade, player_soft_fade=player_soft_fade)
+    apply_skill_pool_floor(optimizer, min_skill_pool, site_key=site_key)
+    TEAM_DART_LOG.clear()
+    dart_log = apply_team_dart_guard(optimizer, keep_team_dart)
     apply_stack_specs(optimizer, parse_stack_rules(stacks))
 
     repeating = resolve_repeating_players(
@@ -358,7 +597,14 @@ def generate_lineups(
     if _is_tiny_slate(optimizer) and max_exposure == 0.35:
         max_exposure = None
 
-    lineups = _optimize_or_raise(optimizer, n=count, max_exposure=max_exposure or None)
+    pair_guard = site_key in {"fanduel", "draftkings"}
+    request_count = count * 3 if pair_guard else count
+    lineups = _request_lineups(
+        optimizer,
+        request_count=request_count,
+        count=count,
+        max_exposure=max_exposure or None,
+    )
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
     if max_exposure is not None or max_team_exposure is not None:
@@ -368,6 +614,16 @@ def generate_lineups(
             max_exposure=max_exposure,
             max_team_exposure=max_team_exposure,
         )
+    TEAM_DART_LOG.extend(dart_log)
+    if require_count and len(lineups) < count:
+        raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
+    if pair_guard and require_count:
+        lineups, repeated_pair = filter_te_def_pairs(lineups, count, site_key)
+        if len(lineups) < count:
+            raise ValueError(_te_def_pair_message(repeated_pair, len(lineups), count))
+    if require_count and len(lineups) != count:
+        raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
+    _assert_locks_and_excludes_hold(lineups, resolved_locks, resolved_excludes)
     return lineups
 
 
@@ -409,6 +665,11 @@ def optimize_lineups(
     projection_floor: float | None = None,
     uniques: int | None = None,
     max_team_exposure: float | None = None,
+    keep_team_dart: float = 0.0,
+    soft_fade: dict[str, float] | None = None,
+    player_soft_fade: Mapping[str, float] | Iterable[str] | None = None,
+    min_skill_pool: int | None = None,
+    open_qb_teams: Iterable[str] | None = None,
     report_path: str | Path | None = None,
     flag_wr_triples: bool = False,
     late_swap_audit: bool = False,
@@ -416,6 +677,7 @@ def optimize_lineups(
     ownership_calibration: str | Path | None = None,
     flag_duplicate_cores: bool = False,
     dart_ceiling_report: bool = False,
+    environment: str | Path | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -435,6 +697,11 @@ def optimize_lineups(
         projection_floor=projection_floor,
         uniques=uniques,
         max_team_exposure=max_team_exposure,
+        keep_team_dart=keep_team_dart,
+        soft_fade=soft_fade,
+        player_soft_fade=player_soft_fade,
+        min_skill_pool=min_skill_pool,
+        open_qb_teams=open_qb_teams,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
     from ceminidfs.export.review_reports import maybe_write_review_reports
@@ -449,6 +716,7 @@ def optimize_lineups(
         ownership_calibration=ownership_calibration,
         flag_duplicate_cores=flag_duplicate_cores,
         dart_ceiling_report=dart_ceiling_report,
+        environment=environment,
     )
     _write_build_report(
         lineups,
@@ -461,6 +729,9 @@ def optimize_lineups(
         projection_floor=projection_floor,
         uniques=uniques,
         max_team_exposure=max_team_exposure,
+        keep_team_dart=keep_team_dart,
+        soft_fade=soft_fade,
+        team_dart_log=list(TEAM_DART_LOG),
         report_path=report_path,
     )
     return written
@@ -478,6 +749,9 @@ def _write_build_report(
     projection_floor: float | None = None,
     uniques: int | None = None,
     max_team_exposure: float | None = None,
+    keep_team_dart: float = 0.0,
+    soft_fade: dict[str, float] | None = None,
+    team_dart_log: list[dict[str, Any]] | None = None,
     report_path: str | Path | None,
 ) -> None:
     text = format_lineup_report(
@@ -490,6 +764,9 @@ def _write_build_report(
         projection_floor=projection_floor,
         uniques=uniques,
         max_team_exposure=max_team_exposure,
+        keep_team_dart=keep_team_dart,
+        soft_fade=soft_fade,
+        team_dart_log=team_dart_log,
     )
     target = Path(report_path) if report_path is not None else Path(out_path).with_suffix(".report.txt")
     write_lineup_report(text, target)

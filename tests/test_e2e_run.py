@@ -34,7 +34,9 @@ def test_run_pipeline_diy_to_fanduel_lineups(
         stages="project,normalize,optimize",
         config={
             "projection_mode": "diy",
-            "count": 150,
+            # The two-team fixture has six tight ends and two defenses. The
+            # tight-end/defense pair rule caps the book at the unique pairs.
+            "count": 3,
             "work_dir": tmp_path,
             "site": "fanduel",
         },
@@ -50,7 +52,7 @@ def test_run_pipeline_diy_to_fanduel_lineups(
 
     lineups_path = tmp_path / "lineups.csv"
     lineups = list(csv.DictReader(lineups_path.open(encoding="utf-8")))
-    assert len(lineups) == 150
+    assert len(lineups) == 3
 
     canonical_path = Path(manifest["input_artifacts"]["artifacts"]["canonical_csv"])
     canonical_rows = list(csv.DictReader(canonical_path.open(encoding="utf-8")))

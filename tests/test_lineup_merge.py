@@ -145,6 +145,7 @@ def test_cli_merge_lineups_exits_1_and_prints_the_error(
         [_row("Jayden Daniels", "Bijan Robinson", "Derrick Henry", "lock")],
     )
     out = tmp_path / "merged.csv"
+    players = _players(tmp_path / "players.csv", ["Bijan Robinson"])
 
     code = main(
         [
@@ -155,6 +156,8 @@ def test_cli_merge_lineups_exits_1_and_prints_the_error(
             str(extra),
             "--out",
             str(out),
+            "--players",
+            str(players),
             "--max-exposure",
             "0.20",
             "--count",
@@ -172,6 +175,106 @@ def test_cli_merge_lineups_exits_1_and_prints_the_error(
     assert "3" in captured.err
 
 
+def _players(path: Path, names: list[str]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["Id", "First Name", "Last Name", "Position"])
+        writer.writeheader()
+        for index, name in enumerate(names, start=1):
+            first, _, last = name.partition(" ")
+            writer.writerow(
+                {"Id": str(1000 + index), "First Name": first, "Last Name": last, "Position": "WR"}
+            )
+    return path
+
+
+def _nine(tag: str) -> list[str]:
+    return [
+        f"QB {tag}",
+        f"RB {tag}a",
+        f"RB {tag}b",
+        f"WR {tag}a",
+        f"WR {tag}b",
+        f"WR {tag}c",
+        f"TE {tag}",
+        f"FL {tag}",
+        f"DF {tag}",
+    ]
+
+
+def test_merge_lineups_writes_upload_cells(tmp_path: Path):
+    base_names = _nine("Base")
+    extra_names = _nine("Extra")
+    base = _write(tmp_path / "base.csv", [base_names])
+    extra = _write(tmp_path / "extra.csv", [extra_names])
+    out = tmp_path / "book" / "merged.csv"
+    players = _players(tmp_path / "book" / "players.csv", base_names + extra_names)
+
+    code = main(
+        [
+            "merge-lineups",
+            "--base",
+            str(base),
+            "--extra",
+            str(extra),
+            "--out",
+            str(out),
+            "--players",
+            str(players),
+            "--max-exposure",
+            "1",
+            "--count",
+            "2",
+        ]
+    )
+
+    assert code == 0
+    upload = tmp_path / "book" / "merged_fanduel_upload.csv"
+    ids = tmp_path / "book" / "merged_fanduel_ids.csv"
+    assert upload.is_file()
+    assert ids.is_file()
+    with upload.open(encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert rows[0] == HEADER
+    id_by_name = {}
+    with players.open(encoding="utf-8") as handle:
+        for record in csv.DictReader(handle):
+            full = f"{record['First Name']} {record['Last Name']}"
+            id_by_name[full] = record["Id"]
+    for row in rows[1:]:
+        for cell in row:
+            name, _, rest = cell.partition(" (")
+            assert rest.endswith(")")
+            assert rest[:-1] == id_by_name[name]
+            assert cell == f"{name} ({id_by_name[name]})"
+
+
+def test_merge_lineups_requires_players_file_next_to_out(tmp_path: Path):
+    base = _write(tmp_path / "base.csv", [_nine("Base")])
+    extra = _write(tmp_path / "extra.csv", [_nine("Extra")])
+    out = tmp_path / "book" / "merged.csv"
+
+    code = main(
+        [
+            "merge-lineups",
+            "--base",
+            str(base),
+            "--extra",
+            str(extra),
+            "--out",
+            str(out),
+            "--max-exposure",
+            "1",
+            "--count",
+            "2",
+        ]
+    )
+
+    assert code == 1
+    assert not out.exists()
+    assert not out.with_name("merged_fanduel_upload.csv").exists()
+
+
 def test_merge_lineups_help_lists_book_size_flags():
     parser = build_parser()
     subparsers = next(
@@ -184,3 +287,4 @@ def test_merge_lineups_help_lists_book_size_flags():
     assert "--max-exposure" in help_text
     assert "--count" in help_text
     assert "--site" in help_text
+    assert "--players" in help_text

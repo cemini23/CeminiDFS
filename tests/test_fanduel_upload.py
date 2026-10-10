@@ -61,11 +61,11 @@ def test_optimize_writes_name_upload_and_id_files(tmp_path: Path):
         players_path,
         out_path,
         site="fanduel",
-        count=2,
+        count=1,
         max_exposure=1.0,
         min_salary=0,
     )
-    assert written == 2
+    assert written == 1
 
     upload_path = tmp_path / "lineups_fanduel_upload.csv"
     ids_path = tmp_path / "lineups_fanduel_ids.csv"
@@ -81,7 +81,7 @@ def test_optimize_writes_name_upload_and_id_files(tmp_path: Path):
 
     assert header == LINEUP_HEADERS["fanduel"]
     assert header.count("RB") == 2
-    assert len(upload_rows) == 2
+    assert len(upload_rows) == 1
     for row in upload_rows:
         assert all(UPLOAD_CELL.match(cell) for cell in row)
         for cell in row:

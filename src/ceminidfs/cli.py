@@ -9,6 +9,11 @@ from typing import Any, Mapping, Sequence
 from ceminidfs.config import runtime_config
 
 try:
+    from ceminidfs.export.pool_guards import DEFAULT_MIN_SKILL_POOL
+except ImportError:  # pragma: no cover - defensive for partial installs
+    DEFAULT_MIN_SKILL_POOL = 40
+
+try:
     from ceminidfs.bbm.cli import build_bbm_parser, handle_bbm_command
 except ImportError:  # pragma: no cover - defensive for partial installs
     build_bbm_parser = None  # type: ignore[assignment]
@@ -148,10 +153,11 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     maybe_write_review_reports = None  # type: ignore[assignment]
 
 try:
-    from ceminidfs.export.optimize import ExposureCapError, merge_lineup_csvs
+    from ceminidfs.export.optimize import ExposureCapError, merge_lineup_csvs, write_merged_upload
 except ImportError:  # pragma: no cover - defensive for partial installs
     ExposureCapError = None  # type: ignore[assignment]
     merge_lineup_csvs = None  # type: ignore[assignment]
+    write_merged_upload = None  # type: ignore[assignment]
 
 try:
     from ceminidfs.data.sleeper import fetch_trending_players, trending_with_names
@@ -239,7 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     _add_optimizer_build_arguments(optimize)
-    _add_review_report_arguments(optimize)
+    _add_fade_guard_arguments(optimize)
+    _add_review_report_arguments(optimize, default_on=True)
     _add_profile_argument(optimize)
     optimize.set_defaults(handler=_cmd_optimize)
 
@@ -314,6 +321,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Final book size used for the exposure cap",
     )
     merge.add_argument("--site", default="fanduel")
+    merge.add_argument(
+        "--players",
+        dest="players_path",
+        type=Path,
+        default=None,
+        help="Players CSV with FanDuel ids. Default: normalized_players.csv next to --out",
+    )
     merge.set_defaults(handler=_cmd_merge_lineups)
 
     run = subparsers.add_parser("run", help="Run one or more pipeline stages")
@@ -351,7 +365,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ignore parquet cache TTL and refetch",
     )
     _add_optimizer_build_arguments(run)
-    _add_review_report_arguments(run)
+    _add_fade_guard_arguments(run)
+    _add_review_report_arguments(run, default_on=True)
     _add_profile_argument(run)
     run.set_defaults(handler=_cmd_run)
 
@@ -728,10 +743,18 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
 
 
 def _cmd_merge_lineups(args: argparse.Namespace) -> int:
-    if merge_lineup_csvs is None or ExposureCapError is None:
+    if merge_lineup_csvs is None or ExposureCapError is None or write_merged_upload is None:
         print("Error: lineup merge unavailable", file=sys.stderr)
         return 1
     try:
+        players_path = args.players_path
+        if players_path is None:
+            players_path = Path(args.output_path).parent / "normalized_players.csv"
+        if not Path(players_path).is_file():
+            raise FileNotFoundError(
+                f"players CSV not found: {players_path}. "
+                "Pass --players or place normalized_players.csv next to --out."
+            )
         merge_lineup_csvs(
             args.base_path,
             args.extra_path,
@@ -740,7 +763,11 @@ def _cmd_merge_lineups(args: argparse.Namespace) -> int:
             final_count=args.count,
             site=args.site,
         )
+        write_merged_upload(args.output_path, players_path, site=args.site)
     except ExposureCapError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except FileNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
     print(args.output_path)
@@ -759,12 +786,15 @@ def _cmd_review(args: argparse.Namespace) -> int:
         args.players_path,
         site=args.site,
         out_dir=out_dir,
-        flag_wr_triples=bool(getattr(args, "flag_wr_triples", False)),
+        flag_wr_triples=bool(getattr(args, "flag_wr_triples", False))
+        and not bool(getattr(args, "no_review_reports", False)),
         late_swap_audit=bool(getattr(args, "late_swap_audit", False)),
         ownership_fade_report=bool(getattr(args, "ownership_fade_report", False)),
         ownership_calibration=getattr(args, "ownership_calibration", None),
-        flag_duplicate_cores=bool(getattr(args, "flag_duplicate_cores", False)),
-        dart_ceiling_report=bool(getattr(args, "dart_ceiling_report", False)),
+        flag_duplicate_cores=bool(getattr(args, "flag_duplicate_cores", False))
+        and not bool(getattr(args, "no_review_reports", False)),
+        dart_ceiling_report=bool(getattr(args, "dart_ceiling_report", False))
+        and not bool(getattr(args, "no_review_reports", False)),
     )
     print(out_dir)
     return 0
@@ -1154,11 +1184,15 @@ def _site_from_salary_rows(rows: list[dict[str, object]]) -> str:
     return "fanduel"
 
 
-def _add_review_report_arguments(parser: argparse.ArgumentParser) -> None:
+def _add_review_report_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    default_on: bool = False,
+) -> None:
     parser.add_argument(
         "--flag-wr-triples",
         action="store_true",
-        default=False,
+        default=default_on,
         help="Write stack_fragility_report.csv (same-game WR triples / CHALK-QB-WR-WR)",
     )
     parser.add_argument(
@@ -1182,32 +1216,39 @@ def _add_review_report_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--flag-duplicate-cores",
         action="store_true",
-        default=False,
+        default=default_on,
         help=(
             "Write duplicate_core_report.csv when one QB and two RB slots "
-            "repeat on more than 2 lineups"
+            "repeat, or two lineups share four or more names"
         ),
     )
     parser.add_argument(
         "--dart-ceiling-report",
         action="store_true",
-        default=False,
+        default=default_on,
         help="Write dart_ceiling_rank.csv for salary at or below 5500. Does not invent a ceiling",
+    )
+    parser.add_argument(
+        "--no-review-reports",
+        action="store_true",
+        default=False,
+        help="Turn off flag-wr-triples, flag-duplicate-cores, and dart-ceiling-report",
     )
 
 
 def _review_report_overrides(args: argparse.Namespace) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
-    if getattr(args, "flag_wr_triples", False):
-        overrides["flag_wr_triples"] = True
+    if not bool(getattr(args, "no_review_reports", False)):
+        if getattr(args, "flag_wr_triples", False):
+            overrides["flag_wr_triples"] = True
+        if getattr(args, "flag_duplicate_cores", False):
+            overrides["flag_duplicate_cores"] = True
+        if getattr(args, "dart_ceiling_report", False):
+            overrides["dart_ceiling_report"] = True
     if getattr(args, "late_swap_audit", False):
         overrides["late_swap_audit"] = True
     if getattr(args, "ownership_fade_report", False):
         overrides["ownership_fade_report"] = True
-    if getattr(args, "flag_duplicate_cores", False):
-        overrides["flag_duplicate_cores"] = True
-    if getattr(args, "dart_ceiling_report", False):
-        overrides["dart_ceiling_report"] = True
     calibration = getattr(args, "ownership_calibration", None)
     if calibration is not None:
         overrides["ownership_calibration"] = calibration
@@ -1272,6 +1313,54 @@ def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional research CSV with name plus lock/exclude/fade columns",
     )
+    parser.add_argument(
+        "--min-skill-pool",
+        type=int,
+        default=DEFAULT_MIN_SKILL_POOL,
+        help=(
+            "Refuse the solve when fewer eligible skill players remain on a classic "
+            "slate. 0 disables the floor. Showdown and tiny slates skip it"
+        ),
+    )
+
+
+def _add_fade_guard_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--keep-team-dart",
+        dest="keep_team_dart",
+        type=float,
+        default=0.0,
+        help=(
+            "Keep the cheapest eligible player at or below this salary on every "
+            "slate team. Candidate pool only; the optimizer still chooses. Default 0 = off"
+        ),
+    )
+    parser.add_argument(
+        "--soft-fade",
+        action="append",
+        default=[],
+        metavar="TEAM[=WEIGHT]",
+        help=(
+            "Lower a team weight instead of deleting its players. Repeatable. "
+            "A hard fade (--exclude or the research scratch file) removes players"
+        ),
+    )
+
+
+def _parse_soft_fade(values: list[str] | None) -> dict[str, float]:
+    """Parse ``--soft-fade TEAM[=WEIGHT]`` values into a team -> weight mapping."""
+
+    weights: dict[str, float] = {}
+    for raw in values or []:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        team, _, weight_text = token.partition("=")
+        team = team.strip().upper()
+        if not team:
+            continue
+        weights[team] = float(weight_text) if weight_text.strip() else 0.65
+    return weights
 
 
 def _sim_rerank_cli_override(args: argparse.Namespace) -> dict[str, Any]:
@@ -1309,15 +1398,28 @@ def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["projection_floor"] = args.projection_floor
     if getattr(args, "min_salary", None) is not None:
         overrides["min_salary"] = args.min_salary
+    if getattr(args, "min_skill_pool", None) is not None:
+        overrides["min_skill_pool"] = int(args.min_skill_pool)
+    keep_team_dart = getattr(args, "keep_team_dart", 0.0)
+    if keep_team_dart:
+        overrides["keep_team_dart"] = float(keep_team_dart)
+    soft_fade = _parse_soft_fade(getattr(args, "soft_fade", None))
+    if soft_fade:
+        overrides["soft_fade"] = soft_fade
     research_csv = getattr(args, "research_csv", None)
     if research_csv is not None:
-        from ceminidfs.data.research_locks import parse_research_locks
+        from ceminidfs.data.research_locks import parse_research_locks, parse_research_qb_cells
 
-        extra_locks, extra_excludes = parse_research_locks(research_csv)
+        extra_locks, extra_excludes, extra_fades = parse_research_locks(research_csv)
         if extra_locks:
             overrides["locks"] = list(overrides.get("locks", [])) + extra_locks
         if extra_excludes:
             overrides["excludes"] = list(overrides.get("excludes", [])) + extra_excludes
+        if extra_fades:
+            overrides["player_soft_fade"] = list(overrides.get("player_soft_fade", [])) + extra_fades
+        open_qb_teams = parse_research_qb_cells(research_csv)
+        if open_qb_teams:
+            overrides["open_qb_teams"] = sorted(open_qb_teams)
     return overrides
 
 

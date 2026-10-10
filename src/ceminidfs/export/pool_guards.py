@@ -7,22 +7,27 @@ optimizer still chooses freely.
   at or below a dollar amount on every slate team. The guard fires only when the
   normal path removed every player on that team. It widens the pool; it cannot
   force a player into a book.
-- **Soft fade.** ``--soft-fade TEAM`` lowers the weight of a team. It never
-  deletes a player. A hard fade (``--exclude`` or the research scratch file)
-  removes a player.
+- **Soft fade.** ``--soft-fade TEAM`` lowers the weight of a team. A research
+  ``fade`` lowers the weight of one player. Neither deletes a player. A hard
+  fade (``--exclude`` or a research ``exclude``) removes a player.
 """
 
 from __future__ import annotations
 
+import csv
 import sys
-from typing import Any, Mapping, Sequence
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 from pydfs_lineup_optimizer.exceptions import LineupOptimizerException
 from pydfs_lineup_optimizer.fantasy_points_strategy import BaseFantasyPointsStrategy
 
+from ceminidfs.data.research_locks import QB_CELL_OPEN_TOKENS
 from ceminidfs.data.stadiums import normalize_team_abbr
 from ceminidfs.export.lineup_report import player_team
+from ceminidfs.export.stack_rules import nfl_positions
 
 # A skill player with no rush, target, or pass attempt stays out of the pool.
 SKILL_POSITIONS = frozenset({"QB", "RB", "WR", "TE"})
@@ -32,6 +37,52 @@ UNAVAILABLE_INJURY_TOKENS = frozenset({"OUT", "O", "IR", "D", "DOUBTFUL", "PUP",
 
 # A soft fade multiplies the player weight. The default keeps 65 percent.
 DEFAULT_SOFT_FADE_WEIGHT = 0.65
+
+# A classic multi-game slate must keep this many skill players after hard removes.
+DEFAULT_MIN_SKILL_POOL = 40
+
+_TEAM_KEYS = ("team", "team abbrev", "teamabbrev", "tm")
+_POSITION_KEYS = ("position", "pos", "roster position")
+_QB_CELL_KEYS = ("qb_cell", "qb cell")
+_QB_STARTER_KEYS = ("is_qb_starter", "is qb starter")
+_TRUTHY = frozenset({"1", "true", "yes", "y", "t", "x"})
+
+
+def _fold_player_name(value: object) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _is_truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in _TRUTHY
+
+
+def normalize_player_soft_fade_weights(
+    soft_fade: Mapping[str, float] | Iterable[str] | None,
+    *,
+    default_weight: float = DEFAULT_SOFT_FADE_WEIGHT,
+) -> dict[str, float]:
+    """Return folded player name -> weight with a 0..1 clamp.
+
+    A sequence of names uses ``default_weight`` for each name. A zero or
+    negative weight would delete the player, so the default replaces it.
+    """
+
+    if soft_fade is None:
+        return {}
+    items = soft_fade.items() if isinstance(soft_fade, Mapping) else ((name, default_weight) for name in soft_fade)
+    weights: dict[str, float] = {}
+    for name, value in items:
+        key = _fold_player_name(name)
+        if not key:
+            continue
+        try:
+            weight = float(value)
+        except (TypeError, ValueError):
+            weight = default_weight
+        if weight <= 0:
+            weight = default_weight
+        weights[key] = min(1.0, weight)
+    return weights
 
 
 def normalize_soft_fade_weights(
@@ -58,37 +109,199 @@ def normalize_soft_fade_weights(
 
 
 class SoftFadeStrategy(BaseFantasyPointsStrategy):
-    """Discount the fantasy points of softly faded teams. Never remove a player."""
+    """Discount the fantasy points of softly faded teams and players.
 
-    def __init__(self, weights: dict[str, float]):
+    The strategy never removes a player.
+    """
+
+    def __init__(
+        self,
+        weights: dict[str, float],
+        player_weights: dict[str, float] | None = None,
+    ):
         self.weights = normalize_soft_fade_weights(weights)
+        self.player_weights = normalize_player_soft_fade_weights(player_weights)
 
     def get_player_fantasy_points(self, player: Any) -> float:
-        weight = self.weights.get(normalize_team_abbr(player_team(player)), 1.0)
-        return float(getattr(player, "fppg", 0.0) or 0.0) * weight
+        multiplier = self.weights.get(normalize_team_abbr(player_team(player)), 1.0)
+        multiplier *= self.player_weights.get(
+            _fold_player_name(getattr(player, "full_name", "")),
+            1.0,
+        )
+        return float(getattr(player, "fppg", 0.0) or 0.0) * multiplier
 
 
 def apply_soft_fade(
     optimizer: Any,
     soft_fade: dict[str, float] | None,
     *,
+    player_soft_fade: Mapping[str, float] | Iterable[str] | None = None,
     default_weight: float = DEFAULT_SOFT_FADE_WEIGHT,
 ) -> dict[str, float]:
-    """Lower the weight of each softly faded team. Return the applied weights.
+    """Lower the weight of each softly faded team or player.
 
-    Soft fade never removes a player, so the pool size does not change.
+    Return the applied team weights. Soft fade never removes a player, so the
+    pool size does not change.
     """
 
     weights = normalize_soft_fade_weights(soft_fade, default_weight=default_weight)
-    if not weights:
+    player_weights = normalize_player_soft_fade_weights(
+        player_soft_fade,
+        default_weight=default_weight,
+    )
+    if not weights and not player_weights:
         return {}
-    optimizer.set_fantasy_points_strategy(SoftFadeStrategy(weights))
+    optimizer.set_fantasy_points_strategy(SoftFadeStrategy(weights, player_weights))
     for team, weight in sorted(weights.items()):
         print(
             f"soft fade: {team} weight {weight:g} (discount only, no player removed)",
             file=sys.stderr,
         )
+    if player_weights:
+        print(
+            f"player soft fade: {len(player_weights)} names at {default_weight:g} (not removed)",
+            file=sys.stderr,
+        )
     return weights
+
+
+def _lowered_row(row: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        str(key).strip().lower(): str(value or "").strip()
+        for key, value in row.items()
+        if key
+    }
+
+
+def _row_value(lowered: Mapping[str, str], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = lowered.get(key)
+        if value:
+            return value
+    return ""
+
+
+def open_qb_teams_from_csv(path: str | Path) -> set[str]:
+    """Return teams with an open quarterback cell.
+
+    A ``qb_cell`` value of ``open``, ``unassigned``, or ``tbd`` marks the row's
+    team. When the CSV has an ``is_qb_starter`` column, a team with two or more
+    QB rows and no truthy starter is also open. An absent column is not inferred.
+    """
+
+    csv_path = Path(path)
+    if not csv_path.is_file():
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
+
+    open_teams: set[str] = set()
+    qb_rows: dict[str, list[bool]] = defaultdict(list)
+    has_starter_column = False
+    with csv_path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle, skipinitialspace=True)
+        for row in reader:
+            lowered = _lowered_row(row)
+            team = normalize_team_abbr(_row_value(lowered, _TEAM_KEYS))
+            cell = _row_value(lowered, _QB_CELL_KEYS).lower()
+            if team and cell in QB_CELL_OPEN_TOKENS:
+                open_teams.add(team)
+            starter_key = next((key for key in _QB_STARTER_KEYS if key in lowered), None)
+            if starter_key is not None:
+                has_starter_column = True
+            position = _row_value(lowered, _POSITION_KEYS).upper()
+            if team and position == "QB":
+                starter_value = lowered.get(starter_key) if starter_key else ""
+                qb_rows[team].append(_is_truthy(starter_value))
+
+    if has_starter_column:
+        for team, starter_flags in qb_rows.items():
+            if len(starter_flags) >= 2 and not any(starter_flags):
+                open_teams.add(team)
+    return open_teams
+
+
+def _is_qb_player(player: Any) -> bool:
+    return "QB" in nfl_positions(player)
+
+
+def apply_open_qb_gate(optimizer: Any, open_teams: Iterable[str]) -> list[str]:
+    """Remove every QB on an open team. Print one warning per team.
+
+    The gate does not choose a starting quarterback. Return the teams it acted on.
+    """
+
+    teams = {normalize_team_abbr(team) for team in open_teams if str(team or "").strip()}
+    if not teams:
+        return []
+    pool = getattr(optimizer, "player_pool", None)
+    if pool is None:
+        return []
+
+    removed_teams: list[str] = []
+    for team in sorted(teams):
+        removed = 0
+        for player in list(getattr(pool, "all_players", []) or []):
+            if normalize_team_abbr(player_team(player)) != team or not _is_qb_player(player):
+                continue
+            try:
+                pool.remove_player(player)
+            except LineupOptimizerException:
+                continue
+            removed += 1
+        if removed:
+            print(f"QB cell open for {team}; no quarterback rostered", file=sys.stderr)
+            removed_teams.append(team)
+    return removed_teams
+
+
+def count_eligible_skill_players(optimizer: Any) -> int:
+    """Count eligible QB, RB, WR, and TE players. Defense does not count."""
+
+    pool = getattr(optimizer, "player_pool", None)
+    if pool is None:
+        return 0
+    seen: set[str] = set()
+    count = 0
+    for player in getattr(pool, "filtered_players", []) or []:
+        if not (nfl_positions(player) & SKILL_POSITIONS):
+            continue
+        identity = _player_identity(player)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        count += 1
+    return count
+
+
+def apply_skill_pool_floor(
+    optimizer: Any,
+    floor: int | None,
+    *,
+    site_key: str,
+) -> int:
+    """Raise before the solve when the eligible skill pool is below the floor.
+
+    Return the eligible skill count. A ``None`` floor, a showdown site, or a
+    tiny slate skips the gate. Floor ``0`` logs and disables the gate.
+    """
+
+    if floor is None or site_key in {"fanduel_showdown", "draftkings_showdown"}:
+        return count_eligible_skill_players(optimizer)
+    if _optimizer_is_tiny_slate(optimizer):
+        return count_eligible_skill_players(optimizer)
+
+    count = count_eligible_skill_players(optimizer)
+    print(f"skill pool: {count} eligible, floor {floor}", file=sys.stderr)
+    if floor > 0 and count < floor:
+        raise ValueError(
+            f"skill pool: {count} eligible, floor {floor}; "
+            "hard excludes removed too many skill players"
+        )
+    return count
+
+
+def _optimizer_is_tiny_slate(optimizer: Any) -> bool:
+    teams = getattr(getattr(optimizer, "player_pool", None), "available_teams", None)
+    return len(list(teams or [])) <= 2
 
 
 def _player_identity(player: Any) -> str:
