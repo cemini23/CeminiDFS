@@ -172,6 +172,9 @@ def format_lineup_report(
     projection_floor: float | None = None,
     uniques: int | None = None,
     max_team_exposure: float | None = None,
+    keep_team_dart: float | None = None,
+    soft_fade: dict[str, float] | None = None,
+    team_dart_log: list[dict[str, Any]] | None = None,
     preview: int = 8,
 ) -> str:
     """Plain-text report for the operator before FanDuel submit."""
@@ -194,8 +197,23 @@ def format_lineup_report(
         build_flags.append(f"uniques={uniques}")
     if max_team_exposure is not None:
         build_flags.append(f"max-team-exposure={max_team_exposure}")
+    if keep_team_dart:
+        build_flags.append(f"keep-team-dart={keep_team_dart:g}")
+    if soft_fade:
+        applied = ", ".join(f"{team}={weight:g}" for team, weight in sorted(soft_fade.items()))
+        build_flags.append(f"soft-fade={applied}")
     if build_flags:
         lines.append(f"Build: {', '.join(build_flags)}")
+    if keep_team_dart:
+        lines.extend(["", "Team dart rule (candidate pool only; the optimizer still chooses)"])
+        if team_dart_log:
+            for record in team_dart_log:
+                lines.append(
+                    f"  {record['team']}: kept {record['player']} (${record['salary']})"
+                    " — the normal path removed the whole team"
+                )
+        else:
+            lines.append("  (no team needed the rule; the normal path kept every slate team)")
     shown = len(pool) if len(pool) <= 20 else min(preview, len(pool))
     heading = f"All {shown} lineups" if len(pool) <= 20 else f"First {shown} lineups"
     lines.extend(

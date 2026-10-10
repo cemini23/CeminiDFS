@@ -12,7 +12,8 @@ lineup. The agent does not Enter.
 > 1. Use this week's FanDuel player-list CSV. Do not reuse last week's contest IDs.
 > 2. Run the 25-lineup probe before the full GPP build.
 > 3. The five review flags default off. Read each report before you solve again.
-> 4. Questionable (`Q`) players stay in the pool. Do not drop them.
+> 4. Questionable (`Q`) players stay in the pool. Do not drop them. A hard fade
+>    removes a player. A soft fade discounts a team.
 > 5. Do not retune FPPG, CIN, Chase, or weather from one Sunday.
 > 6. The agent does not Enter, Submit, or late-swap.
 
@@ -139,6 +140,64 @@ ceminidfs review --lineups runs/2026_week_2/lineups.csv \
 
 Read the CSVs. Then you may `--exclude`, `--max-exposure`, or `late-swap`. Do not
 auto-apply a report. Do not auto-drop a `Q` player.
+
+### Hard fade and soft fade
+
+A hard fade **removes** a player from the pool. These inputs are hard fades:
+
+- `--exclude NAME` removes one player.
+- `--research-csv FILE` removes every `exclude` row. A `fade` row discounts
+  that player and leaves the player in the pool. The scratch file stays
+  OUT / IR / D only.
+
+A soft fade **discounts** a team. It does not remove a player:
+
+```bash
+ceminidfs optimize --csv runs/2026_week_2/normalized_players.csv \
+  --out runs/2026_week_2/probe.csv --count 25 --min-salary 58500 \
+  --soft-fade CIN --soft-fade HOU=0.4
+```
+
+- `--soft-fade TEAM` lowers the weight of that team. Repeat the flag for more
+  teams. The default weight is `0.65`.
+- `--soft-fade TEAM=WEIGHT` sets the weight. `1.0` is no fade. A weight of `0`
+  or less is not allowed; it becomes the default weight.
+- The optimizer reads the lower weight. The player stays in the pool.
+
+### Team dart rule (pool guard, default off)
+
+`--keep-team-dart SALARY` keeps at least one player at or below that salary on
+every slate team. The rule fires only when the normal path removed every player
+on a team. The rule logs each kept team in the console and in
+`<out>.report.txt`. The research narrowed the pool too far in Weeks 1 and 3.
+The rule is a guard against that loss.
+
+```bash
+ceminidfs run --season 2026 --week 3 \
+  --salary data/slates/2026-09-27_fd_sun.csv \
+  --stages all --profile gpp --keep-team-dart 4500
+```
+
+- The default is `0`. The rule is off.
+- The rule changes the candidate pool only. The optimizer still chooses freely.
+- The rule does not revive a player with injury status OUT, IR, or D.
+- The rule does not claim a better result. Measure it with the fade-coverage
+  report before you trust it.
+
+### Fade-coverage report (after the games)
+
+The report measures the book. It counts, per slate team, the book exposure and
+the best actual scorer. The slate teams come from the week's salary CSV, never
+from every team that played. The threshold is 18.0 points.
+
+```bash
+python -m ceminidfs.pipeline.fade_coverage --season 2026 --week 3
+python -m ceminidfs.pipeline.fade_coverage --season 2026 --season-rollup
+```
+
+The week file is `reports/audit/fade-coverage-w3.md`. The season file is
+`reports/audit/fade-coverage-season.md`. The rollup shows a team that was faded
+and produced in more than one week.
 
 Do not append a lock lineup onto `lineups.csv` with a script. Run `ceminidfs merge-lineups --base <book.csv> --extra <lock.csv> --out <merged.csv> --max-exposure 0.20 --count 15`. If the command exits non-zero, that lock lineup breaks the cap. Rebuild the lock lineup. Do not force the file together.
 

@@ -10,7 +10,12 @@ from typing import Any
 import numpy as np
 
 from .lineup_report import format_lineup_report, write_lineup_report
-from .optimize import generate_lineups, select_with_exposure_caps, write_lineup_artifacts
+from .optimize import (
+    TEAM_DART_LOG,
+    generate_lineups,
+    select_with_exposure_caps,
+    write_lineup_artifacts,
+)
 from .review_reports import maybe_write_review_reports, pop_review_kwargs
 
 NAME_KEYS = (
@@ -223,8 +228,15 @@ def optimize_with_sim_rerank(
     """Generate candidate lineups, rerank by simulated score, and write final CSV."""
 
     team_exposure = kwargs.pop("max_team_exposure", None)
+    kwargs.pop("require_count", None)
     review_kwargs = pop_review_kwargs(kwargs)
-    candidate_lineups = generate_lineups(csv_path, site=site, count=candidates, **kwargs)
+    candidate_lineups = generate_lineups(
+        csv_path,
+        site=site,
+        count=candidates,
+        require_count=False,
+        **kwargs,
+    )
     exposure = kwargs["max_exposure"] if "max_exposure" in kwargs else 0.35
     selected = rerank_lineups(
         candidate_lineups,
@@ -237,11 +249,15 @@ def optimize_with_sim_rerank(
         max_exposure=exposure,
         max_team_exposure=team_exposure,
     )
+    if len(selected) != final:
+        raise ValueError(f"optimizer wrote {len(selected)} lineups; requested {final}")
     written = write_lineup_artifacts(selected, out_path, site=site)
     maybe_write_review_reports(out_path, csv_path, site=site, **review_kwargs)
     stacks = kwargs.get("stacks")
     locks = kwargs.get("locks")
     excludes = kwargs.get("excludes")
+    keep_team_dart = float(kwargs.get("keep_team_dart") or 0.0)
+    soft_fade = kwargs.get("soft_fade")
     report = format_lineup_report(
         selected,
         stacks=stacks,
@@ -252,6 +268,9 @@ def optimize_with_sim_rerank(
         projection_floor=kwargs.get("projection_floor"),
         uniques=kwargs.get("uniques"),
         max_team_exposure=team_exposure,
+        keep_team_dart=keep_team_dart,
+        soft_fade=soft_fade,
+        team_dart_log=list(TEAM_DART_LOG),
     )
     write_lineup_report(report, Path(out_path).with_suffix(".report.txt"))
     print(report)
