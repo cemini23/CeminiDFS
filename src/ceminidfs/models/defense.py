@@ -9,7 +9,7 @@ import pandas as pd
 from ceminidfs.data.pbp_filters import epa_eligible_plays
 
 DEFENSE_MULTIPLIER_CLAMP = (0.85, 1.15)
-DEFAULT_DEFENSE_ALPHA = 0.08
+DEFAULT_DEFENSE_ALPHA = 0.35
 
 
 def build_defense_ratings(
@@ -27,8 +27,6 @@ def build_defense_ratings(
     ratings: dict[str, dict[str, float]] = {}
     for side in ("pass", "rush"):
         league_avg = _league_rate(historical, side)
-        if league_avg <= 0:
-            continue
         for team, team_rate in _team_rates(historical, side).items():
             multiplier = 1.0 + (alpha * (team_rate - league_avg))
             ratings.setdefault(team, {})[side] = _clamp(multiplier)

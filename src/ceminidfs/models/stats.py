@@ -8,7 +8,11 @@ from typing import Any, Mapping
 import pandas as pd
 
 from ceminidfs.data.stadiums import get_stadium, normalize_team_abbr, roof_type_is_weather_exposed
-from ceminidfs.models.defense import build_defense_ratings, defense_multiplier
+from ceminidfs.models.defense import (
+    DEFAULT_DEFENSE_ALPHA,
+    build_defense_ratings,
+    defense_multiplier,
+)
 from ceminidfs.models.usage import history_week_cutoff
 from ceminidfs.models.stats_settings import (
     DEFAULT_PASS_SHRINKAGE_K,
@@ -296,7 +300,11 @@ def build_week_stats(
     defense_cfg = {}
     if isinstance(config, Mapping):
         defense_cfg = config.get("defense", {})
-    alpha = float(defense_cfg.get("alpha", 0.08)) if isinstance(defense_cfg, Mapping) else 0.08
+    alpha = (
+        float(defense_cfg.get("alpha", DEFAULT_DEFENSE_ALPHA))
+        if isinstance(defense_cfg, Mapping)
+        else DEFAULT_DEFENSE_ALPHA
+    )
     defense_ratings = build_defense_ratings(historical_pbp, through_week=hist_cutoff, alpha=alpha)
 
     stats_settings = StatsSettings.from_config(config)
