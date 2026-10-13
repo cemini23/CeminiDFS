@@ -27,6 +27,8 @@ from .review_reports import (
 )
 from .build_gates import name_key, exposure_cap_count
 from .optimize import (
+    _fold_lineup_name,
+    _lineup_player_names,
     _load_pydfs,
     _relax_tiny_slate_limits,
     _site_enum,
@@ -252,7 +254,7 @@ def late_swap_lineups(
     optimizer.load_players_from_csv(str(players_file))
     attach_csv_original_positions(optimizer, players_file)
     _relax_tiny_slate_limits(optimizer, site_key)
-    keep_injury_tagged_players(optimizer)
+    keep_injury_tagged_players(optimizer, players_file)
 
     players = list(optimizer.player_pool.all_players)
     _warn_unmatched_lock_teams(players, locked_teams)
@@ -272,7 +274,7 @@ def late_swap_lineups(
 
     apply_locks_and_excludes(optimizer, locks=locks, excludes=None)
     assert_locked_players_eligible(optimizer)
-    _apply_late_swap_excludes(optimizer, excludes, locked_teams)
+    excluded_names = _apply_late_swap_excludes(optimizer, excludes, locked_teams)
     apply_pool_constraints(
         optimizer,
         no_offense_vs_dst=no_offense_vs_dst,
@@ -293,7 +295,12 @@ def late_swap_lineups(
             "Installed pydfs-lineup-optimizer does not expose optimize_lineups; "
             "late swap cannot preserve locked players. Upgrade pydfs-lineup-optimizer."
         )
-    swapped = _optimize_existing_lineups(optimizer, existing_lineups, max_exposure=max_exposure)
+    swapped = _optimize_existing_lineups(
+        optimizer,
+        existing_lineups,
+        max_exposure=max_exposure,
+        excluded_names=excluded_names,
+    )
 
     if not swapped:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and locked teams")
@@ -338,8 +345,14 @@ def _apply_late_swap_excludes(
     optimizer: Any,
     excludes: list[str] | None,
     locked_teams: set[str],
+    *,
+    allow_missing: bool = False,
 ) -> list[str]:
-    """Zero FPPG for excludes. Remove unlocked names only so locked-team rows still parse."""
+    """Zero FPPG for excludes. Remove unlocked names only so locked-team rows still parse.
+
+    A typo in ``excludes`` raises ``ValueError`` by default. Pass
+    ``allow_missing=True`` to warn and skip an exclude that is not in the pool.
+    """
 
     if not excludes:
         return []
@@ -349,6 +362,8 @@ def _apply_late_swap_excludes(
         try:
             player = resolve_pool_player(optimizer, query)
         except ValueError as exc:
+            if not allow_missing:
+                raise ValueError(f"exclude not found in pool: {query}") from exc
             print(f"WARNING: {exc}", file=sys.stderr)
             continue
         try:
@@ -367,16 +382,31 @@ def _optimize_existing_lineups(
     existing_lineups: list[Any],
     *,
     max_exposure: float | None,
+    excluded_names: list[str] | None = None,
 ) -> list[Any]:
-    """Rebuild one lineup at a time. Keep the original row when pydfs cannot swap."""
+    """Rebuild one lineup at a time. Keep the original row when pydfs cannot swap.
 
+    Never keep an original lineup that still holds an excluded player. Raise
+    ``RuntimeError`` in that case, because a kept lineup with a banned name is
+    not a safe artifact.
+    """
+
+    banned = {
+        _fold_lineup_name(name) for name in excluded_names or [] if str(name).strip()
+    }
     results: list[Any] = []
     swapped = 0
     skipped = 0
-    for original in existing_lineups:
+    for index, original in enumerate(existing_lineups, start=1):
         try:
             rebuilt = _optimize_one_existing(optimizer, original, max_exposure=max_exposure)
         except Exception as exc:  # noqa: BLE001 - one failed swap must not abort the file
+            banned_present = sorted(banned & _lineup_player_names(original))
+            if banned_present:
+                raise RuntimeError(
+                    f"late-swap could not rebuild lineup {index} and it still holds "
+                    f"excluded player {banned_present[0]}"
+                ) from exc
             print(
                 f"WARNING: late-swap skipped one lineup ({exc}); kept original",
                 file=sys.stderr,
@@ -385,6 +415,12 @@ def _optimize_existing_lineups(
             skipped += 1
             continue
         if rebuilt is None:
+            banned_present = sorted(banned & _lineup_player_names(original))
+            if banned_present:
+                raise RuntimeError(
+                    f"late-swap could not rebuild lineup {index} and it still holds "
+                    f"excluded player {banned_present[0]}"
+                )
             results.append(original)
             skipped += 1
             continue

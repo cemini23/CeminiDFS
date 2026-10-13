@@ -204,8 +204,13 @@ def apply_locks_and_excludes(
     *,
     locks: list[str] | None = None,
     excludes: list[str] | None = None,
+    allow_missing: bool = False,
 ) -> tuple[list[str], list[str]]:
-    """Lock and remove players by name or id. Return resolved names."""
+    """Lock and remove players by name or id. Return resolved names.
+
+    A typo in ``excludes`` raises ``ValueError`` by default. Pass
+    ``allow_missing=True`` to warn and skip an exclude that is not in the pool.
+    """
 
     locked_names: list[str] = []
     excluded_names: list[str] = []
@@ -219,6 +224,8 @@ def apply_locks_and_excludes(
             player = resolve_pool_player(optimizer, query)
         except ValueError as exc:
             if "not found" in str(exc).lower():
+                if not allow_missing:
+                    raise ValueError(f"exclude not found in pool: {query}") from exc
                 print(
                     f"WARNING: exclude {query!r} is already out of the pool; skip",
                     file=sys.stderr,

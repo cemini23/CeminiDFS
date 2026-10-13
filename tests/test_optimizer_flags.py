@@ -426,3 +426,34 @@ def test_te_def_pair_rule_refuses_a_repeated_pair_and_writes_nothing(
 
     assert not out.exists()
     assert not out.with_name("lineups_fanduel_upload.csv").exists()
+
+
+def test_keep_injury_tagged_players_drops_unavailable_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    from pydfs_lineup_optimizer import Site, Sport, get_optimizer
+
+    from ceminidfs.export.optimize import keep_injury_tagged_players
+
+    path = tmp_path / "raw_fd.csv"
+    game = "BUF@KC 01:00PM ET"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(HEADER)
+        writer.writerow(["1", "Patrick", "Mahomes", "QB", "KC", "8000", "30", game, "", "BUF"])
+        writer.writerow(["2", "Isiah", "Pacheco", "RB", "KC", "6100", "18", game, "OUT", "BUF"])
+        writer.writerow(["3", "Kareem", "Hunt", "RB", "KC", "5200", "12", game, "IR", "BUF"])
+        writer.writerow(["4", "Rashee", "Rice", "WR", "KC", "6400", "16", game, "Q", "BUF"])
+
+    optimizer = get_optimizer(Site.FANDUEL, Sport.FOOTBALL)
+    optimizer.load_players_from_csv(str(path))
+
+    keep_injury_tagged_players(optimizer, path)
+
+    eligible = {player.full_name for player in optimizer.player_pool.filtered_players}
+    assert "Isiah Pacheco" not in eligible
+    assert "Kareem Hunt" not in eligible
+    assert "Rashee Rice" in eligible
+    err = capsys.readouterr().err
+    assert "removed 2 unavailable players" in err
+    assert "['IR', 'OUT']" in err

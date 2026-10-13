@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from ceminidfs.data.availability import is_unavailable_status
+
 from .build_gates import (
     FIVE_CORE_SIZE,
     BuildGateError,
@@ -1038,7 +1040,7 @@ def generate_lineups(
     optimizer.load_players_from_csv(str(csv_file))
     attach_csv_original_positions(optimizer, csv_file)
     _relax_tiny_slate_limits(optimizer, site_key)
-    keep_injury_tagged_players(optimizer)
+    keep_injury_tagged_players(optimizer, csv_file)
     apply_open_qb_gate(
         optimizer,
         set(open_qb_teams or ()) | open_qb_teams_from_csv(csv_file),
@@ -1315,17 +1317,72 @@ def _write_build_report(
     print(f"Wrote lineup report -> {target}")
 
 
-def keep_injury_tagged_players(optimizer: Any) -> None:
-    """Keep Q/questionable rows that pydfs marks injured.
+def _injury_status_by_name(csv_path: str | Path) -> dict[str, str]:
+    """Read a salary CSV and map folded player name to injury status.
+
+    Return ``{}`` when the file is missing or has no injury column.
+    """
+
+    path = Path(csv_path)
+    if not path.is_file():
+        return {}
+    injury_aliases = ("injury indicator", "injury", "inj", "status", "injury_status")
+    mapping: dict[str, str] = {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        lowered = {str(name).strip().lower(): name for name in reader.fieldnames or []}
+        injury_col = next((lowered[key] for key in injury_aliases if key in lowered), None)
+        if injury_col is None:
+            return {}
+        first_col = lowered.get("first name") or lowered.get("firstname")
+        last_col = lowered.get("last name") or lowered.get("lastname")
+        name_col = (
+            lowered.get("name") or lowered.get("player_name") or lowered.get("nickname")
+        )
+        for raw in reader:
+            first = str(raw.get(first_col, "") or "").strip() if first_col else ""
+            last = str(raw.get(last_col, "") or "").strip() if last_col else ""
+            display = " ".join(part for part in (first, last) if part).strip()
+            if not display and name_col:
+                display = str(raw.get(name_col, "") or "").strip()
+            status = str(raw.get(injury_col, "") or "").strip()
+            key = _exposure_name_key(display) if display else ""
+            if key and status:
+                mapping[key] = status
+    return mapping
+
+
+def keep_injury_tagged_players(optimizer: Any, csv_path: str | Path | None = None) -> None:
+    """Keep Q/questionable rows that pydfs marks injured, drop unavailable rows.
 
     The FanDuel importer sets ``is_injured`` for any non-empty Injury Indicator.
-    CeminiDFS already dropped OUT/IR/D in normalize. Default pydfs filtering
-    would then drop every remaining Q tag.
+    Default pydfs filtering would drop every Q tag, so this function sets
+    ``pool.with_injured = True``. It must still drop OUT/IR/PUP/NFI/NA/D/
+    EXEMPT/SUSPENDED/DOUBTFUL/INACTIVE rows.
+
+    Some callers pass a raw FanDuel salary CSV with no upstream normalize step.
+    Read the status from ``csv_path`` itself in that case.
     """
 
     pool = getattr(optimizer, "player_pool", None)
     if pool is None:
         return
+    status_by_name = _injury_status_by_name(csv_path) if csv_path is not None else {}
+    removed = 0
+    removed_statuses: set[str] = set()
+    for player in list(pool.all_players):
+        key = _exposure_name_key(getattr(player, "full_name", ""))
+        status = status_by_name.get(key, "") if key else ""
+        if status and is_unavailable_status(status):
+            pool.remove_player(player)
+            removed += 1
+            removed_statuses.add(status.strip().upper())
+    if removed > 0:
+        print(
+            f"optimizer pool: removed {removed} unavailable players "
+            f"({sorted(removed_statuses)})",
+            file=sys.stderr,
+        )
     pool.with_injured = True
     all_n = len(pool.all_players)
     filtered_n = len(pool.filtered_players)

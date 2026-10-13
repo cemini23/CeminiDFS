@@ -189,7 +189,24 @@ def test_report_lists_build_flags_when_set():
     assert "Build: no-offense-vs-dst, one-rb-per-team, projection-floor=8.0, uniques=3" in text
 
 
-def test_exclude_already_out_of_pool_skips(capsys):
+def test_exclude_not_in_pool_raises_by_default():
+    removed: list[object] = []
+    pool = SimpleNamespace(
+        get_player_by_id=lambda _query: None,
+        get_player_by_name=lambda _query: (_ for _ in ()).throw(KeyError("missing")),
+        all_players=[],
+        remove_player=removed.append,
+        lock_player=lambda _player: None,
+    )
+    optimizer = SimpleNamespace(player_pool=pool)
+
+    with pytest.raises(ValueError, match="exclude not found in pool"):
+        apply_locks_and_excludes(optimizer, excludes=["A.J. Brown"])
+
+    assert removed == []
+
+
+def test_exclude_already_out_of_pool_skips_when_allowed(capsys):
     pool = SimpleNamespace(
         get_player_by_id=lambda _query: None,
         get_player_by_name=lambda _query: (_ for _ in ()).throw(KeyError("missing")),
@@ -199,7 +216,11 @@ def test_exclude_already_out_of_pool_skips(capsys):
     )
     optimizer = SimpleNamespace(player_pool=pool)
 
-    locks, excludes = apply_locks_and_excludes(optimizer, excludes=["A.J. Brown"])
+    locks, excludes = apply_locks_and_excludes(
+        optimizer,
+        excludes=["A.J. Brown"],
+        allow_missing=True,
+    )
 
     assert locks == []
     assert excludes == []

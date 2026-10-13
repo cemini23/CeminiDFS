@@ -10,6 +10,7 @@ pytest.importorskip("pydfs_lineup_optimizer")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.export.late_swap import (
+    _apply_late_swap_excludes,
     _load_simple_lineups,
     _normalize_teams,
     _optimize_existing_lineups,
@@ -288,6 +289,72 @@ def test_optimize_existing_lineups_keeps_original_when_one_fails():
 
     assert result[0].id == 10
     assert result[1].id == 2
+
+
+def test_optimize_existing_lineups_raises_when_original_holds_excluded():
+    original = SimpleNamespace(id=1, players=[SimpleNamespace(full_name="Breece Hall")])
+
+    class Optimizer:
+        def optimize_lineups(self, lineups, max_exposure=None):
+            raise RuntimeError("Unable to build lineup")
+
+    with pytest.raises(RuntimeError, match="still holds excluded player"):
+        _optimize_existing_lineups(
+            Optimizer(),
+            [original],
+            max_exposure=0.35,
+            excluded_names=["Breece Hall"],
+        )
+
+
+def test_optimize_existing_lineups_raises_when_rebuild_is_none_and_excluded():
+    original = SimpleNamespace(id=1, players=[SimpleNamespace(full_name="Breece Hall")])
+
+    class Optimizer:
+        def optimize_lineups(self, lineups, max_exposure=None):
+            return None
+
+    with pytest.raises(RuntimeError, match="still holds excluded player"):
+        _optimize_existing_lineups(
+            Optimizer(),
+            [original],
+            max_exposure=0.35,
+            excluded_names=["Breece Hall"],
+        )
+
+
+def test_optimize_existing_lineups_keeps_original_without_excluded_names():
+    original = SimpleNamespace(id=1, players=[SimpleNamespace(full_name="Breece Hall")])
+
+    class Optimizer:
+        def optimize_lineups(self, lineups, max_exposure=None):
+            raise RuntimeError("Unable to build lineup")
+
+    result = _optimize_existing_lineups(
+        Optimizer(),
+        [original],
+        max_exposure=0.35,
+        excluded_names=["Someone Else"],
+    )
+
+    assert result == [original]
+
+
+def test_apply_late_swap_excludes_raises_on_unknown_name():
+    pool = SimpleNamespace(
+        get_player_by_id=lambda _query: None,
+        get_player_by_name=lambda _query: (_ for _ in ()).throw(KeyError("missing")),
+        all_players=[],
+        remove_player=lambda _player: None,
+    )
+    optimizer = SimpleNamespace(player_pool=pool)
+
+    with pytest.raises(ValueError, match="exclude not found in pool"):
+        _apply_late_swap_excludes(optimizer, ["A.J. Brown"], set())
+
+    assert _apply_late_swap_excludes(
+        optimizer, ["A.J. Brown"], set(), allow_missing=True
+    ) == []
 
 
 def test_format_prelock_swap_checklist_inactive_confirmed_with_replacement():

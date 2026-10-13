@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from ceminidfs.cli import _review_report_overrides, build_parser, main
 from ceminidfs.export.lineup_report import format_lineup_report
 from ceminidfs.export.optimize import LINEUP_HEADERS
@@ -15,6 +17,8 @@ from ceminidfs.export.review_reports import (
     LATE_SWAP_ALERT_HEADER,
     LEVERAGE_FADE_HEADER,
     STACK_FRAGILITY_HEADER,
+    _player_from_row,
+    load_player_index,
     maybe_write_review_reports,
     parse_lineup_csv,
 )
@@ -595,3 +599,41 @@ def test_format_lineup_report_exposure_cap_stays_two_of_four():
     assert " 75%    3  Joe Burrow" in report
     assert " 25%    1  Josh Allen" in report
     assert " 75%    3  Ja'Marr Chase" in report
+
+
+def test_player_from_row_reads_canonical_schema():
+    meta = _player_from_row(
+        {
+            "slate_id": "2026_w5",
+            "player_key": "135023-103064",
+            "fd_id": "135023-103064",
+            "fd_position": "RB",
+            "fd_salary": "7000",
+            "fd_projection": "12.5",
+            "dk_id": "",
+            "dk_position": "",
+            "dk_salary": "",
+            "dk_projection": "",
+            "team": "NYJ",
+            "opp": "CLE",
+            "game": "CLE@NYJ",
+            "injury_status": "",
+            "name": "Breece Hall",
+            "player_name": "Breece Hall",
+        }
+    )
+
+    assert meta.name == "Breece Hall"
+    assert meta.team == "NYJ"
+    assert meta.position == "RB"
+    assert meta.salary == "7000"
+    assert meta.projection == "12.5"
+    assert meta.player_id == "135023-103064"
+
+
+def test_load_player_index_raises_when_position_and_salary_missing(tmp_path: Path):
+    path = tmp_path / "bad.csv"
+    path.write_text("name,injury_status\nBreece Hall,O\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no position and no salary"):
+        load_player_index(path)

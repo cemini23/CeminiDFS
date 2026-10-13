@@ -122,14 +122,21 @@ _NAME_KEYS = (
     "full name",
     "full_name",
 )
-_TEAM_KEYS = ("team", "team abbrev", "teamabbrev", "tm")
-_POS_KEYS = ("position", "pos", "roster position")
+_TEAM_KEYS = ("team", "team abbrev", "teamabbrev", "tm", "fd_team", "dk_team")
+_POS_KEYS = ("position", "pos", "roster position", "fd_position", "dk_position")
 _INJURY_KEYS = ("injury indicator", "injury", "inj", "status", "injury_status")
 _GAME_KEYS = ("game", "game info", "matchup")
-_ID_KEYS = ("id", "player id", "player_id")
+_ID_KEYS = ("id", "player id", "player_id", "fd_id", "dk_id")
 _OWN_KEYS = ("projected ownership", "ownership", "own%", "own")
-_SALARY_KEYS = ("salary",)
-_PROJ_KEYS = ("fppg", "projection", "avgpointspergame", "avg points per game")
+_SALARY_KEYS = ("salary", "fd_salary", "dk_salary")
+_PROJ_KEYS = (
+    "fppg",
+    "projection",
+    "avgpointspergame",
+    "avg points per game",
+    "fd_projection",
+    "dk_projection",
+)
 _CEILING_KEYS = ("projection ceil", "ceiling", "ceil", "proj_ceiling", "fd_ceiling")
 _OPP_KEYS = ("opp", "opponent")
 CEILING_MISSING = "ceiling_missing"
@@ -358,16 +365,28 @@ def parse_lineup_csv(
 
 
 def load_player_index(path: str | Path) -> dict[str, PlayerMeta]:
-    """Index players CSV by normalized name and by id."""
+    """Index players CSV by normalized name and by id.
+
+    Raise ``ValueError`` when a row has neither a position nor a salary. That
+    means the header did not match the player schema, so the index would be
+    unusable for review reports.
+    """
 
     index: dict[str, PlayerMeta] = {}
-    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+    source = Path(path)
+    with source.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
+        header = list(reader.fieldnames or [])
         for raw in reader:
             row = {str(key): ("" if value is None else str(value)) for key, value in raw.items()}
             meta = _player_from_row(row)
             if not meta.name:
                 continue
+            if not meta.position and not meta.salary:
+                raise ValueError(
+                    f"{source}: row {meta.name!r} has no position and no salary; "
+                    f"header: {', '.join(header)}"
+                )
             index[_normalize_name(meta.name)] = meta
             if meta.player_id:
                 index[meta.player_id] = meta
