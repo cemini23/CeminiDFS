@@ -205,11 +205,17 @@ def build_status_packet(
 
 
 def _verify_action(verdict: str, noul: float | None, confidence: float | None) -> str:
-    """Map one Noul answer to a gate action. Thresholds live here."""
+    """Map one Noul answer to a gate action. Thresholds live here.
 
-    if confidence is None or confidence < NOUL_CONFIDENCE_FLOOR:
+    Only a contradicted claim can flag. ``unsupported`` means the evidence
+    does not address the claim. That is silence, not evidence against it.
+    Silence routes to the operator, because a run that flags every player the
+    packet is quiet about is worse than no gate at all.
+    """
+
+    if verdict in {"unsupported", "unknown"} or noul is None:
         return "review"
-    if noul is None:
+    if confidence is None or confidence < NOUL_CONFIDENCE_FLOOR:
         return "review"
     return "pass" if noul >= NOUL_HIGH else "flag"
 

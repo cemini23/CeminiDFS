@@ -74,10 +74,26 @@ the lineup file and the players file. It **does not read the scratch** CSV
 
 | Condition | Action |
 |-----------|--------|
-| verdict supported and confidence >= 0.80 | `pass` |
-| verdict contradicted and confidence >= 0.80 | `flag` |
+| verdict `verified` and confidence >= 0.80 | `pass` |
+| verdict `contradicted` and confidence >= 0.80 | `flag` (candidate inactive) |
+| verdict `unsupported` | `review` |
 | confidence < 0.80 | `review` (route to the operator) |
 | screen says `block` | `block` |
+
+**Only a contradicted claim can flag.** `unsupported` means the evidence does
+not address the claim. That is silence. A gate that flags every player the
+packet is quiet about is worse than no gate.
+
+The Week 5 live run shows why this matters. The QBs returned `unsupported`,
+because the status packet holds no depth-chart data. Flagging them would have
+accused Rodgers, Goff, Burrow, and Watson of not being starters.
+
+### The evidence sets the ceiling
+
+A `Q` tag alone is weak evidence. Live, Jev contradicted "expected to be
+active" for every Questionable player, but never above 0.28 confidence. All of
+them landed in `review`. A `flag` needs evidence that actually contradicts the
+claim, such as a real inactive report. Pass one with `--jev-status FILE`.
 
 ### Fail closed
 

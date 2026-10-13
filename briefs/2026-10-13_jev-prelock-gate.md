@@ -38,6 +38,7 @@ Thresholds live in `jev_gate.py`, not in Jev.
 |-----------|--------|
 | supported and confidence >= 0.80 | `pass` |
 | contradicted and confidence >= 0.80 | `flag` |
+| unsupported (the evidence says nothing) | `review` |
 | confidence < 0.80 | `review` |
 | screen says `block` | `block` |
 
@@ -50,34 +51,36 @@ parallel against the same state, so one call holds the whole slate.
 runs/2026_week_5/normalized_players.csv --out runs/2026_week_5 --jev`.
 
 ```
-jev gate: pass=29 flag=8 review=10 block=0 low_confidence=10
+jev gate: pass=17 flag=0 review=30 block=0 low_confidence=30
 ```
 
 | Action | Count | What it is |
 |--------|------:|------------|
-| pass | 29 | 1 screen row, 20 healthy over-cap players, 12 QBs, minus overlap |
-| flag | 8 | Carnell Tate, Rhamondre Stevenson, Ja'Marr Chase, Jaylen Wright, Jordan Addison, Keenan Allen, Alvin Kamara, Ashton Jeanty |
-| review | 10 | Tee Higgins at 0.62 confidence, plus 9 late-swap Choice rows |
+| pass | 17 | the screen row, plus every player the packet supports |
+| flag | 0 | no evidence contradicted a claim at 0.80 |
+| review | 30 | every Questionable player, every QB, and the 9 late-swap Choice rows |
 | block | 0 | |
 
-Jordan Addison is flagged. He was Questionable with a hamstring, was in 38 of
-150 lineups, and scored 0.
+Jordan Addison was Questionable with a hamstring, was in 38 of 150 lineups,
+and scored 0. The gate **routed him to the operator, it did not flag him** —
+see "The live run" below for why, and what it would take to flag him.
 
 ## Measured effect: no cash impact this week
 
-I measured the counterfactual. For every flagged player in every lineup, I
-swapped in the best legal alternative — same game, same position, healthy.
+The counterfactual uses the audit's flagged set — the Questionable players. For
+every one, in every lineup, I swapped in the best legal alternative: same game,
+same position, healthy.
 
 | Book | Lineups at or above the 134.74 cash line | Median |
 |------|-----------------------------------------:|-------:|
 | Week 5 as shipped | 30 | 117.78 |
-| After every flag repaired (best projection) | 29 | 117.99 |
-| After every flag repaired (best actual, hindsight) | 29 | 117.99 |
+| After every Questionable repaired (best projection) | 29 | 117.99 |
+| After every Questionable repaired (best actual, hindsight) | 29 | 117.99 |
 
 **The gate has no cash impact this week.** A blanket repair moves the count by
 one, downward. The reason is in the data:
 
-| Flagged player | Mean actual | Lineups with 0 |
+| Questionable player | Mean actual | Lineups with 0 |
 |----------------|------------:|---------------:|
 | Ja'Marr Chase | 16.70 | 0 |
 | Rhamondre Stevenson | 16.00 | 0 |
@@ -117,24 +120,62 @@ jev gate: pass=0 flag=0 review=0 block=1 low_confidence=0
 A missing key, a missing launcher, a timeout, a JSON-RPC error, a tool error,
 or a malformed payload all raise. The gate never reads silence as a pass.
 
-## Limitation of this build
+## The live run
 
-The live TypeSafe call did not run on this machine. The sandbox blocks egress
-to `api.typesafe.ai`, so every attempt returned `Connection error: fetch
-failed`. That failure is the second fail-closed case above.
+The live gate ran on 2026-10-13 against `api.typesafe.ai` (model
+`jev-latest`), from a shell with real egress. The first live run found a defect.
 
-The Week 5 report above was produced with `--jev-fixture
-tests/fixtures/jev/week5_gate.json`. The fixture follows the response shape in
-`mcp-jev` `dist/index.js` and the tool README. It is not a captured live
-response. The gate logic, the thresholds, the report, and the fail-closed paths
-ran for real. The live path is wired and starts correctly — the MCP handshake
-against `~/.local/bin/mcp-jev` succeeds.
+### Defect: silence was read as an accusation
 
-Run the live gate from a machine with egress to `api.typesafe.ai`:
+Every rostered QB came back `unsupported noul=0.00` with high confidence. The
+status packet holds no depth-chart data, so Jev correctly answered "the
+evidence says nothing". The gate mapped a low noul and a high confidence to
+`flag`, so it accused nine QBs of not being starters:
 
-```bash
-ceminidfs review --lineups <book.csv> --players <normalized.csv> --jev
 ```
+jev flag: Aaron Rodgers — Aaron Rodgers is the confirmed starter for PIT. [unsupported noul=0.00]
+jev flag: Jared Goff — ...            (9 in total)
+```
+
+An accusation from silence is worse than no gate. Only a `contradicted` claim
+can flag now. `unsupported` routes to the operator.
+
+| Live result | Before the fix | After the fix |
+|-------------|---------------:|--------------:|
+| pass | 17 | 17 |
+| flag | 9 | **0** |
+| review | 21 | 30 |
+
+### What the live run says about Week 5
+
+**The gate did not flag Jordan Addison.** Jev returned `contradicted` for him
+at noul 0.49 and confidence 0.23. Below the 0.80 floor, the gate routes him to
+the operator. That is the specified behavior, and it is the honest result: a
+Questionable tag is weak evidence, and Jev said so. Every Questionable player
+landed in the same place, at confidence 0.23 to 0.48.
+
+So the gate's measured value this week is a **review list**, not a flag list.
+The 30 rows tell the operator where the evidence is thin.
+
+To reach a `flag` the packet must contradict the claim. A real inactive report
+does that. Pass one with `--jev-status FILE`. The flag path is covered by
+`test_gate_flags_a_player_whose_evidence_contradicts`.
+
+The Choice step is also weak as built. Its candidates are bare player names, so
+Jev returned `partial` or `absent` for most rows, with probabilities near 0.5.
+It ranks, but it does not decide. That matches its role, and it is not a
+reason to trust the ordering.
+
+## Tests and the fixture
+
+The Week 5 fixture is now a **real capture**. `tests/fixtures/jev/week5_gate.json`
+holds the verdict, noul, and confidence that the live model returned for all 37
+claims and 9 Choice calls. `probabilities.contradicts` and `says_nothing` are
+reconstructed, because the CSV report keeps only noul. The gate reads verdict,
+`probabilities.supports`, and confidence.
+
+The offline run reproduces the live summary exactly:
+`pass=17 flag=0 review=30 block=0 low_confidence=30`.
 
 ## Tests
 
