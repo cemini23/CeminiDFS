@@ -11,7 +11,7 @@ lineup. The agent does not Enter.
 >
 > 1. Use this week's FanDuel player-list CSV. Do not reuse last week's contest IDs.
 > 2. Run the 25-lineup probe before the full GPP build.
-> 3. The five review flags default off. Read each report before you solve again.
+> 3. The review flags default off. Read each report before you solve again.
 > 4. Questionable (`Q`) players stay in the pool. Do not drop them. A hard fade
 >    removes a player. A soft fade discounts a team.
 > 5. Do not retune FPPG, CIN, Chase, or weather from one Sunday.
@@ -34,7 +34,7 @@ Do not guess on a money slate.
 
 - **Slate guard:** the FanDuel salary CSV must be the **Sunday-afternoon** slate only. A full-week export also holds SNF IND@KC. Do not import that game.
 - **ATL QB check:** after `fetch`, the nflverse vegas file may still name Tua as the ATL QB. The hub says **Cooper Rush** starts. Keep the fade on the ATL pass game. Do not retune FPPG.
-- **Optional Jev HITL:** after the review CSVs exist, call `jev_verify` on one injury cell. Call `jev_find` on the late-swap rows (`late_swap_alert_report.csv`). Jev does not change projections. No scrape. No Enter.
+- **Jev HITL:** the pre-lock gate in step 4b runs `verify`, `screen`, and `find` over the whole book. Read `jev_gate_report.csv`. The gate marks. You decide. Jev does not change projections. No scrape. No Enter.
 
 **Late-swap 1 p.m. ET lock teams (nflverse):** `--lock-team CAR --lock-team ATL --lock-team NO --lock-team BAL --lock-team MIN --lock-team CHI --lock-team CIN --lock-team HOU --lock-team PIT --lock-team NE --lock-team GB --lock-team NYJ --lock-team CLE --lock-team TB --lock-team PHI --lock-team TEN`.
 
@@ -137,9 +137,65 @@ ceminidfs review --lineups runs/2026_week_2/lineups.csv \
 | `--ownership-fade-report` | `leverage_fade_matrix.csv` | Read the leverage. May then `--max-exposure` or `--exclude`. |
 | `--flag-duplicate-cores` | `duplicate_core_report.csv` | Read a QB and the same two RB slots on more than 2 lineups. Do not drop a lineup. |
 | `--dart-ceiling-report` | `dart_ceiling_rank.csv` | Read players with salary at or below 5500. The rank uses the existing mean. A blank ceiling means the file had no ceiling. |
+| `--flag-qb-starter` | `qb_starter_report.csv` | Read a rostered QB who is not a confirmed starter. |
+| `--flag-stack-concentration` | `stack_concentration_report.csv` | Read prior-3-week target share on each QB stack partner. |
+| `--flag-correlated-pairs` | `correlated_pair_report.csv` | Read a TE and DST pair on more than one lineup. |
+| `--defense-context-report` | `defense_context_report.csv` | Read opponent context beside the pass multiplier. |
+| `--projection-bands` | `projection_bands.csv` | Read P85 and P15. The projection stays the same. |
 
 Read the CSVs. Then you may `--exclude`, `--max-exposure`, or `late-swap`. Do not
 auto-apply a report. Do not auto-drop a `Q` player.
+
+### Build-time gates (`--profile gpp`)
+
+The gates move four review findings into the solver. The solver refuses the
+book. It does not print a note and continue. Values are in
+`config/nfl_dfs_gpp.yaml` under `gates`.
+
+| Gate | Rule | Week 5 result |
+|------|------|---------------|
+| `core` | Any 5-player core appears on at most `max_count` (12) lineups. | The Chase / Addison / Allen / Wright / Stevenson core dropped from 38 lineups to 12. |
+| `max_exposure` | Every player stays at or under 20% of the book. | Nine players at 34.7% became none. |
+| `exposure_hatch` | One player per position may reach 30% when his projection leads the next player at that position by `lead_margin` (4.0). | Purdy (QB) and Gibbs (RB) reached 30%. |
+| `low_ceiling` | A lineup holds at most `max_per_lineup` (1) skill player under `projection_floor` (8.0) points. | 38 lineups with two weak players became none. |
+
+A breach stops the run with a message. Fix the cause; do not raise the cap
+without a written reason. The gate values live in the profile, so the plain
+`optimize` command is unchanged.
+
+## 4b. Pre-lock Q/D gate (before 1:00 p.m. ET)
+
+Run this **before** the lock. It reads the lineup file and the players file.
+It writes `late_swap_alert_report.csv`. It exits 1 when a `Q` or `D` player is
+over the exposure cap (8% of the book). The operator then swaps or accepts.
+
+```bash
+ceminidfs late-swap \
+  --lineups runs/2026_week_2/lineups.csv \
+  --players runs/2026_week_2/normalized_players.csv \
+  --prelock --profile gpp
+```
+
+A non-zero exit is the gate. Change the lineup, or lower the exposure with
+`--exclude` and rebuild. Do not submit a `Q` player at 25% of the book.
+
+That command writes the alert report only. It does not ask Jev. Run the Jev
+gate after it, before the lock:
+
+```bash
+ceminidfs review \
+  --lineups runs/2026_week_2/lineups.csv \
+  --players runs/2026_week_2/normalized_players.csv \
+  --out runs/2026_week_2 \
+  --jev --jev-date 2026-09-20
+```
+
+Read `jev_gate_report.csv`. `flag` means a candidate is inactive. `review`
+means the answer was below 0.80 confidence and needs your eye. `block` means
+the gate refused, and you fix the cause before you upload. To run it with no
+key and no network, add `--jev-fixture <file>`.
+
+The gate marks. It never swaps a player. You swap.
 
 ### Hard fade and soft fade
 
@@ -246,6 +302,23 @@ players file.
 Paste the scored lineups and the tool gaps into the DFS Recap Desk. The protocol
 is in [`GROK-BOTS.md`](GROK-BOTS.md). The Recap Desk is live in Grok Bot.app; it
 still does not write this repo. Still no Enter.
+
+Scores come from one owner: `src/ceminidfs/models/scoring.py`. The Recap Desk
+script does not score. See `GROK-BOTS.md` section 18.
+
+### Grade in buckets, not ranks
+
+Rank 30 and rank 31 differ by noise. Bucket the scores. The bucket that matters
+is 41–100: its median shows how far the middle of the book sits under the cash
+line. Lift that median and the cash rate moves.
+
+```bash
+ceminidfs buckets --totals runs/2026_week_5/lineup_totals.csv
+```
+
+The command writes `cash_bucket_report.csv` next to the totals file. It reads a
+rank column and a score column. It does not invent a rank.
+
 
 ## Keep and refuse
 

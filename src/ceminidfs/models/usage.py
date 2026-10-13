@@ -285,6 +285,124 @@ def history_week_cutoff(frame: pd.DataFrame, season: int, week: int) -> int:
     return int(max_week) + 1
 
 
+def _shares_on_played_games(
+    team_stats: pd.DataFrame,
+    *,
+    max_games: int | None,
+    only_ids: pd.Series,
+) -> pd.DataFrame:
+    """Return shares on the games each player actually played.
+
+    A week with no row is a missed game. That week stays out of the
+    denominator. ``max_games`` keeps the most recent appearances. ``None``
+    keeps every appearance. Players outside ``only_ids`` are left out.
+    """
+
+    columns = ["player_id", "target_share", "air_yards_share", "carry_share"]
+    if team_stats.empty or only_ids.empty:
+        return pd.DataFrame(columns=columns)
+
+    frame = team_stats.loc[team_stats["player_id"].isin(only_ids)].copy()
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    frame["_week"] = pd.to_numeric(frame["week"], errors="coerce")
+    if "season" in frame.columns:
+        frame["_season"] = pd.to_numeric(frame["season"], errors="coerce").fillna(0)
+    else:
+        frame["_season"] = 0
+    frame["_targets"] = pd.to_numeric(frame["targets"], errors="coerce").fillna(0.0)
+    frame["_air"] = pd.to_numeric(frame["air_yards"], errors="coerce").fillna(0.0)
+    frame["_carries"] = pd.to_numeric(frame["carries"], errors="coerce").fillna(0.0)
+
+    # Team totals include teammates who are outside only_ids.
+    full = team_stats.copy()
+    full["_week"] = pd.to_numeric(full["week"], errors="coerce")
+    full["_season"] = (
+        pd.to_numeric(full["season"], errors="coerce").fillna(0)
+        if "season" in full.columns
+        else 0
+    )
+    full["_targets"] = pd.to_numeric(full["targets"], errors="coerce").fillna(0.0)
+    full["_air"] = pd.to_numeric(full["air_yards"], errors="coerce").fillna(0.0)
+    full["_carries"] = pd.to_numeric(full["carries"], errors="coerce").fillna(0.0)
+    team_week = full.groupby(["_season", "_week"], dropna=False)[
+        ["_targets", "_air", "_carries"]
+    ].sum()
+
+    rows: list[dict[str, Any]] = []
+    for player_id, player in frame.groupby("player_id", dropna=False):
+        games = (
+            player.groupby(["_season", "_week"], dropna=False)[["_targets", "_air", "_carries"]]
+            .sum()
+            .reset_index()
+            .sort_values(["_season", "_week"])
+        )
+        if max_games is not None and max_games > 0:
+            games = games.tail(max_games)
+        if games.empty:
+            continue
+        keys = list(zip(games["_season"], games["_week"], strict=True))
+        team_totals = team_week.reindex(keys).sum()
+        player_totals = games[["_targets", "_air", "_carries"]].sum()
+        rows.append(
+            {
+                "player_id": player_id,
+                "target_share": _ratio(player_totals["_targets"], team_totals["_targets"]),
+                "air_yards_share": _ratio(player_totals["_air"], team_totals["_air"]),
+                "carry_share": _ratio(player_totals["_carries"], team_totals["_carries"]),
+            }
+        )
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _players_in_latest_game(team_stats: pd.DataFrame) -> pd.Series:
+    """Return ids who played the team's most recent game."""
+
+    weeks = pd.to_numeric(team_stats["week"], errors="coerce")
+    if "season" in team_stats.columns:
+        seasons = pd.to_numeric(team_stats["season"], errors="coerce").fillna(0)
+    else:
+        seasons = pd.Series(0, index=team_stats.index)
+    if weeks.dropna().empty:
+        return pd.Series(dtype=object)
+    latest_season = seasons.loc[weeks.notna()].max()
+    latest_week = weeks.loc[seasons == latest_season].max()
+    played = team_stats.loc[(seasons == latest_season) & (weeks == latest_week), "player_id"]
+    return played.drop_duplicates()
+
+
+def _ratio(numerator: Any, denominator: Any) -> float:
+    den = float(denominator)
+    if den <= 0:
+        return 0.0
+    return float(numerator) / den
+
+
+def _overlay_played_shares(
+    calendar: pd.DataFrame,
+    played: pd.DataFrame,
+    *,
+    prefix: str,
+) -> pd.DataFrame:
+    """Replace calendar shares for players whose played-game sample exists."""
+
+    if played.empty or calendar.empty:
+        return calendar
+    update = played.rename(
+        columns={
+            "target_share": f"{prefix}_target_share",
+            "air_yards_share": f"{prefix}_air_yards_share",
+            "carry_share": f"{prefix}_carry_share",
+        }
+    )
+    base = calendar.set_index("player_id")
+    base.update(update.set_index("player_id"))
+    return base.reset_index()
+
+
 def rolling_shares(
     stats: pd.DataFrame,
     team: str,
@@ -293,7 +411,12 @@ def rolling_shares(
     *,
     settings: UsageSettings | None = None,
 ) -> pd.DataFrame:
-    """Return per-player recent and season usage shares for one team."""
+    """Return per-player recent and season usage shares for one team.
+
+    A player who played the team's latest game is measured on the games he
+    played. Earlier missed weeks do not dilute that share. A player who
+    missed the latest game keeps the calendar-week share.
+    """
 
     cfg = settings or UsageSettings.from_config({})
     window = windows[0] if windows else cfg.l3_window
@@ -328,6 +451,18 @@ def rolling_shares(
     ].copy()
     season_usage = _share_frame(team_stats, prefix="season")
     recent_usage = _share_frame(recent_stats, prefix="l3")
+    appeared = _players_in_latest_game(team_stats)
+    if not appeared.empty:
+        recent_usage = _overlay_played_shares(
+            recent_usage,
+            _shares_on_played_games(team_stats, max_games=window, only_ids=appeared),
+            prefix="l3",
+        )
+        season_usage = _overlay_played_shares(
+            season_usage,
+            _shares_on_played_games(team_stats, max_games=None, only_ids=appeared),
+            prefix="season",
+        )
 
     players = _player_index(team_stats)
     result = players.merge(recent_usage, on="player_id", how="left").merge(
@@ -666,9 +801,15 @@ def build_week_usage(
                 position=str(player.get("position", "")),
                 settings=settings,
             )
-            rows.append(projection.to_dict())
+            record = projection.to_dict()
+            record["is_qb_starter"] = bool(player.get("is_qb_starter"))
+            record["l3_target_share"] = player.get("l3_target_share", "")
+            rows.append(record)
 
-    return pd.DataFrame(rows, columns=columns)
+    frame = pd.DataFrame(rows)
+    extra = [name for name in ("is_qb_starter", "l3_target_share") if name in frame.columns]
+    ordered = [name for name in columns if name in frame.columns] + extra
+    return frame.reindex(columns=ordered)
 
 
 def _usage_events(

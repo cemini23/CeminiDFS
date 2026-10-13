@@ -326,6 +326,9 @@ def build_week_stats(
         "workload_risk_flag",
         "goal_line_carry_share",
         "goal_line_target_share",
+        "is_qb_starter",
+        "snap_share",
+        "l3_target_share",
     ):
         if column not in week_usage.columns:
             continue

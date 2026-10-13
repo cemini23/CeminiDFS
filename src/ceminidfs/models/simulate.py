@@ -127,12 +127,15 @@ def simulation_summary(
         raise ValueError("quantiles must contain floor, median, and ceiling values")
 
     floor, median, ceiling = np.quantile(matrix, quantiles, axis=1)
+    p15, p85 = np.quantile(matrix, (0.15, 0.85), axis=1)
     return pd.DataFrame(
         {
             "player_id": ids,
             "floor": floor,
             "median": median,
             "ceiling": ceiling,
+            "p15": p15,
+            "p85": p85,
         }
     )
 
@@ -160,6 +163,8 @@ def add_simulation_columns(
     output["Projection Floor"] = summary["floor"].to_numpy()
     output["sim_median"] = summary["median"].to_numpy()
     output["Projection Ceil"] = summary["ceiling"].to_numpy()
+    output["p15"] = summary["p15"].to_numpy()
+    output["p85"] = summary["p85"].to_numpy()
     return output
 
 

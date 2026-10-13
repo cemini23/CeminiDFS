@@ -1,0 +1,25 @@
+I'll build the missing w28 hub from the prefetch, digests, and w27/w29 templates — research-only, no slate tools.Prefetch is thin; mining Jul 5–12 digests for camp/BBM/injury material to fill the hub.Checking w29 prefetch status and a few source pages for accurate w28 framing.Writing the w28 hub from digests + prior injury/ADP sources, then flipping prefetch statuses.Writing the w28 hub from the thin Jul 5–12 window (pre-camp calendars, depth charts, PickLabs, BBM process) and updating prefetch statuses.## Done — w28 hub gap filled
+
+**Wrote:** `briefs/offseason/2026-offseason-w28-hub.md` (Jul 5–12 only; no w29 SI/CBS medical overlap)
+
+### What landed
+
+| Section | Content |
+|--------|---------|
+| **Watchlist** | 5 rows + **thin-week** note — Price, Skattebo, Ferguson, Delane, Charbonnet (carry-forward; no job wins) |
+| **Injury** | BR Jul 1 baseline + SEA/NYG depth notes (CBS Jul 16 left on w29) |
+| **BBM** | Ferguson TE BUY; RotoViz process; slot/stack queue — Mitchell/Johnston/Brooks deferred to w29 |
+| **K147** | Unchanged + **PickLabs** bench (Jul 5 source) |
+| **Hard Rock** | One promo posture line only |
+| **Deep-reads ×3** | BR camp schedule · RotoViz Review · ESPN SEA better/worse |
+
+### Acceptance
+
+- [x] Hub exists  
+- [x] Watchlist ≥3 + thin-week carry-forward  
+- [x] Deep-read ×3  
+- [x] Prefetches w27 / w28 / w29 all `status: hub-written`  
+- [x] `.cursor-prompt-offseason-w28.txt` — not present (nothing to delete)  
+- [x] **No commits**
+
+**Optional next:** light fix on w29’s “w28 hub skipped” line so the chain reads clean — say if you want that.

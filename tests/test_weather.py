@@ -84,7 +84,11 @@ def test_build_week_weather_skips_open_meteo_for_sofi():
 
     assert len(result) == 1
     assert result.loc[0, "roof_type"] == "semi_open"
+    assert result.loc[0, "roof_flag"] == "semi_open"
     assert not result.loc[0, "weather_exposed"]
+    assert not result.loc[0, "prelock_fade_flag"]
+    assert result.loc[0, "pass_rate_delta"] is None or pd.isna(result.loc[0, "pass_rate_delta"])
+    assert "prelock_fade_only" in str(result.loc[0, "weather_note"])
     assert pd.isna(result.loc[0, "wind_speed_10m_mph"])
 
 

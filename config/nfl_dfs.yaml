@@ -61,6 +61,24 @@ buzz_signal:
   max_ownership_boost: 8.0
 luck_metrics:
   pyth_exponent: 2.37
+# Build-time gates. The reports name these risks; the gates refuse them.
+# The GPP profile turns them on. A profile gate value replaces a scalar here.
+gates:
+  core:
+    enabled: false
+    size: 5
+    max_count: 12
+  low_ceiling:
+    enabled: false
+    projection_floor: 8.0
+    max_per_lineup: 1
+    skill_only: true
+  exposure_hatch:
+    enabled: false
+    lead_margin: 4.0
+    cap: 0.30
+prelock:
+  q_exposure_cap: 0.08
 espn_adjunct:
   enabled: false
   league_id: null

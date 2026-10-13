@@ -138,12 +138,13 @@ Sunday game falls outside the set.
 
 ## P2 — suspected team-code mapping fault
 
+**Status:** Closed. nflverse play-by-play puts Kenneth Walker III on KC and Isaiah Likely on NYG for 2026 weeks 1–3. The FanDuel export agrees.
+
 The FanDuel CSV and the normalized pool list **Kenneth Walker III on KC** and
 **Phil Mafah on NYG**. Walker is a Seahawks running back. If the team code is
 wrong, every stack count and every game count is wrong.
 
-**Fix.** Check the team mapping against `data/stadiums.py` aliases. Add a test
-that a known player lands on the right team.
+**Fix.** No team-map change. Normalize keeps Kenneth Walker III on KC and Isaiah Likely on NYG.
 
 ---
 

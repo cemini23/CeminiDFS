@@ -134,6 +134,12 @@ def test_environment_has_one_row_per_slate_team_and_skips_indoor_weather(tmp_pat
     assert kc["weather_exposed"] == "true"
     assert kc["wind_mph"] == "12"
     assert kc["precip_pop"] == "40"
+    assert kc["game_total"] == "47"
+    assert kc["roof_flag"] == "open"
+    assert kc["prelock_fade_flag"] == "true"
+    assert kc["pass_rate_delta"] == ""
+    assert "prelock_fade_only" in kc["weather_note"]
+    assert "do_not_attribute_without_pass_rate_delta" in kc["weather_note"]
     assert kc["wind_source_url"] == HOURLY_URL
     assert kc["wind_retrieved_at"] == "2026-10-04T12:00:00-04:00"
     assert kc["precip_source_url"] == HOURLY_URL
@@ -143,13 +149,17 @@ def test_environment_has_one_row_per_slate_team_and_skips_indoor_weather(tmp_pat
     assert buf["wind_mph"] == "12"
     det = by_team["DET"]
     assert det["roof"] == "dome"
+    assert det["roof_flag"] == "dome"
     assert det["weather_exposed"] == "false"
+    assert det["prelock_fade_flag"] == "false"
     assert det["wind_mph"] == ""
     assert det["precip_pop"] == ""
     assert det["implied_total"] == ""
     assert det["spread"] == ""
     lac = by_team["LAC"]
     assert lac["roof"] == "semi_open"
+    assert lac["roof_flag"] == "semi_open"
+    assert lac["prelock_fade_flag"] == "false"
     assert lac["wind_mph"] == ""
     assert lac["precip_pop"] == ""
     assert "0" not in {det["wind_mph"], det["precip_pop"], lac["wind_mph"], lac["precip_pop"]}

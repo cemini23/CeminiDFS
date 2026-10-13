@@ -1,0 +1,25 @@
+Updating ROADMAP and the K159 brief to match the K163 process-docs pattern.**Done.** K159 process guidance is in the repo (docs only).
+
+### What changed
+
+1. **`ROADMAP.md`**
+   - Shipped track: **K159** — process/docs, not a feature
+   - Section **K159 — pipeline cost discipline (2026-07-19)** with lanes, rules, NO-GO, operator-owned token-delta note
+
+2. **`briefs/2026-07-11_k159-fable-advisor-pipeline-cost-steal.md`**
+   - `status: process-adopted`, `adopt_date: 2026-07-19`
+   - Notes process guidance only; no calibration run; no fake token log
+
+### Untouched
+`src/`, `tests/`, `extension/` — none edited.
+
+### Acceptance
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | ROADMAP section | ✅ |
+| 2 | Brief process-adopted 2026-07-19 | ✅ |
+| 3 | Shipped as process/docs | ✅ |
+| 4 | No code dirs | ✅ |
+| 5 | No invented token log | ✅ |
+
+**Next (optional):** commit these two files when you want them on a branch.

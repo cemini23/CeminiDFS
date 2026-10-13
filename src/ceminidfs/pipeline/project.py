@@ -326,6 +326,12 @@ def _add_simulation_to_rows(
         index = int(row["_row_index"])
         merged[index]["Projection Floor"] = row["Projection Floor"]
         merged[index]["Projection Ceil"] = row["Projection Ceil"]
+        merged[index]["p15"] = row["p15"]
+        merged[index]["p85"] = row["p85"]
+    for row in merged:
+        if _is_empty_projection(row.get("fd_projection")):
+            row["p15"] = 0.0
+            row["p85"] = 0.0
     return merged
 
 

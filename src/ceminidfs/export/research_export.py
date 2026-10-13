@@ -31,7 +31,17 @@ ENV_COLUMNS = [
     "wind_retrieved_at",
     "precip_source_url",
     "precip_retrieved_at",
+    "game_total",
+    "roof_flag",
+    "prelock_fade_flag",
+    "pass_rate_delta",
+    "weather_note",
 ]
+
+# Same 10 mph start as the weather file. This flag does not change a projection.
+PRELOCK_WIND_MPH = 10.0
+PRELOCK_PRECIP_POP = 40.0
+WEATHER_NOTE = "prelock_fade_only; do_not_attribute_without_pass_rate_delta"
 
 STATUS_DFS_COLUMNS = [
     "name",
@@ -109,9 +119,55 @@ def write_environment_csv(
                 "wind_retrieved_at": weather["wind_retrieved_at"],
                 "precip_source_url": weather["precip_source_url"],
                 "precip_retrieved_at": weather["precip_retrieved_at"],
+                "roof_flag": roof,
+                "prelock_fade_flag": _prelock_fade_flag(
+                    exposed,
+                    weather["wind_mph"],
+                    weather["precip_pop"],
+                ),
+                "pass_rate_delta": "",
+                "weather_note": WEATHER_NOTE,
             }
         )
+    _fill_game_totals(rows)
     return _write_dict_rows(out_path, ENV_COLUMNS, rows)
+
+
+def _prelock_fade_flag(exposed: bool, wind_mph: str, precip_pop: str) -> str:
+    """Return a pre-lock fade flag. A dome and a semi-open roof stay false."""
+
+    if not exposed:
+        return "false"
+    wind = _optional_float(wind_mph)
+    precip = _optional_float(precip_pop)
+    if wind is not None and wind >= PRELOCK_WIND_MPH:
+        return "true"
+    if precip is not None and precip >= PRELOCK_PRECIP_POP:
+        return "true"
+    return "false"
+
+
+def _optional_float(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _fill_game_totals(rows: list[dict[str, str]]) -> None:
+    """Put the sum of the two implied totals beside the roof flag."""
+
+    by_team = {row["team"]: _optional_float(row.get("implied_total", "")) for row in rows}
+    for row in rows:
+        own = by_team.get(row["team"])
+        opp = by_team.get(row.get("opp", ""))
+        if own is None or opp is None:
+            row["game_total"] = ""
+        else:
+            row["game_total"] = f"{own + opp:.4f}".rstrip("0").rstrip(".")
 
 
 def slate_teams_from_salary(

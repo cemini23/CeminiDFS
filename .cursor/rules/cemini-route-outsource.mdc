@@ -42,4 +42,4 @@ Default = current project directory. TipDrop scanner only when the task is clear
 
 ## Safety unchanged
 
-No secrets in handoffs. No secrets on free OpenRouter or OpenCode Zen models (live pick prefers Ox Alpha while it is free; do not prefer `opencode/big-pickle` when other free coding models exist; pin with `ROUTE_OPENCODE_MODEL`). No LIVE Discord without LIVE OK.
+No secrets in handoffs. No secrets on free OpenRouter or OpenCode Zen models (live pick ranks the strongest listed-free coding model; do not prefer `opencode/big-pickle` when other free coding models exist; pin with `ROUTE_OPENCODE_MODEL`). No LIVE Discord without LIVE OK.

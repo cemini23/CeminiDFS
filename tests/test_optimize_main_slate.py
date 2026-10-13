@@ -141,6 +141,41 @@ def test_player_exposure_cap_refuses_a_short_book(tmp_path: Path):
     assert not out_csv.with_name("lineups_fanduel_upload.csv").exists()
 
 
+def test_pydfs_exposure_stops_at_the_book_cap():
+    """0.35 of 25 is 8 uses. pydfs must block the 9th use."""
+
+    from ceminidfs.export.optimize import _pydfs_exposure_for_book
+
+    exposure = _pydfs_exposure_for_book(0.35, 25, 25)
+    assert exposure == 8 / 25
+    assert _pydfs_exposure_for_book(0.35, 25, 75) == 8 / 75
+    # pydfs blocks when exposure <= used / n.
+    assert not (exposure <= 7 / 25)
+    assert exposure <= 8 / 25
+    assert _pydfs_exposure_for_book(1.0, 25, 75) == 1.0
+    assert _pydfs_exposure_for_book(None, 25, 75) is None
+
+
+def test_short_candidate_pool_keeps_lineups_built_before_the_stop():
+    """A candidate search may stop before the request. Keep the lineups."""
+
+    from ceminidfs.export.optimize import _optimize_or_raise
+
+    class GenerateLineupException(Exception):
+        pass
+
+    class Optimizer:
+        def optimize(self, **kwargs):
+            del kwargs
+            yield "one"
+            yield "two"
+            raise GenerateLineupException("max_repeating_lineup")
+
+    assert _optimize_or_raise(Optimizer(), n=10, allow_short=True) == ["one", "two"]
+    with pytest.raises(ValueError, match="could not build lineups"):
+        _optimize_or_raise(Optimizer(), n=10, allow_short=False)
+
+
 def test_generate_lineups_default_max_exposure_is_035():
     import inspect
     from ceminidfs.export.optimize import generate_lineups

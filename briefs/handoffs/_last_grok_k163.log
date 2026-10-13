@@ -1,0 +1,36 @@
+I'll mount the maths-cs-ai-compendium as an optional local MCP under CeminiDFS — symlink if the OSINT clone exists, wire `.cursor/mcp.json`, and update the brief/roadmap without touching FanDuel/`src/`.Next: create the symlink, install MCP deps, then wire config and docs.Verifying MCP starts cleanly and acceptance checks pass:## Done — K163 maths-compendium MCP extract
+
+**~5 min of setup complete.** No FanDuel / `src/` / `tests/` / `extension/` changes.
+
+### Checklist
+
+| # | Acceptance | Status |
+|---|------------|--------|
+| 1 | `.local/` exists + gitignored | Done |
+| 2 | Symlink at `.local/adopts/maths-cs-ai-compendium` → OSINT adopt | Done |
+| 3 | `mcp/node_modules` installed (99 packages) | Done |
+| 4 | `.cursor/mcp.json` has `maths-compendium` + keeps `codebase-memory-mcp` | Done |
+| 5 | `ROADMAP.md` Shipped row for K163 | Done |
+| 6 | Brief status `extract-applied` / date 2026-07-19 | Done |
+
+### What you need to do next
+
+1. **Reload MCP in Cursor** (or restart the agent) so `maths-compendium` connects.
+2. **Optional commit** (tracked files only — `.local/` stays out of git):
+
+```bash
+git add .gitignore ROADMAP.md briefs/2026-07-14_k163-maths-compendium-mcp-extract.md .cursor/mcp.json
+git status   # confirm no secrets / no src/
+```
+
+### Layout
+
+- Symlink: `.local/adopts/maths-cs-ai-compendium` → OSINT WORKSPACE adopt  
+- MCP start: `npm start` in `.../mcp` with `COMPENDIUM_ROOT` set to the adopt root  
+- Smoke: process printed `Compendium MCP server running on stdio` (stdio exits when stdin closes — expected)
+
+### Unchanged (by design)
+
+- FanDuel slate / projection code under `src/`
+- No books pasted into docs
+- No secrets committed

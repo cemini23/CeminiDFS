@@ -8,7 +8,9 @@ process: print a one-line path after each write.
 from __future__ import annotations
 
 import csv
+import itertools
 import re
+import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,7 +68,24 @@ DUPLICATE_CORE_HEADER = [
     "lineup_count",
     "lineup_indexes",
     "note",
+    "players",
 ]
+CASH_BUCKET_NAME = "cash_bucket_report.csv"
+CASH_BUCKET_HEADER = [
+    "bucket",
+    "rank_low",
+    "rank_high",
+    "count",
+    "score_min",
+    "score_max",
+    "score_median",
+    "cash_count",
+    "cash_rate_pct",
+]
+DEFAULT_CASH_BUCKETS = ((1, 20), (21, 40), (41, 100), (101, 150))
+_RANK_KEYS = ("rank", "score_rank_of_150", "rank_of_150", "Score Rank", "place")
+_SCORE_KEYS = ("score", "computed_fd", "points", "total", "fd_points", "Score")
+_CASH_KEYS = ("cashed", "cashed_inferred", "won", "win", "cash")
 DART_CEILING_HEADER = [
     "player",
     "team",
@@ -80,6 +99,10 @@ DART_CEILING_HEADER = [
 ]
 
 DO_NOT_AUTO_APPLY = "do_not_auto_apply"
+FIVE_CORE_NOTE = "five_core"
+FIVE_CORE_CAP_NOTE = "five_core_over_cap"
+# A 5-player core that appears fewer than this many times is noise, not a signal.
+FIVE_CORE_REPORT_MIN = 5
 SHARED_NAMES_NOTE = "shared_names"
 SHARED_NAME_MIN = 4
 NEGATIVE_LEVERAGE = "NEGATIVE_LEVERAGE"
@@ -141,7 +164,15 @@ def maybe_write_review_reports(
     ownership_calibration: str | Path | None = None,
     flag_duplicate_cores: bool = False,
     dart_ceiling_report: bool = False,
+    flag_qb_starter: bool = False,
+    flag_stack_concentration: bool = False,
+    flag_correlated_pairs: bool = False,
+    defense_context_report: bool = False,
+    projection_bands: bool = False,
     environment: str | Path | None = None,
+    season: int | None = None,
+    week: int | None = None,
+    core_cap: int | None = None,
 ) -> list[Path]:
     """Write the selected review CSVs next to the lineup file (or into ``out_dir``)."""
 
@@ -185,9 +216,86 @@ def maybe_write_review_reports(
             )
         )
     if flag_duplicate_cores:
-        written.append(write_duplicate_core_report(dest / DUPLICATE_CORE_NAME, lineups))
+        written.append(
+            write_duplicate_core_report(
+                dest / DUPLICATE_CORE_NAME,
+                lineups,
+                core_cap=core_cap,
+            )
+        )
     if dart_ceiling_report:
         written.append(write_dart_ceiling_rank(dest / DART_CEILING_NAME, players))
+    written.extend(
+        _write_week4_gates(
+            dest,
+            lineups,
+            players,
+            implied_totals=implied_totals,
+            flag_qb_starter=flag_qb_starter,
+            flag_stack_concentration=flag_stack_concentration,
+            flag_correlated_pairs=flag_correlated_pairs,
+            defense_context_report=defense_context_report,
+            projection_bands=projection_bands,
+            season=season,
+            week=week,
+        )
+    )
+    return written
+
+
+def _write_week4_gates(
+    dest: Path,
+    lineups: list[list[tuple[str, str]]],
+    players: Mapping[str, PlayerMeta],
+    *,
+    implied_totals: Mapping[str, str] | None,
+    flag_qb_starter: bool,
+    flag_stack_concentration: bool,
+    flag_correlated_pairs: bool,
+    defense_context_report: bool,
+    projection_bands: bool,
+    season: int | None,
+    week: int | None,
+) -> list[Path]:
+    """Write the Week-4 gates. A gate reports. It does not edit a projection."""
+
+    from ceminidfs.export.review_gates import (
+        CORRELATED_PAIR_NAME,
+        DEFENSE_CONTEXT_NAME,
+        PROJECTION_BANDS_NAME,
+        QB_STARTER_NAME,
+        STACK_CONCENTRATION_NAME,
+        load_defense_context,
+        write_correlated_pair_report,
+        write_defense_context_report,
+        write_projection_bands_report,
+        write_qb_starter_report,
+        write_stack_concentration_report,
+    )
+
+    written: list[Path] = []
+    if flag_qb_starter:
+        written.append(write_qb_starter_report(dest / QB_STARTER_NAME, lineups, players))
+    if flag_stack_concentration:
+        written.append(
+            write_stack_concentration_report(dest / STACK_CONCENTRATION_NAME, lineups, players)
+        )
+    if flag_correlated_pairs:
+        written.append(write_correlated_pair_report(dest / CORRELATED_PAIR_NAME, lineups, players))
+    if defense_context_report:
+        context = {}
+        if season is not None and week is not None:
+            context = load_defense_context(int(season), int(week))
+        written.append(
+            write_defense_context_report(
+                dest / DEFENSE_CONTEXT_NAME,
+                players,
+                implied_totals=implied_totals,
+                context=context,
+            )
+        )
+    if projection_bands:
+        written.append(write_projection_bands_report(dest / PROJECTION_BANDS_NAME, players))
     return written
 
 
@@ -201,7 +309,15 @@ def pop_review_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         "ownership_calibration": kwargs.pop("ownership_calibration", None),
         "flag_duplicate_cores": bool(kwargs.pop("flag_duplicate_cores", False)),
         "dart_ceiling_report": bool(kwargs.pop("dart_ceiling_report", False)),
+        "flag_qb_starter": bool(kwargs.pop("flag_qb_starter", False)),
+        "flag_stack_concentration": bool(kwargs.pop("flag_stack_concentration", False)),
+        "flag_correlated_pairs": bool(kwargs.pop("flag_correlated_pairs", False)),
+        "defense_context_report": bool(kwargs.pop("defense_context_report", False)),
+        "projection_bands": bool(kwargs.pop("projection_bands", False)),
         "environment": kwargs.pop("environment", None),
+        "season": kwargs.pop("season", None),
+        "week": kwargs.pop("week", None),
+        "core_cap": kwargs.pop("core_cap", None),
     }
 
 
@@ -306,6 +422,86 @@ def write_late_swap_alert_report(
     return _write_report(path, LATE_SWAP_ALERT_HEADER, rows)
 
 
+def read_lineup_totals(path: str | Path) -> list[dict[str, Any]]:
+    """Read a totals CSV into ``{rank, score, cashed}`` rows.
+
+    Accepts the Recap Desk ``lineup_totals.csv`` shape. A row without a rank
+    or a score is skipped.
+    """
+
+    rows: list[dict[str, Any]] = []
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+        for raw in csv.DictReader(handle):
+            row = {str(key): ("" if value is None else str(value)) for key, value in raw.items()}
+            rank = _parse_number(_first_present(row, _RANK_KEYS))
+            score = _parse_number(_first_present(row, _SCORE_KEYS))
+            if rank is None or score is None:
+                continue
+            cashed = _parse_cash(_first_present(row, _CASH_KEYS))
+            rows.append({"rank": rank, "score": score, "cashed": cashed})
+    rows.sort(key=lambda item: item["rank"])
+    return rows
+
+
+def write_cash_bucket_report(
+    path: str | Path,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    buckets: Sequence[tuple[int, int]] = DEFAULT_CASH_BUCKETS,
+) -> Path:
+    """Report the score range and the cash rate of each rank bucket.
+
+    A bucket answers "how far short is this group", not "what rank is this
+    lineup". Rank 30 and rank 31 differ by noise. The bucket median is the
+    number to lift.
+    """
+
+    out_rows: list[list[str]] = []
+    for low, high in buckets:
+        scores = [float(row["score"]) for row in rows if low <= row["rank"] <= high]
+        cashes = [
+            float(row["score"])
+            for row in rows
+            if low <= row["rank"] <= high and bool(row.get("cashed"))
+        ]
+        count = len(scores)
+        if count:
+            score_min = f"{min(scores):.2f}"
+            score_max = f"{max(scores):.2f}"
+            median = f"{statistics.median(scores):.2f}"
+        else:
+            score_min = score_max = median = ""
+        rate = f"{(len(cashes) / count * 100.0):.1f}" if count else ""
+        out_rows.append(
+            [
+                f"{low}-{high}",
+                str(low),
+                str(high),
+                str(count),
+                score_min,
+                score_max,
+                median,
+                str(len(cashes)),
+                rate,
+            ]
+        )
+    return _write_report(path, CASH_BUCKET_HEADER, out_rows)
+
+
+def _parse_cash(value: str) -> bool:
+    text = str(value or "").strip().upper()
+    return text in {"Y", "YES", "TRUE", "1", "W"}
+
+
+def _first_present(row: Mapping[str, Any], keys: Sequence[str]) -> str:
+    lowered = {str(key).strip().lower(): value for key, value in row.items()}
+    for key in keys:
+        value = lowered.get(key.lower())
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
 def write_leverage_fade_matrix(
     path: str | Path,
     lineups: Sequence[Sequence[tuple[str, str]]],
@@ -350,11 +546,16 @@ def write_leverage_fade_matrix(
 def write_duplicate_core_report(
     path: str | Path,
     lineups: Sequence[Sequence[tuple[str, str]]],
+    *,
+    core_size: int = 5,
+    core_cap: int | None = None,
 ) -> Path:
-    """Report a repeated QB-plus-two-RB core, or lineups that share four names.
+    """Report a repeated core, or lineups that share four names.
 
-    FLEX is ignored for the core key. The shared-name rule skips a lineup that a
-    core row already lists. Does not change lineups.
+    A 5-player core row lists the full combination in the ``players`` column.
+    ``core_cap`` marks a row over the limit. FLEX is ignored for the QB-plus-two-RB
+    key. The shared-name rule skips a lineup that a core row already lists.
+    Does not change lineups.
     """
 
     seat_lists = [list(seats) for seats in lineups]
@@ -389,8 +590,11 @@ def write_duplicate_core_report(
                 str(len(indexes)),
                 ",".join(str(item) for item in indexes),
                 DO_NOT_AUTO_APPLY,
+                "",
             ]
         )
+
+    rows.extend(_five_core_rows(seat_lists, core_size=core_size, core_cap=core_cap))
 
     name_sets = [
         {_normalize_name(str(name)) for _slot, name in seats if str(name).strip()}
@@ -408,11 +612,63 @@ def write_duplicate_core_report(
                 str(len(component)),
                 ",".join(str(item) for item in component),
                 SHARED_NAMES_NOTE,
+                "",
             ]
         )
 
-    rows.sort(key=lambda row: (-int(row[3]), row[0], row[1], row[2]))
+    rows.sort(
+        key=lambda row: (
+            row[5] not in {FIVE_CORE_NOTE, FIVE_CORE_CAP_NOTE},
+            -int(row[3]),
+            row[0],
+            row[1],
+        )
+    )
     return _write_report(path, DUPLICATE_CORE_HEADER, rows)
+
+
+def _five_core_rows(
+    seat_lists: Sequence[Sequence[tuple[str, str]]],
+    *,
+    core_size: int,
+    core_cap: int | None,
+) -> list[list[str]]:
+    """Return one row per 5-player core that repeats above the report floor.
+
+    With a cap, only a core over the cap is reported. Without a cap, a core is
+    reported when it appears ``FIVE_CORE_REPORT_MIN`` times or more.
+    """
+
+    if core_size < 2:
+        return []
+    threshold = core_cap if core_cap is not None else FIVE_CORE_REPORT_MIN - 1
+    combos: dict[tuple[str, ...], list[int]] = {}
+    labels: dict[tuple[str, ...], tuple[str, ...]] = {}
+    for index, seats in enumerate(seat_lists, start=1):
+        names = [str(name).strip() for _slot, name in seats if str(name).strip()]
+        keys = sorted({_normalize_name(name) for name in names})
+        if len(keys) < core_size:
+            continue
+        for combo in itertools.combinations(keys, core_size):
+            combos.setdefault(combo, []).append(index)
+            labels.setdefault(combo, tuple(combo))
+    rows: list[list[str]] = []
+    for combo, indexes in combos.items():
+        if len(indexes) <= threshold:
+            continue
+        note = FIVE_CORE_CAP_NOTE if core_cap is not None else FIVE_CORE_NOTE
+        rows.append(
+            [
+                combo[0],
+                combo[1] if len(combo) > 1 else "",
+                combo[2] if len(combo) > 2 else "",
+                str(len(indexes)),
+                ",".join(str(item) for item in indexes),
+                note,
+                " | ".join(labels[combo]),
+            ]
+        )
+    return rows
 
 
 def _shared_name_components(

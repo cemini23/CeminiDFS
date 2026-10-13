@@ -258,6 +258,10 @@ def merge_projections_into_canonical(
         "pass_protection_stress",
         "workload_index",
         "workload_risk_flag",
+        "is_qb_starter",
+        "snap_share",
+        "l3_target_share",
+        "adot",
     ):
         if column in stats_df.columns:
             merge_columns.append(column)
@@ -293,6 +297,9 @@ def merge_projections_into_canonical(
                 mapped["workload_index"] = projection.get("workload_index")
             if "workload_risk_flag" in projection:
                 mapped["workload_risk_flag"] = projection.get("workload_risk_flag")
+            for field in ("is_qb_starter", "snap_share", "l3_target_share", "adot"):
+                if field in projection and projection.get(field) not in (None, ""):
+                    mapped[field] = projection.get(field)
         merged.append(mapped)
     return merged
 

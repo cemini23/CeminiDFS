@@ -61,7 +61,17 @@ WEATHER_OUTPUT_COLUMNS = [
     "rain_in",
     "snowfall_in",
     "kickoff_hour",
+    "game_total",
+    "roof_flag",
+    "prelock_fade_flag",
+    "pass_rate_delta",
+    "weather_note",
 ]
+
+# The fade flag uses the same 10 mph start as the passing-yards haircut.
+# It does not change that haircut and it does not change a projection.
+PRELOCK_WIND_MPH = 10.0
+WEATHER_NOTE = "prelock_fade_only; do_not_attribute_without_pass_rate_delta"
 
 UrlOpener = Callable[..., Any]
 
@@ -184,6 +194,7 @@ def _schedule_game_weather(row: Mapping[str, Any], *, opener: UrlOpener | None) 
     }
 
     if not exposed or game_date is None:
+        _attach_weather_flags(base, exposed=exposed, roof_type=stadium.roof_type)
         return base
 
     try:
@@ -196,6 +207,7 @@ def _schedule_game_weather(row: Mapping[str, Any], *, opener: UrlOpener | None) 
         )
     except (OSError, TimeoutError, URLError, json.JSONDecodeError, ValueError) as exc:
         print(f"WARNING: weather fetch failed for {home_team}; leaving weather empty: {exc}", file=sys.stderr)
+        _attach_weather_flags(base, exposed=exposed, roof_type=stadium.roof_type)
         return base
     snapshot = kickoff_weather_snapshot(forecast.get("hourly", {}), game_time)
     base.update(
@@ -209,7 +221,35 @@ def _schedule_game_weather(row: Mapping[str, Any], *, opener: UrlOpener | None) 
             "kickoff_hour": snapshot.get("kickoff_hour", game_time),
         }
     )
+    _attach_weather_flags(base, exposed=exposed, roof_type=stadium.roof_type)
     return base
+
+
+def _attach_weather_flags(row: dict[str, Any], *, exposed: bool, roof_type: str) -> None:
+    """Add a pre-lock fade flag and a roof flag. Do not boost a projection.
+
+    ``pass_rate_delta`` stays empty. A miss is not attributed to weather here.
+    ``game_total`` stays empty on this path. The environment CSV fills it.
+    """
+
+    wind = row.get("wind_speed_10m_mph")
+    precip = row.get("precipitation_in")
+    fade = False
+    if exposed and wind is not None:
+        try:
+            fade = float(wind) >= PRELOCK_WIND_MPH
+        except (TypeError, ValueError):
+            fade = False
+    if exposed and precip is not None:
+        try:
+            fade = fade or float(precip) > 0
+        except (TypeError, ValueError):
+            pass
+    row["game_total"] = None
+    row["roof_flag"] = roof_type
+    row["prelock_fade_flag"] = fade
+    row["pass_rate_delta"] = None
+    row["weather_note"] = WEATHER_NOTE
 
 
 def _has_weather_inputs(schedules: pd.DataFrame) -> bool:

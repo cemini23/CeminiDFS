@@ -23,3 +23,25 @@ buzz_signal:
   limit: 25
   ownership_boost_per_1k: 0.5
   max_ownership_boost: 8.0
+# Default player exposure for a GPP book. Nine Week 5 players sat at 34.7%,
+# the old 0.35 wall. The exposure hatch lifts one player to 0.30 when his
+# projection leads the next player at his position by 4.0 points.
+max_exposure: 0.20
+gates:
+  core:
+    enabled: true
+    size: 5
+    max_count: 12
+  low_ceiling:
+    enabled: true
+    projection_floor: 8.0
+    max_per_lineup: 1
+    skill_only: true
+  exposure_hatch:
+    enabled: true
+    lead_margin: 4.0
+    cap: 0.30
+# The pre-lock gate refuses a Q or D player over this exposure share.
+# Run `ceminidfs late-swap --prelock` before the 1:00 p.m. ET lock.
+prelock:
+  q_exposure_cap: 0.08

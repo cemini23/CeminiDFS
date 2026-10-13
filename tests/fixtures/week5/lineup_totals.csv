@@ -1,0 +1,151 @@
+lineup_id,score_rank_of_150,computed_fd,entry_fee,won,cashed_inferred,flags,players
+L022,1,192.54,0.05,0.30,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Garrett Wilson|Malik Washington|Michael Wilson|Isaiah Likely|Jaylen Warren|New York Jets
+L043,2,162.84,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Malik Washington|Michael Wilson|Tee Higgins|Isaiah Likely|Jaylen Warren|Washington Commanders
+L010,3,159.74,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Nico Collins|Isaiah Likely|Jaylen Warren|Washington Commanders
+L048,4,152.14,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Chris Olave|KC Concepcion Jr.|Michael Wilson|Isaiah Likely|Jaylen Warren|Indianapolis Colts
+L026,5,147.94,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Garrett Wilson|Michael Wilson|Isaiah Likely|Tony Pollard|Minnesota Vikings
+L030,6,147.84,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|Michael Wilson|Wan'Dale Robinson|Isaiah Likely|Quinshon Judkins|Tennessee Titans
+L012,7,146.34,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|Malik Washington|Michael Wilson|Isaiah Likely|Tony Pollard|Miami Dolphins
+L075,8,145.92,0.05,0.10,Y,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Garrett Wilson|Jaxon Smith-Njigba|Malik Washington|Tyler Warren|Quinshon Judkins|Washington Commanders
+L049,9,145.84,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Tee Higgins|Tyler Warren|Jaylen Warren|Washington Commanders
+L036,10,145.76,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Garrett Wilson|Nico Collins|Isaiah Likely|Tony Pollard|Washington Commanders
+L068,11,145.62,0.05,0.10,Y,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Garrett Wilson|Jaxon Smith-Njigba|Isaiah Likely|Tony Pollard|Washington Commanders
+L015,12,144.46,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|Malik Washington|Isaiah Likely|Quinshon Judkins|Tennessee Titans
+L064,13,143.12,0.05,0.10,Y,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Denzel Boston|Jaxon Smith-Njigba|Nico Collins|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L027,14,142.64,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Denzel Boston|Michael Wilson|Isaiah Likely|Jonathan Taylor|New Orleans Saints
+L092,15,140.04,0.05,0.10,Y,,Jared Goff|Ashton Jeanty|Jaylen Warren|Chris Olave|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Quinshon Judkins|New York Jets
+L003,16,139.44,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Nico Collins|Isaiah Likely|Quinshon Judkins|New York Jets
+L070,17,139.4,0.05,0.10,Y,,Aaron Rodgers|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|Malik Washington|Nico Collins|Tyler Warren|Quinshon Judkins|Washington Commanders
+L007,18,139.36,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|KC Concepcion Jr.|Malik Washington|Tyler Warren|Quinshon Judkins|Washington Commanders
+L041,19,139.26,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|Josh Downs|Isaiah Likely|Tony Pollard|Miami Dolphins
+L005,20,139.24,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|KC Concepcion Jr.|Michael Wilson|Isaiah Likely|Tony Pollard|Tennessee Titans
+L008,21,139.06,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|KC Concepcion Jr.|Isaiah Likely|Tony Pollard|Washington Commanders
+L021,22,138.44,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Malik Washington|Michael Wilson|Nico Collins|Tyler Warren|Quinshon Judkins|New York Jets
+L032,23,138.16,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|Malik Washington|Tyler Warren|Tony Pollard|Washington Commanders
+L062,24,138.02,0.05,0.10,Y,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Quinshon Judkins|New Orleans Saints
+L017,25,137.84,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|Michael Wilson|Wan'Dale Robinson|Tyler Warren|Quinshon Judkins|Miami Dolphins
+L081,26,137.82,0.05,0.10,Y,,Kirk Cousins|Chase Brown|Jaylen Warren|Jaxon Smith-Njigba|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Quinshon Judkins|New York Jets
+L037,27,137.44,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Malik Washington|Michael Wilson|Nico Collins|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L067,28,136.7,0.05,0.10,Y,,Sam Darnold|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|Malik Washington|Nico Collins|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L016,29,136.54,0.05,0.10,Y,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Chris Olave|KC Concepcion Jr.|Michael Wilson|Isaiah Likely|Tony Pollard|New York Jets
+L104,30,134.74,0.05,0.10,Y,,Jared Goff|Ashton Jeanty|Jaylen Warren|Josh Downs|KC Concepcion Jr.|Nico Collins|Brock Bowers|Quinshon Judkins|New York Jets
+L013,31,134.46,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|Malik Washington|Tyler Warren|Quinshon Judkins|Miami Dolphins
+L038,32,134.06,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Malik Washington|Nico Collins|Tee Higgins|Isaiah Likely|Tony Pollard|Washington Commanders
+L091,33,133.42,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Chris Olave|Malik Washington|Nico Collins|Isaiah Likely|Quinshon Judkins|New York Jets
+L105,34,131.64,0.05,0.00,N,,Jared Goff|Christian McCaffrey|Jaylen Warren|Chris Olave|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Quinshon Judkins|Miami Dolphins
+L019,35,131.34,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Chase Brown|Carnell Tate|KC Concepcion Jr.|Michael Wilson|Isaiah Likely|Jahmyr Gibbs|New York Jets
+L108,36,130.1,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|Michael Wilson|Tee Higgins|Isaiah Likely|Tony Pollard|Washington Commanders
+L057,37,130.0,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|Michael Wilson|Nico Collins|Isaiah Likely|Tony Pollard|Miami Dolphins
+L051,38,129.34,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Josh Downs|Michael Wilson|Tee Higgins|Tyler Warren|Tony Pollard|New York Jets
+L086,39,129.22,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Chris Olave|Jaxon Smith-Njigba|KC Concepcion Jr.|Isaiah Likely|Tony Pollard|Washington Commanders
+L033,40,129.14,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Nico Collins|Tyler Warren|Tony Pollard|New York Jets
+L103,41,129.02,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jaylen Warren|Chris Olave|Garrett Wilson|Nico Collins|Isaiah Likely|Quinshon Judkins|Tennessee Titans
+L044,42,128.64,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Malik Washington|Michael Wilson|Isaiah Likely|Jonathan Taylor|Miami Dolphins
+L110,43,128.52,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Chase Brown|Malik Washington|Nico Collins|Tee Higgins|Isaiah Likely|Jaylen Warren|New York Jets
+L035,44,128.04,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|KC Concepcion Jr.|Michael Wilson|Nico Collins|Isaiah Likely|Tony Pollard|Washington Commanders
+L009,45,127.94,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Chris Olave|Michael Wilson|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L063,46,127.4,0.05,0.00,N,,Sam Darnold|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Isaiah Likely|Tony Pollard|Washington Commanders
+L004,47,127.36,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|KC Concepcion Jr.|Tyler Warren|Quinshon Judkins|Tennessee Titans
+L028,48,126.94,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Chris Olave|Malik Washington|Michael Wilson|Tyler Warren|Quinshon Judkins|Washington Commanders
+L085,49,126.82,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|KC Concepcion Jr.|Malik Washington|Brock Bowers|Tony Pollard|Washington Commanders
+L087,50,126.82,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Isaiah Likely|Tony Pollard|Tennessee Titans
+L088,51,126.82,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Jaylen Warren|Carnell Tate|Jaxon Smith-Njigba|Malik Washington|Tyler Warren|Jonathan Taylor|Washington Commanders
+L082,52,126.32,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jaylen Warren|Chris Olave|Jaxon Smith-Njigba|KC Concepcion Jr.|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L074,53,126.12,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Isaiah Likely|Quinshon Judkins|Indianapolis Colts
+L002,54,125.54,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|KC Concepcion Jr.|Michael Wilson|Isaiah Likely|Jonathan Taylor|Washington Commanders
+L031,55,125.54,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Tee Higgins|Tyler Warren|Quinshon Judkins|New York Jets
+L069,56,125.52,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Chris Olave|Jaxon Smith-Njigba|KC Concepcion Jr.|Isaiah Likely|Quinshon Judkins|Miami Dolphins
+L025,57,125.06,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Jaxon Smith-Njigba|KC Concepcion Jr.|Tyler Warren|Tony Pollard|Miami Dolphins
+L059,58,125.0,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Michael Wilson|Tyler Warren|Tony Pollard|Denver Broncos
+L034,59,124.74,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Josh Downs|Michael Wilson|Isaiah Likely|Jonathan Taylor|Indianapolis Colts
+L029,60,124.64,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Malik Washington|Michael Wilson|Tyler Warren|Jonathan Taylor|Washington Commanders
+L078,61,124.32,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Chris Olave|Jaxon Smith-Njigba|Isaiah Likely|Tony Pollard|Miami Dolphins
+L099,62,124.2,0.05,0.00,N,,Sam Darnold|Chase Brown|Jaylen Warren|Garrett Wilson|KC Concepcion Jr.|Nico Collins|Trey McBride|Quinshon Judkins|New York Jets
+L084,63,123.74,0.05,0.00,N,,Jared Goff|Jonathan Taylor|Quinshon Judkins|Jaxon Smith-Njigba|Malik Washington|Nico Collins|Isaiah Likely|Tony Pollard|Washington Commanders
+L050,64,123.24,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Tee Higgins|Isaiah Likely|Tony Pollard|Washington Commanders
+L083,65,123.12,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|KC Concepcion Jr.|Malik Washington|Brock Bowers|Quinshon Judkins|Miami Dolphins
+L053,66,123.02,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|KC Concepcion Jr.|Nico Collins|Tyler Warren|Quinshon Judkins|Washington Commanders
+L072,67,122.72,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Quinshon Judkins|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Brock Bowers|Tony Pollard|Washington Commanders
+L089,68,122.7,0.05,0.00,N,,Sam Darnold|Jaylen Warren|Jonathan Taylor|Jaxon Smith-Njigba|Malik Washington|Nico Collins|Tyler Warren|Quinshon Judkins|Miami Dolphins
+L011,69,122.54,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|KC Concepcion Jr.|Michael Wilson|Trey McBride|Quinshon Judkins|New York Jets
+L052,70,122.24,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Malik Washington|Michael Wilson|Tee Higgins|Tyler Warren|Tony Pollard|Washington Commanders
+L055,71,121.82,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Tyler Warren|Tony Pollard|Washington Commanders
+L018,72,121.64,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Josh Downs|KC Concepcion Jr.|Michael Wilson|Tyler Warren|Jonathan Taylor|Washington Commanders
+L006,73,120.44,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Nico Collins|Tyler Warren|Quinshon Judkins|Washington Commanders
+L095,74,119.02,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jaylen Warren|Malik Washington|Nico Collins|Tee Higgins|Isaiah Likely|Jonathan Taylor|Washington Commanders
+L080,75,118.12,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Tyler Warren|Quinshon Judkins|Miami Dolphins
+L001,76,117.44,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|KC Concepcion Jr.|Michael Wilson|Brock Bowers|Quinshon Judkins|Washington Commanders
+L046,77,117.26,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Malik Washington|Tee Higgins|Trey McBride|Tony Pollard|Washington Commanders
+L039,78,116.96,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|KC Concepcion Jr.|Nico Collins|Tee Higgins|Tyler Warren|Tony Pollard|Washington Commanders
+L023,79,116.74,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Josh Downs|Michael Wilson|Tyler Warren|Jonathan Taylor|Miami Dolphins
+L107,80,116.52,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Chase Brown|KC Concepcion Jr.|Malik Washington|Nico Collins|Trey McBride|Jaylen Warren|New York Jets
+L040,81,116.24,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|KC Concepcion Jr.|Michael Wilson|Trey McBride|Tony Pollard|Minnesota Vikings
+L079,82,115.02,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jaylen Warren|Carnell Tate|Jaxon Smith-Njigba|KC Concepcion Jr.|Tyler Warren|Jonathan Taylor|Washington Commanders
+L077,83,114.82,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|KC Concepcion Jr.|Brock Bowers|Tony Pollard|Tennessee Titans
+L093,84,114.42,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Chris Olave|Malik Washington|Nico Collins|Tyler Warren|Quinshon Judkins|Washington Commanders
+L024,85,113.94,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Chris Olave|Michael Wilson|Tyler Warren|Quinshon Judkins|Miami Dolphins
+L106,86,113.72,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Jaylen Warren|Malik Washington|Nico Collins|Tee Higgins|Tyler Warren|Jonathan Taylor|Washington Commanders
+L056,87,113.2,0.05,0.00,N,,Kirk Cousins|Jaylen Warren|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Michael Wilson|Trey McBride|Tony Pollard|Miami Dolphins
+L143,88,112.96,0.05,0.00,N,,Drake Maye|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Minnesota Vikings
+L020,89,112.54,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|KC Concepcion Jr.|Michael Wilson|Tyler Warren|Jonathan Taylor|Tennessee Titans
+L014,90,112.24,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|KC Concepcion Jr.|Michael Wilson|Harold Fannin Jr.|Tony Pollard|Miami Dolphins
+L047,91,112.06,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Nico Collins|Tee Higgins|Tyler Warren|Tony Pollard|Miami Dolphins
+L114,92,112.04,0.05,0.00,N,,Jared Goff|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|New York Jets
+L111,93,111.62,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Chase Brown|Josh Downs|Malik Washington|Nico Collins|Brock Bowers|Jaylen Warren|Miami Dolphins
+L042,94,111.54,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Jaxon Smith-Njigba|KC Concepcion Jr.|Michael Wilson|T.J. Hockenson|Tony Pollard|Indianapolis Colts
+L098,95,110.34,0.05,0.00,N,,Jared Goff|Chase Brown|Jaylen Warren|Chris Olave|KC Concepcion Jr.|Nico Collins|Harold Fannin Jr.|Quinshon Judkins|New York Jets
+L113,96,110.0,0.05,0.00,N,,Aaron Rodgers|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|New York Jets
+L109,97,108.82,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Chase Brown|Chris Olave|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Jaylen Warren|Miami Dolphins
+L045,98,108.24,0.05,0.00,N,,Brock Purdy|Aaron Jones Sr.|Jahmyr Gibbs|Carnell Tate|Michael Wilson|Tee Higgins|Tyler Warren|Tony Pollard|Indianapolis Colts
+L096,99,107.02,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jaylen Warren|KC Concepcion Jr.|Malik Washington|Nico Collins|Trey McBride|Jonathan Taylor|Washington Commanders
+L123,100,106.8,0.05,0.00,N,,Deshaun Watson|Christian McCaffrey|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|New York Jets
+L145,101,105.86,0.05,0.00,N,,Drake Maye|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Las Vegas Raiders
+L100,102,105.6,0.05,0.00,N,,Aaron Rodgers|Chase Brown|Jaylen Warren|Chris Olave|KC Concepcion Jr.|Nico Collins|Trey McBride|Quinshon Judkins|Tennessee Titans
+L131,103,105.34,0.05,0.00,N,,Jared Goff|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Denver Broncos
+L133,104,105.0,0.05,0.00,N,,Joe Burrow|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|New York Jets
+L126,105,103.64,0.05,0.00,N,,Jared Goff|Christian McCaffrey|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Miami Dolphins
+L135,106,103.44,0.05,0.00,N,,Jared Goff|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Houston Texans
+L115,107,101.4,0.05,0.00,N,,Aaron Rodgers|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|New York Jets
+L132,108,101.4,0.05,0.00,N,,Aaron Rodgers|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Houston Texans
+L120,109,100.94,0.05,0.00,N,,Jared Goff|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Indianapolis Colts
+L071,110,100.52,0.05,0.00,N,,Kirk Cousins|Jonathan Taylor|Quinshon Judkins|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Isaiah Likely|Tony Pollard|Washington Commanders
+L124,111,100.0,0.05,0.00,N,,Sam Darnold|Christian McCaffrey|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|New York Jets
+L117,112,98.24,0.05,0.00,N,,Jared Goff|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Miami Dolphins
+L061,113,98.0,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Michael Wilson|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L147,114,96.3,0.05,0.00,N,,Joe Burrow|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Sam LaPorta|Rhamondre Stevenson|Denver Broncos
+L125,115,96.14,0.05,0.00,N,,Jared Goff|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|George Kittle|Rhamondre Stevenson|New York Jets
+L101,116,95.82,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Jonathan Taylor|Chris Olave|Malik Washington|Nico Collins|Isaiah Likely|Quinshon Judkins|Washington Commanders
+L060,117,95.7,0.05,0.00,N,,Kirk Cousins|Jonathan Taylor|Quinshon Judkins|Jaxon Smith-Njigba|Michael Wilson|Nico Collins|Tyler Warren|Tony Pollard|Washington Commanders
+L118,118,95.2,0.05,0.00,N,,Deshaun Watson|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Minnesota Vikings
+L116,119,94.6,0.05,0.00,N,,Sam Darnold|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|New York Jets
+L090,120,93.52,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Chase Brown|Chris Olave|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Quinshon Judkins|New York Jets
+L148,121,93.34,0.05,0.00,N,,C.J. Stroud|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Seattle Seahawks
+L065,122,93.28,0.05,0.00,N,,Sam Darnold|Chase Brown|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Michael Wilson|Isaiah Likely|Tony Pollard|Washington Commanders
+L136,123,93.1,0.05,0.00,N,,Joe Burrow|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Cincinnati Bengals
+L058,124,92.7,0.05,0.00,N,,Kirk Cousins|Jonathan Taylor|Quinshon Judkins|Jaxon Smith-Njigba|KC Concepcion Jr.|Michael Wilson|Brock Bowers|Tony Pollard|Washington Commanders
+L066,125,92.7,0.05,0.00,N,,Kirk Cousins|Ashton Jeanty|Jonathan Taylor|Carnell Tate|Jaxon Smith-Njigba|Michael Wilson|Tyler Warren|Quinshon Judkins|Washington Commanders
+L130,126,92.7,0.05,0.00,N,,Joe Burrow|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Miami Dolphins
+L121,127,92.34,0.05,0.00,N,,Jared Goff|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Indianapolis Colts
+L112,128,91.54,0.05,0.00,N,,Jared Goff|Ashton Jeanty|Chase Brown|Chris Olave|Josh Downs|KC Concepcion Jr.|Trey McBride|Rhamondre Stevenson|Miami Dolphins
+L129,129,90.9,0.05,0.00,N,,Sam Darnold|Christian McCaffrey|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Tennessee Titans
+L150,130,90.76,0.05,0.00,N,,Drake Maye|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|George Kittle|Rhamondre Stevenson|Pittsburgh Steelers
+L073,131,90.02,0.05,0.00,N,,Kirk Cousins|Jonathan Taylor|Quinshon Judkins|Carnell Tate|Chris Olave|Jaxon Smith-Njigba|Tyler Warren|Tony Pollard|Washington Commanders
+L128,132,90.0,0.05,0.00,N,,Joe Burrow|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Tennessee Titans
+L076,133,88.1,0.05,0.00,N,,Sam Darnold|Jonathan Taylor|Quinshon Judkins|Carnell Tate|Jaxon Smith-Njigba|Nico Collins|Tyler Warren|Tony Pollard|Washington Commanders
+L054,134,87.8,0.05,0.00,N,,Kirk Cousins|Jonathan Taylor|Quinshon Judkins|Carnell Tate|Jaxon Smith-Njigba|Michael Wilson|Brock Bowers|Tony Pollard|Miami Dolphins
+L141,135,86.9,0.05,0.00,N,,Joe Burrow|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|George Kittle|Rhamondre Stevenson|Houston Texans
+L127,136,86.4,0.05,0.00,N,,Sam Darnold|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Cincinnati Bengals
+L134,137,85.7,0.05,0.00,N,,Sam Darnold|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Minnesota Vikings
+L139,138,85.24,0.05,0.00,N,,Jared Goff|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|George Kittle|Rhamondre Stevenson|Cincinnati Bengals
+L119,139,84.7,0.05,0.00,N,,Sam Darnold|Chase Brown|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Minnesota Vikings
+L122,140,83.3,0.05,0.00,N,,Sam Darnold|Ashton Jeanty|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Miami Dolphins
+L094,141,81.62,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jonathan Taylor|KC Concepcion Jr.|Malik Washington|Nico Collins|Brock Bowers|Quinshon Judkins|Washington Commanders
+L097,142,80.02,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jonathan Taylor|Chris Olave|KC Concepcion Jr.|Nico Collins|Isaiah Likely|Quinshon Judkins|Tennessee Titans
+L137,143,77.6,0.05,0.00,N,,Deshaun Watson|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Pittsburgh Steelers
+L138,144,75.24,0.05,0.00,N,,Tyler Shough|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Cincinnati Bengals
+L102,145,73.72,0.05,0.00,N,,Kirk Cousins|Chase Brown|Jonathan Taylor|Chris Olave|KC Concepcion Jr.|Nico Collins|Tyler Warren|Tony Pollard|Washington Commanders
+L140,146,73.34,0.05,0.00,N,,Tyler Shough|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Denver Broncos
+L142,147,70.4,0.05,0.00,N,unresolved_QB,UNRESOLVED_69017|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|New England Patriots
+L149,148,65.5,0.05,0.00,N,unresolved_QB,UNRESOLVED_102965|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|New England Patriots
+L146,149,65.4,0.05,0.00,N,unresolved_QB,UNRESOLVED_102965|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Brock Bowers|Rhamondre Stevenson|Chicago Bears
+L144,150,60.5,0.05,0.00,N,unresolved_QB,UNRESOLVED_69017|Alvin Kamara|Jaylen Wright|Ja'Marr Chase|Jordan Addison|Keenan Allen|Trey McBride|Rhamondre Stevenson|Pittsburgh Steelers

@@ -11,7 +11,11 @@ import pytest
 pytest.importorskip("pydfs_lineup_optimizer")
 
 from ceminidfs.export.normalize import normalize_csv
-from ceminidfs.export.pool_guards import apply_participation_gate, names_with_participation
+from ceminidfs.export.pool_guards import (
+    apply_participation_gate,
+    names_with_participation,
+    player_matches_participation,
+)
 from ceminidfs.orchestrator.run import _canonical_for_sim, run_pipeline
 
 CANONICAL_HEADER = [
@@ -298,6 +302,36 @@ def test_missing_pbp_raises_before_normalized_pool(tmp_path: Path, monkeypatch: 
         )
 
     assert not (work / "normalized_players.csv").exists()
+
+
+def test_role_gate_matches_nflverse_abbreviated_names():
+    """FanDuel full names must match nflverse ``A.Jeanty`` and ``Mi.Wilson``."""
+
+    names = {"a.jeanty", "j.chase", "k.walker", "mi.wilson", "a.st. brown"}
+    assert player_matches_participation("Ashton Jeanty", names)
+    assert player_matches_participation("Ja'Marr Chase", names)
+    assert player_matches_participation("Kenneth Walker III", names)
+    assert player_matches_participation("Michael Wilson", names)
+    assert player_matches_participation("Amon-Ra St. Brown", names)
+    assert not player_matches_participation("Zero Touch", names)
+
+    rows = [
+        {"First Name": "Ashton", "Last Name": "Jeanty", "Position": "RB"},
+        {"First Name": "Michael", "Last Name": "Wilson", "Position": "WR"},
+        {"First Name": "Amon-Ra", "Last Name": "St. Brown", "Position": "WR"},
+        {"First Name": "Kenneth", "Last Name": "Walker III", "Position": "RB"},
+        {"First Name": "Zero", "Last Name": "Touch", "Position": "WR"},
+        {"First Name": "Houston", "Last Name": "Texans", "Position": "D"},
+    ]
+    kept = apply_participation_gate(rows, names, week=5)
+    got = {f"{row['First Name']} {row['Last Name']}" for row in kept}
+    assert got == {
+        "Ashton Jeanty",
+        "Michael Wilson",
+        "Amon-Ra St. Brown",
+        "Kenneth Walker III",
+        "Houston Texans",
+    }
 
 
 def test_apply_participation_gate_on_three_row_frame():

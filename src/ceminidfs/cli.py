@@ -153,8 +153,10 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     maybe_write_review_reports = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.export.build_gates import BuildGateError
     from ceminidfs.export.optimize import ExposureCapError, merge_lineup_csvs, write_merged_upload
 except ImportError:  # pragma: no cover - defensive for partial installs
+    BuildGateError = None  # type: ignore[assignment]
     ExposureCapError = None  # type: ignore[assignment]
     merge_lineup_csvs = None  # type: ignore[assignment]
     write_merged_upload = None  # type: ignore[assignment]
@@ -281,8 +283,24 @@ def build_parser() -> argparse.ArgumentParser:
     late_swap.add_argument("--out", dest="output_path", type=Path)
     late_swap.add_argument("--site", default="fanduel")
     late_swap.add_argument("--count", type=int, default=None)
+    late_swap.add_argument(
+        "--prelock",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the pre-lock Q/D gate only. Refuse a Q or D player over "
+            "--q-exposure-cap. Writes late_swap_alert_report.csv. No swap"
+        ),
+    )
+    late_swap.add_argument(
+        "--q-exposure-cap",
+        type=float,
+        default=None,
+        help="Pre-lock Q/D exposure share (0-1; GPP profile default 0.08)",
+    )
     _add_optimizer_build_arguments(late_swap)
     _add_review_report_arguments(late_swap)
+    _add_profile_argument(late_swap)
     late_swap.set_defaults(handler=_cmd_late_swap)
 
     review = subparsers.add_parser(
@@ -301,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--site", default="fanduel")
     _add_review_report_arguments(review)
     _add_environment_argument(review)
+    _add_jev_arguments(review)
     review.set_defaults(handler=_cmd_review)
 
     merge = subparsers.add_parser(
@@ -323,6 +342,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Final book size used for the exposure cap",
     )
+    merge.add_argument(
+        "--core-cap",
+        type=int,
+        default=None,
+        help="Refuse a repeated 5-player core over this count (default off)",
+    )
     merge.add_argument("--site", default="fanduel")
     merge.add_argument(
         "--players",
@@ -332,6 +357,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Players CSV with FanDuel ids. Default: normalized_players.csv next to --out",
     )
     merge.set_defaults(handler=_cmd_merge_lineups)
+
+    buckets = subparsers.add_parser(
+        "buckets",
+        help="Report the cash-line bucket distribution from a totals CSV",
+    )
+    buckets.add_argument(
+        "--totals",
+        dest="totals_path",
+        type=Path,
+        required=True,
+        help="Totals CSV with a rank column and a score column",
+    )
+    buckets.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=None,
+        help="Output CSV (default: cash_bucket_report.csv next to --totals)",
+    )
+    buckets.set_defaults(handler=_cmd_buckets)
 
     research = subparsers.add_parser(
         "research-export",
@@ -767,6 +812,8 @@ def _cmd_ownership_calibrate(args: argparse.Namespace) -> int:
 def _cmd_late_swap(args: argparse.Namespace) -> int:
     if late_swap_lineups is None:
         raise RuntimeError("Late swap unavailable: ceminidfs.export.late_swap import failed")
+    if bool(getattr(args, "prelock", False)):
+        return _cmd_prelock(args)
     output_path = args.output_path or args.lineups_path.with_name(
         f"{args.lineups_path.stem}_late_swap.csv"
     )
@@ -795,8 +842,80 @@ def _cmd_late_swap(args: argparse.Namespace) -> int:
         ownership_calibration=review.get("ownership_calibration"),
         flag_duplicate_cores=bool(review.get("flag_duplicate_cores")),
         dart_ceiling_report=bool(review.get("dart_ceiling_report")),
+        flag_qb_starter=bool(review.get("flag_qb_starter")),
+        flag_stack_concentration=bool(review.get("flag_stack_concentration")),
+        flag_correlated_pairs=bool(review.get("flag_correlated_pairs")),
+        defense_context_report=bool(review.get("defense_context_report")),
+        projection_bands=bool(review.get("projection_bands")),
+        season=review.get("season"),
+        week=review.get("week"),
     )
     print(output_path)
+    return 0
+
+
+def _cmd_buckets(args: argparse.Namespace) -> int:
+    from ceminidfs.export.review_reports import (
+        CASH_BUCKET_NAME,
+        read_lineup_totals,
+        write_cash_bucket_report,
+    )
+
+    totals_path = Path(args.totals_path)
+    if not totals_path.is_file():
+        print(f"Error: totals CSV not found: {totals_path}", file=sys.stderr)
+        return 1
+    out_path = args.output_path or totals_path.with_name(CASH_BUCKET_NAME)
+    rows = read_lineup_totals(totals_path)
+    if not rows:
+        print(f"Error: no ranked rows in {totals_path}", file=sys.stderr)
+        return 1
+    write_cash_bucket_report(out_path, rows)
+    print(out_path)
+    return 0
+
+
+def _cmd_prelock(args: argparse.Namespace) -> int:
+    """Run the pre-lock Q/D gate. Write the alert report. Refuse on a breach."""
+
+    from ceminidfs.export.late_swap import (
+        PrelockQError,
+        assert_prelock_q,
+        prelock_q_violations,
+        write_prelock_alert,
+    )
+
+    out_dir = args.output_path.parent if args.output_path else None
+    write_prelock_alert(
+        args.lineups_path,
+        args.players_path,
+        site=args.site,
+        out_dir=out_dir,
+    )
+    profile = runtime_config(profile=getattr(args, "profile", None))
+    cap = args.q_exposure_cap
+    if cap is None:
+        cap = profile.get("prelock", {}).get("q_exposure_cap", 0.08)
+    cap = float(cap)
+    try:
+        assert_prelock_q(
+            args.lineups_path,
+            args.players_path,
+            cap=cap,
+            site=args.site,
+        )
+    except PrelockQError as exc:
+        over = prelock_q_violations(
+            args.lineups_path,
+            args.players_path,
+            cap=cap,
+            site=args.site,
+        )
+        for name, injury, count, limit in over:
+            print(f"prelock: {name} ({injury}) is in {count} lineups; cap is {limit}", file=sys.stderr)
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"prelock: no Q or D player over {cap:.0%}")
     return 0
 
 
@@ -820,9 +939,13 @@ def _cmd_merge_lineups(args: argparse.Namespace) -> int:
             max_exposure=args.max_exposure,
             final_count=args.count,
             site=args.site,
+            core_cap=getattr(args, "core_cap", None),
         )
         write_merged_upload(args.output_path, players_path, site=args.site)
     except ExposureCapError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    except BuildGateError as exc:
         print(exc, file=sys.stderr)
         return 1
     except FileNotFoundError as exc:
@@ -853,9 +976,83 @@ def _cmd_review(args: argparse.Namespace) -> int:
         and not bool(getattr(args, "no_review_reports", False)),
         dart_ceiling_report=bool(getattr(args, "dart_ceiling_report", False))
         and not bool(getattr(args, "no_review_reports", False)),
+        flag_qb_starter=bool(getattr(args, "flag_qb_starter", False)),
+        flag_stack_concentration=bool(getattr(args, "flag_stack_concentration", False)),
+        flag_correlated_pairs=bool(getattr(args, "flag_correlated_pairs", False)),
+        defense_context_report=bool(getattr(args, "defense_context_report", False)),
+        projection_bands=bool(getattr(args, "projection_bands", False)),
         environment=getattr(args, "environment", None),
+        season=getattr(args, "season", None),
+        week=getattr(args, "week", None),
     )
     print(out_dir)
+    if bool(getattr(args, "jev", False)):
+        return _run_jev_gate(args, out_dir)
+    return 0
+
+
+def _run_jev_gate(args: argparse.Namespace, out_dir: Path) -> int:
+    """Run the Jev pre-lock gate. The gate marks. The operator decides."""
+
+    from ceminidfs.export.jev_gate import run_jev_gate, write_blocked_report
+    from ceminidfs.integrations.jev import JevError, build_jev_client
+
+    fixture = getattr(args, "jev_fixture", None)
+    try:
+        client = build_jev_client(fixture=fixture)
+    except JevError as exc:
+        path = write_blocked_report(out_dir, args.lineups_path, str(exc))
+        print(path)
+        print(f"jev gate BLOCKED: {exc}", file=sys.stderr)
+        print("jev gate: pass=0 flag=0 review=0 block=1 low_confidence=0", file=sys.stderr)
+        return 1
+
+    status_doc = None
+    status_path = getattr(args, "jev_status", None)
+    if status_path is not None:
+        status_doc = Path(status_path).read_text(encoding="utf-8")
+    standings = None
+    standings_path = getattr(args, "jev_standings", None)
+    if standings_path is not None:
+        standings = Path(standings_path).read_text(encoding="utf-8")
+
+    cap = getattr(args, "jev_exposure_cap", None)
+    if cap is None:
+        profile = runtime_config(profile=getattr(args, "profile", None))
+        cap = profile.get("max_exposure", 0.20)
+
+    close = getattr(client, "close", None)
+    try:
+        result = run_jev_gate(
+            args.lineups_path,
+            args.players_path,
+            client=client,
+            site=args.site,
+            out_dir=out_dir,
+            date=getattr(args, "jev_date", None),
+            exposure_cap=cap,
+            status_doc=status_doc,
+            standings=standings,
+            cash_claim=getattr(args, "jev_cash_claim", None),
+            enable_late_swap=not bool(getattr(args, "no_jev_late_swap", False)),
+            enable_cash=bool(getattr(args, "jev_cash_claim", None)),
+        )
+    except JevError as exc:
+        print(f"jev gate BLOCKED: {exc}", file=sys.stderr)
+        print("jev gate: pass=0 flag=0 review=0 block=1 low_confidence=0", file=sys.stderr)
+        return 1
+    finally:
+        if callable(close):
+            close()
+
+    print(result.path)
+    print(result.summary())
+    for row in result.rows:
+        if row.action in {"flag", "block"}:
+            print(f"jev {row.action}: {row.player} — {row.question} [{row.result}]")
+    if result.blocked:
+        print(f"jev gate BLOCKED: {result.blocked_reason}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1338,6 +1535,36 @@ def _add_review_report_arguments(
         help="Write dart_ceiling_rank.csv for salary at or below 5500. Does not invent a ceiling",
     )
     parser.add_argument(
+        "--flag-qb-starter",
+        action="store_true",
+        default=False,
+        help="Write qb_starter_report.csv for a rostered QB who is not a confirmed starter",
+    )
+    parser.add_argument(
+        "--flag-stack-concentration",
+        action="store_true",
+        default=False,
+        help="Write stack_concentration_report.csv with prior-3-week target share. Does not drop a stack",
+    )
+    parser.add_argument(
+        "--flag-correlated-pairs",
+        action="store_true",
+        default=False,
+        help="Write correlated_pair_report.csv when one TE and DST pair is on more than one lineup",
+    )
+    parser.add_argument(
+        "--defense-context-report",
+        action="store_true",
+        default=False,
+        help="Write defense_context_report.csv beside the pass multiplier. Does not down-weight a DST",
+    )
+    parser.add_argument(
+        "--projection-bands",
+        action="store_true",
+        default=False,
+        help="Write projection_bands.csv with P85 and P15. Does not change the projection",
+    )
+    parser.add_argument(
         "--no-review-reports",
         action="store_true",
         default=False,
@@ -1358,6 +1585,20 @@ def _review_report_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["late_swap_audit"] = True
     if getattr(args, "ownership_fade_report", False):
         overrides["ownership_fade_report"] = True
+    if getattr(args, "flag_qb_starter", False):
+        overrides["flag_qb_starter"] = True
+    if getattr(args, "flag_stack_concentration", False):
+        overrides["flag_stack_concentration"] = True
+    if getattr(args, "flag_correlated_pairs", False):
+        overrides["flag_correlated_pairs"] = True
+    if getattr(args, "defense_context_report", False):
+        overrides["defense_context_report"] = True
+    if getattr(args, "projection_bands", False):
+        overrides["projection_bands"] = True
+    if getattr(args, "season", None) is not None:
+        overrides["season"] = args.season
+    if getattr(args, "week", None) is not None:
+        overrides["week"] = args.week
     calibration = getattr(args, "ownership_calibration", None)
     if calibration is not None:
         overrides["ownership_calibration"] = calibration
@@ -1373,6 +1614,56 @@ def _add_environment_argument(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=None,
         help="Environment CSV. Fills implied_total on the parlays handoff",
+    )
+
+
+def _add_jev_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the Jev pre-lock gate flags. The gate marks. It does not swap."""
+
+    parser.add_argument(
+        "--jev",
+        action="store_true",
+        default=False,
+        help=(
+            "Run the Jev pre-lock gate. Writes jev_gate_report.csv. "
+            "Missing key or network error blocks the gate and exits non-zero"
+        ),
+    )
+    parser.add_argument(
+        "--jev-fixture",
+        type=Path,
+        default=None,
+        help="Recorded Jev responses. Runs the gate with no key and no network",
+    )
+    parser.add_argument("--jev-date", default=None, help="Slate date for the status question")
+    parser.add_argument(
+        "--jev-exposure-cap",
+        type=float,
+        default=None,
+        help="Exposure share at or above which a player gets a status question (0-1)",
+    )
+    parser.add_argument(
+        "--jev-status",
+        type=Path,
+        default=None,
+        help="Optional status or inactive-report text to add to the evidence",
+    )
+    parser.add_argument(
+        "--jev-standings",
+        type=Path,
+        default=None,
+        help="Standings screenshot text. Without it the cash claim stays UNKNOWN",
+    )
+    parser.add_argument(
+        "--jev-cash-claim",
+        default=None,
+        help="Recap cash-count claim to verify against the standings text",
+    )
+    parser.add_argument(
+        "--no-jev-late-swap",
+        action="store_true",
+        default=False,
+        help="Skip the Choice step over late_swap_alert_report.csv rows",
     )
 
 

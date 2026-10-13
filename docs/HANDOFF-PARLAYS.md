@@ -4,13 +4,16 @@ CeminiDFS writes a handoff CSV that CeminiParlays can read. The two CLIs stay sp
 
 CeminiDFS now writes this file next to the lineup output after `optimize`, `late-swap`, or `sim-rerank`, and also on `ceminidfs review` (even when the five review flags are off).
 
-The handoff CSV columns are: `player,team,projection,lineup_exposure_pct,game,implied_total`. `implied_total` may be blank. No FanDuel contest IDs, no salary.
+The handoff CSV columns are: `player,team,projection,lineup_exposure_pct,game,implied_total,injury_status`. `projection` is `fd_projection` when that column is present. `implied_total` stays blank when no cited total exists. The file drops DST, DEF, and D rows. No FanDuel contest IDs, no salary.
+
+`ceminidfs research-export env` writes `environment.csv`. Pass that file to `ceminiparlays compose --environment`. `review`, `optimize`, and `run` accept `--environment` and copy `implied_total` onto the handoff. A blank cell stays blank.
 
 ## Artifact
 
 | Artifact | Typical path | Columns to use |
 |----------|--------------|----------------|
-| Handoff CSV | `runs/{season}_week_{N}/ceminidfs_handoff.csv` | player, team, projection, lineup_exposure_pct, game, implied_total |
+| Handoff CSV | `runs/{season}_week_{N}/ceminidfs_handoff.csv` | player, team, projection, lineup_exposure_pct, game, implied_total, injury_status |
+| Environment CSV | `ceminidfs research-export env --out environment.csv` | path for `ceminiparlays compose --environment` |
 
 ## CeminiParlays may read
 

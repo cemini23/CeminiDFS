@@ -18,7 +18,14 @@ from ceminidfs.data.stadiums import normalize_team_abbr
 
 from .normalize import normalize_site
 from .optimize import LINEUP_HEADERS
-from .review_reports import maybe_write_review_reports
+from .review_reports import (
+    LATE_SWAP_ALERT_NAME,
+    load_player_index,
+    maybe_write_review_reports,
+    parse_lineup_csv,
+    write_late_swap_alert_report,
+)
+from .build_gates import name_key, exposure_cap_count
 from .optimize import (
     _load_pydfs,
     _relax_tiny_slate_limits,
@@ -75,6 +82,108 @@ def format_prelock_swap_checklist(
 _CELL_ID_SUFFIX = re.compile(r"\s*\(([^)]+)\)\s*$")
 _ID_ONLY = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
 
+Q_OR_D_STATUS = frozenset({"Q", "QUESTIONABLE", "D", "DOUBTFUL"})
+
+
+class PrelockQError(ValueError):
+    """A questionable or doubtful player is over the pre-lock exposure cap."""
+
+
+def prelock_q_violations(
+    lineups_csv: str | Path,
+    players_csv: str | Path,
+    *,
+    cap: float = 0.08,
+    site: str = "fanduel",
+) -> list[tuple[str, str, int, int]]:
+    """Return ``(name, injury, count, cap)`` for each Q/D player over ``cap``.
+
+    The check runs before lock. It reads the lineup CSV and the players CSV.
+    It never changes a lineup.
+    """
+
+    site_key = normalize_site(site)
+    lineups_file = Path(lineups_csv)
+    players_file = Path(players_csv)
+    if not lineups_file.is_file():
+        raise FileNotFoundError(f"Lineups CSV not found: {lineups_file}")
+    if not players_file.is_file():
+        raise FileNotFoundError(f"Players CSV not found: {players_file}")
+
+    players = load_player_index(players_file)
+    lineups = parse_lineup_csv(lineups_file, site=site_key, players=players)
+    book_count = len(lineups)
+    if book_count <= 0:
+        return []
+    limit = exposure_cap_count(cap, book_count)
+
+    counts: dict[str, int] = {}
+    display: dict[str, str] = {}
+    injury: dict[str, str] = {}
+    for seats in lineups:
+        seen: set[str] = set()
+        for _slot, name in seats:
+            meta = players.get(name_key(name)) or players.get(str(name))
+            if meta is None or not _is_q_or_d(meta.injury):
+                continue
+            key = name_key(meta.name or name)
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[key] = counts.get(key, 0) + 1
+            display.setdefault(key, meta.name or str(name))
+            injury.setdefault(key, meta.injury or "")
+
+    over = [
+        (display[key], injury[key], count, limit)
+        for key, count in counts.items()
+        if count > limit
+    ]
+    over.sort(key=lambda item: (-item[2], item[0]))
+    return over
+
+
+def assert_prelock_q(
+    lineups_csv: str | Path,
+    players_csv: str | Path,
+    *,
+    cap: float = 0.08,
+    site: str = "fanduel",
+) -> list[tuple[str, str, int, int]]:
+    """Raise when a Q or D player is over the pre-lock exposure cap."""
+
+    over = prelock_q_violations(lineups_csv, players_csv, cap=cap, site=site)
+    if over:
+        name, injury, count, limit = over[0]
+        raise PrelockQError(
+            f"{name} ({injury}) is in {count} lineups; pre-lock cap is {limit}"
+        )
+    return over
+
+
+def write_prelock_alert(
+    lineups_csv: str | Path,
+    players_csv: str | Path,
+    *,
+    site: str = "fanduel",
+    out_dir: str | Path | None = None,
+) -> Path:
+    """Write ``late_swap_alert_report.csv`` for a lineup book. No cap check."""
+
+    site_key = normalize_site(site)
+    players = load_player_index(players_csv)
+    lineups = parse_lineup_csv(lineups_csv, site=site_key, players=players)
+    dest = Path(out_dir) if out_dir is not None else Path(lineups_csv).parent
+    dest.mkdir(parents=True, exist_ok=True)
+    return write_late_swap_alert_report(dest / LATE_SWAP_ALERT_NAME, lineups, players)
+
+
+def _is_q_or_d(status: str | None) -> bool:
+    text = str(status or "").strip().upper()
+    if not text:
+        return False
+    return text in Q_OR_D_STATUS or text.startswith("DOUBTFUL")
+
 
 def _normalize_team(team: str) -> str:
     return normalize_team_abbr(team)
@@ -113,6 +222,13 @@ def late_swap_lineups(
     ownership_calibration: str | Path | None = None,
     flag_duplicate_cores: bool = False,
     dart_ceiling_report: bool = False,
+    flag_qb_starter: bool = False,
+    flag_stack_concentration: bool = False,
+    flag_correlated_pairs: bool = False,
+    defense_context_report: bool = False,
+    projection_bands: bool = False,
+    season: int | None = None,
+    week: int | None = None,
 ) -> int:
     """Late-swap existing lineups and return the number written.
 
@@ -200,6 +316,13 @@ def late_swap_lineups(
         ownership_calibration=ownership_calibration,
         flag_duplicate_cores=flag_duplicate_cores,
         dart_ceiling_report=dart_ceiling_report,
+        flag_qb_starter=flag_qb_starter,
+        flag_stack_concentration=flag_stack_concentration,
+        flag_correlated_pairs=flag_correlated_pairs,
+        defense_context_report=defense_context_report,
+        projection_bands=projection_bands,
+        season=season,
+        week=week,
     )
     return written
 

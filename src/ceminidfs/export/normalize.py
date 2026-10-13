@@ -15,6 +15,12 @@ PASS_THROUGH_FIELDS = [
     "Projection Ceil",
     "coherence_risk_flag",
     "pass_protection_stress",
+    "is_qb_starter",
+    "snap_share",
+    "l3_target_share",
+    "adot",
+    "p15",
+    "p85",
 ]
 
 NAME_KEYS = ("name", "player", "player name", "nickname", "full name", "player_key")

@@ -396,6 +396,199 @@ def participation_name_key(value: object) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+# A trailing generation marker is not part of the play-by-play last name.
+_PARTICIPATION_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
+
+
+def _compact_name_token(value: object) -> str:
+    """Keep letters and digits so ``J.J.`` and ``O'Connell`` compare cleanly."""
+
+    return "".join(ch for ch in str(value or "").casefold() if ch.isalnum())
+
+
+def _participation_parts(value: object) -> list[str]:
+    """Split a display name and drop a trailing suffix such as Jr or III."""
+
+    parts = [part for part in str(value or "").replace("'", "").split() if part]
+    while parts and parts[-1].casefold().rstrip(".") in _PARTICIPATION_SUFFIXES:
+        parts.pop()
+    return parts
+
+
+def player_matches_participation(name: object, known: set[str]) -> bool:
+    """Return True when this name has a prior touch.
+
+    nflverse play-by-play stores ``A.Jeanty``. When two players share an
+    initial, it stores a longer prefix such as ``Mi.Wilson``. FanDuel stores
+    the full name. An exact folded match still works for tests.
+    """
+
+    if participation_name_key(name) in known:
+        return True
+    parts = _participation_parts(name)
+    if len(parts) < 2:
+        return False
+    first_compact = _compact_name_token(parts[0])
+    if not first_compact:
+        return False
+    rest_compact = _compact_name_token(" ".join(parts[1:]))
+    last_compact = _compact_name_token(parts[-1])
+    for item in known:
+        prefix, dot, tail = item.partition(".")
+        if not dot or not prefix:
+            continue
+        prefix_compact = _compact_name_token(prefix)
+        if not prefix_compact or not first_compact.startswith(prefix_compact):
+            continue
+        tail_compact = _compact_name_token(tail)
+        if tail_compact == rest_compact or tail_compact == last_compact:
+            return True
+    return False
+
+
+# A Saturday read of the week-N injury cache is the Friday practice report.
+# Limited and full both count. Did-not-participate does not.
+_FRIDAY_PRACTICE_PREFIXES = ("full participation", "limited participation")
+
+# Cheap trend names stay eligible. Only a real salary gets a lineup floor.
+TREND_MIN_SALARY = 5500
+TREND_MIN_EXPOSURE = 0.10
+
+
+def practice_keeps_player(status: object) -> bool:
+    """Return True for a limited or full practice label."""
+
+    text = " ".join(str(status or "").casefold().split())
+    return any(text.startswith(prefix) for prefix in _FRIDAY_PRACTICE_PREFIXES)
+
+
+_QUESTIONABLE_COLUMNS = ("Injury Indicator", "injury_status", "Injury Status")
+
+
+def is_questionable_row(row: Mapping[str, Any]) -> bool:
+    """Return True when the slate tags this player questionable.
+
+    Healthy players already stay in the pool. The lineup floor is only for
+    a questionable player who also passes the Friday trend rule.
+    """
+
+    for key in _QUESTIONABLE_COLUMNS:
+        if key not in row:
+            continue
+        text = str(row.get(key) or "").strip().upper()
+        if text:
+            return text == "Q"
+    return False
+
+
+def friday_trend_names(
+    injuries: pd.DataFrame,
+    participated_last_week: set[str],
+    *,
+    week: int,
+) -> set[str]:
+    """Return folded names who practiced and played the week before.
+
+    Both parts are required. A questionable tag alone does not qualify, and
+    it also does not remove the player. The caller keeps non-matching
+    questionable players in the pool.
+    """
+
+    if injuries is None or injuries.empty or week < 2:
+        return set()
+    frame = injuries
+    if "week" in frame.columns:
+        weeks = pd.to_numeric(frame["week"], errors="coerce")
+        frame = frame.loc[weeks == week]
+    if frame.empty:
+        return set()
+    status_col = "practice_status" if "practice_status" in frame.columns else None
+    name_col = next(
+        (column for column in ("full_name", "player_name", "name") if column in frame.columns),
+        None,
+    )
+    if status_col is None or name_col is None:
+        return set()
+
+    names: set[str] = set()
+    for row in frame.itertuples(index=False):
+        status = getattr(row, status_col, None)
+        if not practice_keeps_player(status):
+            continue
+        name = str(getattr(row, name_col, "") or "").strip()
+        if not name:
+            continue
+        if not player_matches_participation(name, participated_last_week):
+            continue
+        names.add(participation_name_key(name))
+    return names
+
+
+def _row_salary(row: Mapping[str, Any]) -> int:
+    for key in ("Salary", "salary", "fd_salary"):
+        raw = row.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return int(float(raw))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def split_trend_names_by_salary(
+    rows: Iterable[Mapping[str, Any]],
+    keys: Iterable[str],
+    *,
+    min_salary: int = TREND_MIN_SALARY,
+) -> tuple[list[str], list[str]]:
+    """Split trend names into a salary floor group and an eligible-only group.
+
+    A name below ``min_salary`` stays in the pool. This function does not
+    remove that player.
+    """
+
+    wanted = {participation_name_key(key) for key in keys if str(key).strip()}
+    forced: list[str] = []
+    eligible: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        name = _row_name(row)
+        key = participation_name_key(name)
+        if not key or key not in wanted or key in seen:
+            continue
+        seen.add(key)
+        if _row_salary(row) >= min_salary:
+            forced.append(name)
+        else:
+            eligible.append(name)
+    return forced, eligible
+
+
+def load_friday_trend_keys(season: int, week: int) -> set[str]:
+    """Load Friday practice plus last-week touches from the local caches."""
+
+    if week < 2:
+        return set()
+    from ceminidfs.data.fetch import _cache_dir
+    from ceminidfs.pipeline.backtest import load_season_pbp
+
+    try:
+        pbp = load_season_pbp(int(season))
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        print(f"trend include: skipped, no play-by-play ({exc})", file=sys.stderr)
+        return set()
+    if "week" in pbp.columns:
+        weeks = pd.to_numeric(pbp["week"], errors="coerce")
+        pbp = pbp.loc[weeks == (week - 1)]
+    participated = names_with_participation(pbp, through_week=week - 1)
+    path = _cache_dir() / f"injuries_{int(season)}.parquet"
+    if not path.is_file():
+        print(f"trend include: skipped, no injury cache {path}", file=sys.stderr)
+        return set()
+    return friday_trend_names(pd.read_parquet(path), participated, week=week)
+
+
 def names_with_participation(pbp: pd.DataFrame, *, through_week: int) -> set[str]:
     """Return names with a rush, a target, or a pass attempt in weeks 1..through_week."""
 
@@ -441,7 +634,7 @@ def apply_participation_gate(
     kept: list[dict[str, Any]] = []
     dropped = 0
     for row in rows:
-        if _is_skill_row(row) and participation_name_key(_row_name(row)) not in known:
+        if _is_skill_row(row) and not player_matches_participation(_row_name(row), known):
             dropped += 1
             continue
         kept.append(dict(row))

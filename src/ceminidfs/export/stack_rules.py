@@ -378,8 +378,15 @@ def apply_pool_constraints(
     no_offense_vs_dst: bool = False,
     one_rb_per_team: bool = False,
     projection_floor: float | None = None,
+    low_ceiling_floor: float | None = None,
+    low_ceiling_max: int = 1,
 ) -> None:
-    """Apply optional GPP pool constraints via pydfs groups / remove_player."""
+    """Apply optional GPP pool constraints via pydfs groups / remove_player.
+
+    ``projection_floor`` removes a weak player from the pool. It is a hard
+    rule. ``low_ceiling_floor`` keeps the player but limits how many weak
+    players one lineup may hold.
+    """
 
     if projection_floor is not None:
         locked = set(optimizer.player_pool.locked_players)
@@ -391,6 +398,12 @@ def apply_pool_constraints(
             optimizer.player_pool.remove_player(player)
 
     remaining = list(optimizer.player_pool.filtered_players)
+    if low_ceiling_floor is not None:
+        weak = low_ceiling_pool_players(remaining, float(low_ceiling_floor))
+        if weak:
+            optimizer.add_players_group(
+                PlayersGroup(weak, max_from_group=max(0, int(low_ceiling_max)))
+            )
     if no_offense_vs_dst:
         for dst, other in offense_vs_dst_pairs(remaining):
             optimizer.add_players_group(PlayersGroup([dst, other], max_from_group=1))
@@ -404,6 +417,31 @@ def apply_pool_constraints(
             if len(unique_ids) < 2:
                 continue
             optimizer.add_players_group(PlayersGroup(team_rbs, max_from_group=1))
+
+
+def low_ceiling_pool_players(players: Iterable[Any], floor: float) -> list[Any]:
+    """Return the skill players at or under the projection floor.
+
+    A defense and a kicker are excluded. Their projections sit near the floor
+    and would otherwise fill the group on every lineup.
+    """
+
+    weak: list[Any] = []
+    for player in players:
+        try:
+            projection = float(getattr(player, "fppg", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if projection > floor:
+            continue
+        positions = getattr(player, "positions", None) or []
+        if isinstance(positions, str):
+            positions = [positions]
+        mapped = {str(part).strip().upper() for part in positions}
+        if not mapped & OFFENSE_POSITIONS:
+            continue
+        weak.append(player)
+    return weak
 
 
 def _csv_id_nfl_positions(csv_path: str | Path) -> dict[str, list[str]]:

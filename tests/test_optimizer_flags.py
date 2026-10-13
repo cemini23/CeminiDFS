@@ -152,6 +152,15 @@ def test_uniques_caps_shared_names(tmp_path: Path):
     assert len(shared) <= 1
 
 
+def test_classic_book_uses_a_new_te_def_pair(tmp_path: Path):
+    players = _write_pool(tmp_path / "players.csv")
+    lineups = generate_lineups(players, count=2, max_exposure=1.0, min_salary=0)
+    pairs = [te_def_pair(lineup, "fanduel") for lineup in lineups]
+    assert len(pairs) == 2
+    assert pairs[0] is not None
+    assert pairs[0] != pairs[1]
+
+
 def test_max_exposure_caps_the_written_book(tmp_path: Path):
     players = _write_pool(tmp_path / "players.csv")
     out = tmp_path / "lineups.csv"

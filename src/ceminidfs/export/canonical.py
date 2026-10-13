@@ -53,6 +53,13 @@ OPTIONAL_PASS_THROUGH_FIELDS = [
     "sleeper_buzz_add",
     "sleeper_buzz_drop",
     "injury_source",
+    "fd_projection_unguarded",
+    "is_qb_starter",
+    "snap_share",
+    "l3_target_share",
+    "adot",
+    "p15",
+    "p85",
 ]
 
 

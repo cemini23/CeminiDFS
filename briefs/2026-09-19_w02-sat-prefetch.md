@@ -18,15 +18,15 @@ Agent does not Enter.
 6. Weather: **MIN@CHI** pass downgrade (14 mph G23, 47% pop). **GB@NYJ** rain screen. SoFi **not** a wind fade.
 7. Run Grok **DFS Slate Desk** after salaries land. Operator submits.
 
-Sunday T-90 (~11:30 ET 1 p.m. games): Pittman, Tua, McConkey, Porter Jr.
+Sunday T-90: Tua, McConkey, Bowers, Flowers. Pittman and Porter Jr. are OUT (see sat-lock brief).
 
 ## Scratch (`--exclude`)
 
-Brown IR · Tyler Smith IR · Pacheco IR · Estime IR · Higgins IR · Penix OUT · Jordan OUT · Lane IR · Hand OUT · **Darnold OUT** · **Collins OUT** · **Murray OUT** · **Fitzpatrick OUT** · **Omar Cooper Jr. OUT** · **Bowers D** · **Flowers D**
+Brown IR · Tyler Smith IR · Pacheco IR · Estime IR · Higgins IR · Penix OUT · Jordan OUT · Lane IR · Hand OUT · **Darnold OUT** · **Collins OUT** · **Murray OUT** · **Fitzpatrick OUT** · **Omar Cooper Jr. OUT** · **Bowers D** · **Flowers D** · **Pittman OUT** · **Porter Jr. OUT**
 
 ## Warn (pool OK until OUT)
 
-Tua Q (Rush starts) · Pittman Q · McConkey Q · Porter Jr. Q
+Tua Q (Rush starts) · McConkey Q
 
 ## Vegas / ITT
 

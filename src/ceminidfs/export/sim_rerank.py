@@ -12,10 +12,13 @@ import numpy as np
 from .lineup_report import format_lineup_report, write_lineup_report
 from .optimize import (
     TEAM_DART_LOG,
+    enforce_named_min_counts,
+    exposure_hatch_overrides,
     generate_lineups,
     select_with_exposure_caps,
     write_lineup_artifacts,
 )
+from .pool_guards import TREND_MIN_EXPOSURE
 from .review_reports import maybe_write_review_reports, pop_review_kwargs
 
 NAME_KEYS = (
@@ -64,6 +67,28 @@ def build_player_index(normalized_csv: str | Path | Iterable[Mapping[str, Any]])
         if name and name not in index:
             index[name] = row_index
     return index
+
+
+def _core_cap_from_gates(gates: Any) -> int | None:
+    """Return the 5-player core cap from a gates mapping, or None when off."""
+
+    if not isinstance(gates, Mapping):
+        return None
+    core = gates.get("core")
+    if not isinstance(core, Mapping) or not core.get("enabled"):
+        return None
+    value = core.get("max_count")
+    return int(value) if value is not None else None
+
+
+def _csv_player_rows(csv_path: str | Path) -> list[dict[str, str]]:
+    """Read a normalized players CSV as plain rows for the gate helpers."""
+
+    path = Path(csv_path)
+    if not path.is_file():
+        return []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
 
 
 def build_ownership_lookup(
@@ -152,6 +177,7 @@ def rerank_lineups(
     ownership_penalty: float = 0.0,
     max_exposure: float | None = None,
     max_team_exposure: float | None = None,
+    exposure_overrides: Mapping[str, float] | None = None,
 ) -> list[Any]:
     """Score candidates by simulated tail quantile and return the top unique lineups."""
 
@@ -185,13 +211,14 @@ def rerank_lineups(
 
     ranked.sort(reverse=True)
     ordered = [lineup for _, _, _, lineup in ranked]
-    if max_exposure is None and max_team_exposure is None:
+    if max_exposure is None and max_team_exposure is None and not exposure_overrides:
         return ordered[:final_count]
     return _select_with_exposure_cap(
         ordered,
         final_count,
         max_exposure,
         max_team_exposure=max_team_exposure,
+        exposure_overrides=exposure_overrides,
     )
 
 
@@ -200,6 +227,7 @@ def _select_with_exposure_cap(
     final_count: int,
     max_exposure: float | None,
     max_team_exposure: float | None = None,
+    exposure_overrides: Mapping[str, float] | None = None,
 ) -> list[Any]:
     """Greedily keep lineups that do not push player or team share above the caps."""
 
@@ -208,6 +236,7 @@ def _select_with_exposure_cap(
         final_count,
         max_exposure=max_exposure,
         max_team_exposure=max_team_exposure,
+        exposure_overrides=exposure_overrides,
     )
 
 
@@ -229,7 +258,9 @@ def optimize_with_sim_rerank(
 
     team_exposure = kwargs.pop("max_team_exposure", None)
     kwargs.pop("require_count", None)
+    trend_keys = list(kwargs.get("friday_trend_keys") or [])
     review_kwargs = pop_review_kwargs(kwargs)
+    review_kwargs["core_cap"] = _core_cap_from_gates(kwargs.get("gates"))
     candidate_lineups = generate_lineups(
         csv_path,
         site=site,
@@ -238,6 +269,11 @@ def optimize_with_sim_rerank(
         **kwargs,
     )
     exposure = kwargs["max_exposure"] if "max_exposure" in kwargs else 0.35
+    exposure_overrides = exposure_hatch_overrides(
+        _csv_player_rows(csv_path),
+        kwargs.get("gates"),
+        exposure,
+    )
     selected = rerank_lineups(
         candidate_lineups,
         sim_matrix,
@@ -248,7 +284,17 @@ def optimize_with_sim_rerank(
         ownership_penalty=ownership_penalty,
         max_exposure=exposure,
         max_team_exposure=team_exposure,
+        exposure_overrides=exposure_overrides,
     )
+    if trend_keys:
+        selected = enforce_named_min_counts(
+            selected,
+            candidate_lineups,
+            trend_keys,
+            final_count=final,
+            exposure=TREND_MIN_EXPOSURE,
+            max_exposure=exposure,
+        )
     if len(selected) != final:
         raise ValueError(f"optimizer wrote {len(selected)} lineups; requested {final}")
     written = write_lineup_artifacts(selected, out_path, site=site)

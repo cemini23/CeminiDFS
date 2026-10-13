@@ -284,10 +284,51 @@ def _run_normalize(input_path: Path, output_path: Path, site: str, config: Mappi
     return output_path
 
 
+def _friday_trend_force_names(input_path: Path, config: Mapping[str, Any]) -> list[str]:
+    """Return display names that get a lineup floor for this week.
+
+    The rule is Friday limited or full practice, plus a touch last week,
+    plus salary at or above the trend floor. A miss on any part stays
+    eligible when the player is still in the pool. An empty season or week
+    skips the rule.
+    """
+
+    season = config.get("season")
+    week = config.get("week")
+    if season is None or week is None:
+        return []
+    from ceminidfs.export.pool_guards import (
+        is_questionable_row,
+        load_friday_trend_keys,
+        split_trend_names_by_salary,
+    )
+
+    keys = load_friday_trend_keys(int(season), int(week))
+    frame = pd.read_csv(input_path)
+    questionable = [
+        row for row in frame.to_dict(orient="records") if is_questionable_row(row)
+    ]
+    forced, eligible = split_trend_names_by_salary(questionable, keys)
+    print(
+        f"trend include: force={len(forced)} eligible_only={len(eligible)} "
+        f"from {len(keys)} Friday names",
+        file=sys.stderr,
+    )
+    if forced:
+        print("trend include force: " + ", ".join(sorted(forced)), file=sys.stderr)
+    if eligible:
+        print("trend include eligible only: " + ", ".join(sorted(eligible)), file=sys.stderr)
+    return forced
+
+
 def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mapping[str, Any]) -> Path:
     from ceminidfs.export.optimize import optimize_lineups
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    build_kwargs = _optimize_build_kwargs(config)
+    trend_names = _friday_trend_force_names(input_path, config)
+    if trend_names:
+        build_kwargs["friday_trend_keys"] = trend_names
     if _sim_rerank_enabled(config):
         from ceminidfs.export.sim_rerank import optimize_with_sim_rerank
 
@@ -310,7 +351,7 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
             quantile=float(rerank_cfg.get("quantile", 0.85)),
             ownership_lookup=ownership_lookup,
             ownership_penalty=ownership_penalty,
-            **_optimize_build_kwargs(config),
+            **build_kwargs,
             **_review_report_kwargs(config),
         )
         return output_path
@@ -320,7 +361,7 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
         out_path=output_path,
         site=str(config.get("site", "fanduel")),
         count=count,
-        **_optimize_build_kwargs(config),
+        **build_kwargs,
         **_review_report_kwargs(config),
     )
     return output_path
@@ -367,6 +408,9 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
     open_qb_teams = config.get("open_qb_teams")
     if open_qb_teams:
         kwargs["open_qb_teams"] = list(open_qb_teams)
+    gates = config.get("gates")
+    if gates:
+        kwargs["gates"] = dict(gates)
     return kwargs
 
 
@@ -384,8 +428,22 @@ def _review_report_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
         kwargs["flag_duplicate_cores"] = True
     if config.get("dart_ceiling_report"):
         kwargs["dart_ceiling_report"] = True
+    if config.get("flag_qb_starter"):
+        kwargs["flag_qb_starter"] = True
+    if config.get("flag_stack_concentration"):
+        kwargs["flag_stack_concentration"] = True
+    if config.get("flag_correlated_pairs"):
+        kwargs["flag_correlated_pairs"] = True
+    if config.get("defense_context_report"):
+        kwargs["defense_context_report"] = True
+    if config.get("projection_bands"):
+        kwargs["projection_bands"] = True
     if config.get("environment"):
         kwargs["environment"] = config.get("environment")
+    if config.get("season") is not None:
+        kwargs["season"] = config.get("season")
+    if config.get("week") is not None:
+        kwargs["week"] = config.get("week")
     return kwargs
 
 

@@ -1,0 +1,677 @@
+{
+  "_fixture": "Shaped to the jev-mcp response schema (dist/index.js). Not captured from a live call: this build machine cannot reach api.typesafe.ai. The gate logic, the thresholds, and the fail-closed paths are exercised for real.",
+  "screen": [
+    {
+      "tool": "jev_screen",
+      "model": "jev-latest",
+      "probabilities": {
+        "injection": 0.02,
+        "substance": 0.94,
+        "relevance": 0.88
+      },
+      "thresholds": {
+        "block_at": 0.75,
+        "review_at": 0.25
+      },
+      "recommendation": {
+        "action": "pass",
+        "reason": "injection probability 0.02 < review threshold 0.25"
+      }
+    }
+  ],
+  "verify": [
+    {
+      "tool": "jev_verify",
+      "model": "jev-latest",
+      "auto_accept": 0.8,
+      "summary": {},
+      "results": [
+        {
+          "id": "claim",
+          "claim": "Brock Purdy is expected to be active for SF in SEA@SF on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Aaron Jones Sr. is expected to be active for MIN in MIN@NO on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jahmyr Gibbs is expected to be active for DET in ARI@DET on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Carnell Tate is expected to be active for TEN in HOU@TEN on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "KC Concepcion Jr. is expected to be active for CLE in CLE@NYJ on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Michael Wilson is expected to be active for ARI in ARI@DET on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Quinshon Judkins is expected to be active for CLE in CLE@NYJ on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Washington Commanders is expected to be active for WAS in NYG@WAS on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Isaiah Likely is expected to be active for NYG in NYG@WAS on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jonathan Taylor is expected to be active for IND in IND@PIT on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Nico Collins is expected to be active for HOU in HOU@TEN on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jaxon Smith-Njigba is expected to be active for SEA in SEA@SF on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Tyler Warren is expected to be active for IND in IND@PIT on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Tony Pollard is expected to be active for TEN in HOU@TEN on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Malik Washington is expected to be active for MIA in CIN@MIA on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jaylen Warren is expected to be active for PIT in IND@PIT on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Tee Higgins is expected to be active for CIN in CIN@MIA on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.18,
+            "contradicts": 0.78,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.62,
+          "action": "review",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Kirk Cousins is expected to be active for LV in LV@NE on 2026-10-11.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.96,
+            "contradicts": 0.0,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.91,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Ashton Jeanty is expected to be active for LV in LV@NE on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Rhamondre Stevenson is expected to be active for NE in LV@NE on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jaylen Wright is expected to be active for MIA in CIN@MIA on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Ja'Marr Chase is expected to be active for CIN in CIN@MIA on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jordan Addison is expected to be active for MIN in MIN@NO on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Keenan Allen is expected to be active for IND in IND@PIT on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Alvin Kamara is expected to be active for NO in MIN@NO on 2026-10-11.",
+          "verdict": "contradicted",
+          "probabilities": {
+            "supports": 0.04,
+            "contradicts": 0.92,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.93,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Brock Purdy is the confirmed starter for SF.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Kirk Cousins is the confirmed starter for LV.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Sam Darnold is the confirmed starter for SEA.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Aaron Rodgers is the confirmed starter for PIT.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jared Goff is the confirmed starter for DET.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Deshaun Watson is the confirmed starter for CLE.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Joe Burrow is the confirmed starter for CIN.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Tyler Shough is the confirmed starter for NO.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Jordan Love is the confirmed starter for GB.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Drake Maye is the confirmed starter for NE.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "Bo Nix is the confirmed starter for DEN.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        },
+        {
+          "id": "claim",
+          "claim": "C.J. Stroud is the confirmed starter for HOU.",
+          "verdict": "verified",
+          "probabilities": {
+            "supports": 0.94,
+            "contradicts": 0.02,
+            "says_nothing": 0.04
+          },
+          "confidence": 0.9,
+          "action": "auto",
+          "supporting_evidence": "evidence"
+        }
+      ]
+    }
+  ],
+  "find": [
+    {
+      "tool": "jev_find",
+      "query": "Which healthy WR in this game replaces Carnell Tate?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Nico Collins",
+          "probability": 0.41,
+          "text": "Nico Collins (WR, HOU)"
+        },
+        {
+          "id": "Wan'Dale Robinson",
+          "probability": 0.22,
+          "text": "Wan'Dale Robinson (WR, TEN)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy RB in this game replaces Rhamondre Stevenson?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "TreVeyon Henderson",
+          "probability": 0.41,
+          "text": "TreVeyon Henderson (RB, NE)"
+        },
+        {
+          "id": "Mike Washington Jr.",
+          "probability": 0.22,
+          "text": "Mike Washington Jr. (RB, LV)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy WR in this game replaces Ja'Marr Chase?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Malik Washington",
+          "probability": 0.41,
+          "text": "Malik Washington (WR, MIA)"
+        },
+        {
+          "id": "Mitch Tinsley",
+          "probability": 0.22,
+          "text": "Mitch Tinsley (WR, CIN)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy RB in this game replaces Jaylen Wright?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Chase Brown",
+          "probability": 0.41,
+          "text": "Chase Brown (RB, CIN)"
+        },
+        {
+          "id": "Ollie Gordon II",
+          "probability": 0.22,
+          "text": "Ollie Gordon II (RB, MIA)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy WR in this game replaces Jordan Addison?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Chris Olave",
+          "probability": 0.41,
+          "text": "Chris Olave (WR, NO)"
+        },
+        {
+          "id": "Devaughn Vele",
+          "probability": 0.22,
+          "text": "Devaughn Vele (WR, NO)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy WR in this game replaces Keenan Allen?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Josh Downs",
+          "probability": 0.41,
+          "text": "Josh Downs (WR, IND)"
+        },
+        {
+          "id": "DK Metcalf",
+          "probability": 0.22,
+          "text": "DK Metcalf (WR, PIT)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy RB in this game replaces Alvin Kamara?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Aaron Jones Sr.",
+          "probability": 0.41,
+          "text": "Aaron Jones Sr. (RB, MIN)"
+        },
+        {
+          "id": "Kendre Miller",
+          "probability": 0.22,
+          "text": "Kendre Miller (RB, NO)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy RB in this game replaces Ashton Jeanty?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "TreVeyon Henderson",
+          "probability": 0.41,
+          "text": "TreVeyon Henderson (RB, NE)"
+        },
+        {
+          "id": "Mike Washington Jr.",
+          "probability": 0.22,
+          "text": "Mike Washington Jr. (RB, LV)"
+        }
+      ]
+    },
+    {
+      "tool": "jev_find",
+      "query": "Which healthy WR in this game replaces Tee Higgins?",
+      "exists": 0.93,
+      "exists_verdict": "answered",
+      "top": [
+        {
+          "id": "Malik Washington",
+          "probability": 0.41,
+          "text": "Malik Washington (WR, MIA)"
+        },
+        {
+          "id": "Mitch Tinsley",
+          "probability": 0.22,
+          "text": "Mitch Tinsley (WR, CIN)"
+        }
+      ]
+    }
+  ]
+}

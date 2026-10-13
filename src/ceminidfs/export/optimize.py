@@ -4,19 +4,32 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import math
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .build_gates import (
+    FIVE_CORE_SIZE,
+    BuildGateError,
+    assert_core_cap,
+    assert_exposure_cap,
+    low_ceiling_names,
+    low_ceiling_violations,
+    position_lead_exempt,
+)
 from .lineup_report import format_lineup_report, write_lineup_report
 from .normalize import SHOWDOWN_SITES, normalize_site
 from .pool_guards import (
+    TREND_MIN_EXPOSURE,
+    TREND_MIN_SALARY,
     apply_open_qb_gate,
     apply_skill_pool_floor,
     apply_soft_fade,
     apply_team_dart_guard,
     open_qb_teams_from_csv,
+    participation_name_key,
 )
 from .stack_rules import (
     apply_locks_and_excludes,
@@ -187,6 +200,25 @@ def _exposure_cap(limit: float, final_count: int) -> int:
     return cap
 
 
+def _pydfs_exposure_for_book(
+    max_exposure: float | None,
+    book_count: int,
+    request_n: int,
+) -> float | None:
+    """Return the pydfs exposure that stops at the written-book appearance cap.
+
+    pydfs blocks the next lineup when ``exposure <= used / n``. An exposure of
+    0.35 on 25 lineups still allows 9 uses. The book cap is 8. The same
+    players then fill the pool, and the book cannot reach 25. Pass
+    ``cap / n`` so the solver stops at that cap. A value of 1 or more stays
+    uncapped. The projection does not change.
+    """
+
+    if max_exposure is None or max_exposure >= 1 or request_n <= 0 or book_count <= 0:
+        return max_exposure
+    return _exposure_cap(max_exposure, book_count) / request_n
+
+
 def _exposure_name_key(name: str) -> str:
     return " ".join(str(name).lower().split())
 
@@ -196,13 +228,22 @@ def select_with_exposure_caps(
     final_count: int,
     max_exposure: float | None = None,
     max_team_exposure: float | None = None,
+    exposure_overrides: Mapping[str, float] | None = None,
 ) -> list[Any]:
-    """Greedily keep lineups that stay under player and/or team exposure caps."""
+    """Greedily keep lineups that stay under player and/or team exposure caps.
+
+    ``exposure_overrides`` raises the player cap for a named player. The value
+    is a fraction of the book size. Every other player keeps ``max_exposure``.
+    """
 
     player_cap = _exposure_cap(max_exposure, final_count) if max_exposure is not None else None
     team_cap = (
         _exposure_cap(max_team_exposure, final_count) if max_team_exposure is not None else None
     )
+    overrides = {
+        _exposure_name_key(name): _exposure_cap(value, final_count)
+        for name, value in (exposure_overrides or {}).items()
+    }
     selected: list[Any] = []
     player_counts: dict[str, int] = {}
     team_counts: dict[str, int] = {}
@@ -214,7 +255,7 @@ def select_with_exposure_caps(
         ]
         teams = _exposure_teams(lineup)
         if player_cap is not None and any(
-            player_counts.get(name, 0) + 1 > player_cap for name in names
+            player_counts.get(name, 0) + 1 > overrides.get(name, player_cap) for name in names
         ):
             continue
         if team_cap is not None and any(team_counts.get(team, 0) + 1 > team_cap for team in teams):
@@ -227,6 +268,123 @@ def select_with_exposure_caps(
         if len(selected) >= final_count:
             break
     return selected
+
+
+def _lineup_signature(lineup: Any) -> tuple[str, ...]:
+    return tuple(sorted(_exposure_name_key(name) for name in _exposure_player_names(lineup)))
+
+
+def _exposure_counts(lineups: Iterable[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for lineup in lineups:
+        for name in _exposure_player_names(lineup):
+            key = _exposure_name_key(name)
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _swap_respects_cap(
+    counts: Mapping[str, int],
+    old_sig: tuple[str, ...],
+    new_sig: tuple[str, ...],
+    cap: int | None,
+) -> bool:
+    """Return True when replacing ``old_sig`` with ``new_sig`` stays at or under ``cap``."""
+
+    if cap is None:
+        return True
+    delta: dict[str, int] = {}
+    for name in old_sig:
+        delta[name] = delta.get(name, 0) - 1
+    for name in new_sig:
+        delta[name] = delta.get(name, 0) + 1
+    return all(counts.get(name, 0) + change <= cap for name, change in delta.items())
+
+
+def _apply_signature_delta(
+    counts: dict[str, int],
+    old_sig: tuple[str, ...],
+    new_sig: tuple[str, ...],
+) -> None:
+    for name in old_sig:
+        counts[name] = counts.get(name, 0) - 1
+    for name in new_sig:
+        counts[name] = counts.get(name, 0) + 1
+
+
+def enforce_named_min_counts(
+    selected: list[Any],
+    candidates: list[Any],
+    names: Iterable[str],
+    *,
+    final_count: int,
+    exposure: float,
+    max_exposure: float | None,
+) -> list[Any]:
+    """Keep each named player in at least ``exposure`` of the final book.
+
+    The simulation rerank can drop a player the solver was told to use.
+    This swaps a lower lineup for a candidate that contains the player.
+    The swap tries the lowest lineups first, then an earlier lineup when the
+    exposure cap would break. A player who is not in any legal candidate
+    stays missing, and the log says so.
+    """
+
+    book = list(selected[:final_count])
+    book_sigs = [_lineup_signature(lineup) for lineup in book]
+    need = max(1, int(round(float(exposure) * final_count)))
+    cap = _exposure_cap(max_exposure, final_count) if max_exposure is not None else None
+    in_book = set(book_sigs)
+    pool: list[tuple[Any, tuple[str, ...]]] = []
+    pool_seen = set(in_book)
+    for lineup in list(selected) + list(candidates):
+        sig = _lineup_signature(lineup)
+        if sig in pool_seen:
+            continue
+        pool.append((lineup, sig))
+        pool_seen.add(sig)
+    counts = _exposure_counts(book)
+
+    for raw_name in names:
+        key = _exposure_name_key(str(raw_name))
+        if not key:
+            continue
+        while sum(1 for sig in book_sigs if key in sig) < need:
+            placed = False
+            for lineup, sig in pool:
+                if sig in in_book or key not in sig:
+                    continue
+                if len(book) < final_count and _swap_respects_cap(counts, (), sig, cap):
+                    book.append(lineup)
+                    book_sigs.append(sig)
+                    in_book.add(sig)
+                    _apply_signature_delta(counts, (), sig)
+                    placed = True
+                    break
+                for index in range(len(book) - 1, -1, -1):
+                    if key in book_sigs[index]:
+                        continue
+                    old_sig = book_sigs[index]
+                    if not _swap_respects_cap(counts, old_sig, sig, cap):
+                        continue
+                    book[index] = lineup
+                    book_sigs[index] = sig
+                    in_book.discard(old_sig)
+                    in_book.add(sig)
+                    _apply_signature_delta(counts, old_sig, sig)
+                    placed = True
+                    break
+                if placed:
+                    break
+            if not placed:
+                have = sum(1 for sig in book_sigs if key in sig)
+                print(
+                    f"trend include: {raw_name} is in {have} of {len(book)} lineups; "
+                    f"wanted {need}",
+                    file=sys.stderr,
+                )
+                break
+    return book
 
 
 def _read_lineup_csv_rows(path: str | Path, site: str) -> list[list[str]]:
@@ -275,6 +433,8 @@ def merge_lineup_csvs(
     max_exposure: float,
     final_count: int,
     site: str = "fanduel",
+    core_cap: int | None = None,
+    core_size: int = FIVE_CORE_SIZE,
 ) -> int:
     """Append extra rows, or raise before creating ``out_path``.
 
@@ -282,6 +442,8 @@ def merge_lineup_csvs(
     book size. It is not the number of rows in the two files. The first extra
     row that would break the cap raises ``ExposureCapError``. Earlier extra
     rows are not written.
+
+    ``core_cap`` refuses a repeated ``core_size``-player core over the limit.
     """
 
     site_key = normalize_site(site)
@@ -292,6 +454,11 @@ def merge_lineup_csvs(
     for row in base_rows:
         for key, _display in _seat_name_keys(row):
             counts[key] = counts.get(key, 0) + 1
+    core_counts: dict[tuple[str, ...], int] = {}
+    if core_cap is not None:
+        for row in base_rows:
+            for combo in _row_core_keys(row, core_size):
+                core_counts[combo] = core_counts.get(combo, 0) + 1
 
     accepted: list[list[str]] = []
     for row in extra_rows:
@@ -301,10 +468,28 @@ def merge_lineup_csvs(
             if would > cap:
                 raise ExposureCapError(f"{display} would appear {would} times; cap is {cap}")
             adds[key] = adds.get(key, 0) + 1
+        if core_cap is not None:
+            for combo in _row_core_keys(row, core_size):
+                would = core_counts.get(combo, 0) + 1
+                if would > core_cap:
+                    raise BuildGateError(
+                        f"{core_size}-player core would appear {would} times; "
+                        f"cap is {core_cap}: " + ", ".join(combo)
+                    )
         for key, added in adds.items():
             counts[key] = counts.get(key, 0) + added
+        if core_cap is not None:
+            for combo in _row_core_keys(row, core_size):
+                core_counts[combo] = core_counts.get(combo, 0) + 1
         accepted.append(row)
     return write_lineup_rows(base_rows + accepted, out_path, site_key)
+
+
+def _row_core_keys(row: Iterable[str], size: int) -> list[tuple[str, ...]]:
+    keys = sorted({_exposure_name_key(cell) for cell in row if str(cell).strip()})
+    if len(keys) < size:
+        return []
+    return list(itertools.combinations(keys, size))
 
 
 def _player_ids_by_name(players_csv: str | Path) -> dict[str, str]:
@@ -490,6 +675,7 @@ def _request_lineups(
     request_count: int,
     count: int,
     max_exposure: float | None,
+    allow_short: bool = False,
 ) -> list[Any]:
     """Ask for extra lineups for the pair filter. Fall back to ``count``.
 
@@ -498,7 +684,12 @@ def _request_lineups(
     """
 
     try:
-        return _optimize_or_raise(optimizer, n=request_count, max_exposure=max_exposure)
+        return _optimize_or_raise(
+            optimizer,
+            n=request_count,
+            max_exposure=_pydfs_exposure_for_book(max_exposure, count, request_count),
+            allow_short=allow_short,
+        )
     except ValueError as exc:
         if request_count == count or "could not build lineups" not in str(exc):
             raise
@@ -506,7 +697,296 @@ def _request_lineups(
         f"optimizer could not build {request_count} lineups; retry with {count}",
         file=sys.stderr,
     )
-    return _optimize_or_raise(optimizer, n=count, max_exposure=max_exposure)
+    return _optimize_or_raise(
+        optimizer,
+        n=count,
+        max_exposure=_pydfs_exposure_for_book(max_exposure, count, count),
+        allow_short=allow_short,
+    )
+
+
+def _install_unique_te_def_rule(optimizer: Any, site_key: str) -> None:
+    """Ban a repeated tight-end and defense pair inside the solver.
+
+    The post-filter cannot invent a new pair. The solver must leave the pair
+    after one use. The projection does not change.
+    """
+
+    from pydfs_lineup_optimizer.rules import OptimizerRule
+    from pydfs_lineup_optimizer.solvers import SolverSign
+
+    class UniqueTeDefPairRule(OptimizerRule):
+        def __init__(self, optimizer, players_dict, context):
+            super().__init__(optimizer, players_dict, context)
+            self._seen: list[tuple[Any, Any]] = []
+            self._by_name: dict[str, Any] | None = None
+
+        def _variables_by_name(self) -> dict[str, Any]:
+            if self._by_name is None:
+                names: dict[str, Any] = {}
+                for player, variable in self.players_dict.items():
+                    names.setdefault(_fold_lineup_name(player.full_name), variable)
+                self._by_name = names
+            return self._by_name
+
+        def apply_for_iteration(self, solver, result):
+            if result is not None:
+                pair = te_def_pair(result, site_key)
+                if pair is not None:
+                    names = self._variables_by_name()
+                    tight_end = names.get(pair[0])
+                    defense = names.get(pair[1])
+                    if tight_end is not None and defense is not None:
+                        self._seen.append((tight_end, defense))
+            for index, (tight_end, defense) in enumerate(self._seen, start=1):
+                solver.add_constraint(
+                    [tight_end, defense],
+                    None,
+                    SolverSign.LTE,
+                    1,
+                    name=f"unique_te_def_{index}",
+                )
+
+    optimizer.add_new_rule(UniqueTeDefPairRule)
+
+
+def _gate_section(gates: Mapping[str, Any] | None, key: str) -> dict[str, Any]:
+    """Return one gate block from the config, or an empty mapping."""
+
+    if not gates:
+        return {}
+    block = gates.get(key)
+    if isinstance(block, Mapping):
+        return dict(block)
+    return {}
+
+
+def _optimizer_pool(optimizer: Any) -> list[Any]:
+    return list(getattr(getattr(optimizer, "player_pool", None), "all_players", []) or [])
+
+
+def exposure_hatch_overrides(
+    players: Iterable[Any],
+    gates: Mapping[str, Any] | None,
+    max_exposure: float | None,
+) -> dict[str, float]:
+    """Return ``{name: cap}`` for players allowed above the default cap.
+
+    ``players`` is any iterable with a name, a projection, and a position.
+    A pydfs player and a normalized CSV row both work.
+    """
+
+    hatch = _gate_section(gates, "exposure_hatch")
+    if not hatch.get("enabled") or max_exposure is None:
+        return {}
+    cap = float(hatch.get("cap", max_exposure))
+    if cap <= float(max_exposure):
+        return {}
+    return position_lead_exempt(
+        players,
+        margin=float(hatch.get("lead_margin", 4.0)),
+        cap=cap,
+    )
+
+
+def _apply_solver_exposure_hatch(
+    optimizer: Any,
+    overrides: Mapping[str, float],
+    *,
+    book_count: int,
+    request_n: int,
+) -> None:
+    """Give each exempt player his own pydfs max exposure.
+
+    pydfs reads ``player.max_exposure`` before the global value. The exempt
+    player then reaches the higher cap, and every other player keeps the
+    default cap.
+    """
+
+    if not overrides or request_n <= 0 or book_count <= 0:
+        return
+    for player in _optimizer_pool(optimizer):
+        key = _exposure_name_key(getattr(player, "full_name", ""))
+        if key in overrides:
+            player.max_exposure = _exposure_cap(overrides[key], book_count) / request_n
+
+
+def install_five_core_rule(optimizer: Any, *, size: int, cap: int) -> None:
+    """Ban a repeated ``size``-player core inside the solver.
+
+    After each lineup the rule counts every ``size``-subset of that lineup.
+    When a subset reaches ``cap`` uses, the solver gets ``sum(subset) <= cap-1``.
+    The solver then avoids that combination and still reaches the book size.
+    A subset of a legal book is legal, so a later rerank cannot break the cap.
+    """
+
+    from pydfs_lineup_optimizer.rules import OptimizerRule
+    from pydfs_lineup_optimizer.solvers import SolverSign
+
+    class FiveCoreRule(OptimizerRule):
+        def __init__(self, optimizer, players_dict, context):
+            super().__init__(optimizer, players_dict, context)
+            self._by_name: dict[str, Any] | None = None
+            self._used: dict[tuple[str, ...], int] = {}
+            self._exhausted: list[tuple[str, ...]] = []
+
+        def _variables_by_name(self) -> dict[str, Any]:
+            if self._by_name is None:
+                names: dict[str, Any] = {}
+                for player, variable in self.players_dict.items():
+                    names.setdefault(_fold_lineup_name(player.full_name), variable)
+                self._by_name = names
+            return self._by_name
+
+        def apply_for_iteration(self, solver, result):
+            if result is not None:
+                keys = sorted(
+                    {
+                        _fold_lineup_name(getattr(player, "full_name", ""))
+                        for player in getattr(result, "players", [])
+                    }
+                    - {""}
+                )
+                if len(keys) >= size:
+                    for combo in itertools.combinations(keys, size):
+                        count = self._used.get(combo, 0) + 1
+                        self._used[combo] = count
+                        if count >= cap and combo not in self._exhausted:
+                            self._exhausted.append(combo)
+            names = self._variables_by_name()
+            for index, combo in enumerate(self._exhausted, start=1):
+                variables = [names.get(name) for name in combo]
+                if any(variable is None for variable in variables):
+                    continue
+                solver.add_constraint(
+                    variables,
+                    None,
+                    SolverSign.LTE,
+                    size - 1,
+                    name=f"five_core_{index}",
+                )
+
+    optimizer.add_new_rule(FiveCoreRule)
+
+
+def load_gate_projections(csv_path: str | Path) -> tuple[dict[str, float], dict[str, str]]:
+    """Return ``(projection, position)`` lookups from a players CSV."""
+
+    from .build_gates import load_gate_context
+
+    path = Path(csv_path)
+    if not path.is_file():
+        return {}, {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        return load_gate_context(list(csv.DictReader(handle)))
+
+
+def assert_gates_from_csv(
+    lineups: list[Any],
+    csv_path: str | Path,
+    *,
+    gates: Mapping[str, Any] | None,
+    max_exposure: float | None,
+    exposure_overrides: Mapping[str, float] | None = None,
+    book_count: int | None = None,
+) -> None:
+    """Raise when the book breaks a gate. Read the projections from a CSV."""
+
+    projections, positions = load_gate_projections(csv_path)
+    assert_book_gates(
+        lineups,
+        gates=gates,
+        max_exposure=max_exposure,
+        exposure_overrides=exposure_overrides,
+        projections=projections,
+        positions=positions,
+        book_count=book_count,
+    )
+
+
+def assert_book_gates(
+    lineups: list[Any],
+    *,
+    gates: Mapping[str, Any] | None,
+    max_exposure: float | None,
+    exposure_overrides: Mapping[str, float] | None = None,
+    projections: Mapping[str, float] | None = None,
+    positions: Mapping[str, str] | None = None,
+    book_count: int | None = None,
+) -> None:
+    """Raise when the finished book breaks a build-time gate."""
+
+    core = _gate_section(gates, "core")
+    if core.get("enabled"):
+        assert_core_cap(
+            lineups,
+            int(core.get("max_count", 0)),
+            size=int(core.get("size", FIVE_CORE_SIZE)),
+        )
+    assert_exposure_cap(
+        lineups,
+        max_exposure,
+        overrides=exposure_overrides,
+        book_count=book_count,
+    )
+    low = _gate_section(gates, "low_ceiling")
+    if low.get("enabled") and projections is not None:
+        floor = float(low.get("projection_floor", 0.0))
+        allowed = int(low.get("max_per_lineup", 1))
+        under = low_ceiling_names(
+            projections,
+            positions or {},
+            floor,
+            skill_only=bool(low.get("skill_only", True)),
+        )
+        over = low_ceiling_violations(lineups, under, allowed)
+        if over:
+            count, names = over[0]
+            raise BuildGateError(
+                f"lineup holds {count} players under {floor} points; "
+                f"limit is {allowed}: " + ", ".join(names)
+            )
+
+
+def apply_friday_trend_exposure(
+    optimizer: Any,
+    names: Iterable[str],
+    *,
+    min_salary: int = TREND_MIN_SALARY,
+    exposure: float = TREND_MIN_EXPOSURE,
+) -> list[str]:
+    """Set a lineup floor for trend names at or above ``min_salary``.
+
+    A name below the salary floor stays eligible. The function does not
+    delete a questionable player.
+    """
+
+    wanted = {participation_name_key(name) for name in names if str(name).strip()}
+    if not wanted:
+        return []
+    forced: list[str] = []
+    eligible_only: list[str] = []
+    pool = getattr(getattr(optimizer, "player_pool", None), "all_players", []) or []
+    for player in pool:
+        full_name = str(getattr(player, "full_name", "") or "").strip()
+        if participation_name_key(full_name) not in wanted:
+            continue
+        salary = int(float(getattr(player, "salary", 0) or 0))
+        if salary < min_salary:
+            eligible_only.append(full_name)
+            continue
+        player.min_exposure = float(exposure)
+        forced.append(full_name)
+    if forced or eligible_only:
+        print(
+            "trend include: "
+            f"floor={exposure} on {len(forced)} players at salary>={min_salary}; "
+            f"eligible only={len(eligible_only)}",
+            file=sys.stderr,
+        )
+        if forced:
+            print("trend include forced: " + ", ".join(sorted(forced)), file=sys.stderr)
+    return forced
 
 
 def generate_lineups(
@@ -531,6 +1011,8 @@ def generate_lineups(
     min_skill_pool: int | None = None,
     open_qb_teams: Iterable[str] | None = None,
     require_count: bool = True,
+    friday_trend_keys: Iterable[str] | None = None,
+    gates: Mapping[str, Any] | None = None,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -567,17 +1049,23 @@ def generate_lineups(
         excludes=excludes,
     )
     assert_locked_players_eligible(optimizer)
+    low_ceiling = _gate_section(gates, "low_ceiling")
     apply_pool_constraints(
         optimizer,
         no_offense_vs_dst=no_offense_vs_dst,
         one_rb_per_team=one_rb_per_team,
         projection_floor=projection_floor,
+        low_ceiling_floor=(
+            float(low_ceiling["projection_floor"]) if low_ceiling.get("enabled") else None
+        ),
+        low_ceiling_max=int(low_ceiling.get("max_per_lineup", 1)),
     )
     apply_soft_fade(optimizer, soft_fade, player_soft_fade=player_soft_fade)
     apply_skill_pool_floor(optimizer, min_skill_pool, site_key=site_key)
     TEAM_DART_LOG.clear()
     dart_log = apply_team_dart_guard(optimizer, keep_team_dart)
     apply_stack_specs(optimizer, parse_stack_rules(stacks))
+    apply_friday_trend_exposure(optimizer, friday_trend_keys or ())
 
     repeating = resolve_repeating_players(
         slate_size=len(LINEUP_HEADERS[site_key]),
@@ -598,21 +1086,47 @@ def generate_lineups(
         max_exposure = None
 
     pair_guard = site_key in {"fanduel", "draftkings"}
-    request_count = count * 3 if pair_guard else count
+    # The solver bans a repeated tight-end and defense pair. Ask for the book
+    # size. A larger request with the book cap is infeasible on a full slate.
+    if pair_guard and require_count:
+        _install_unique_te_def_rule(optimizer, site_key)
+
+    core = _gate_section(gates, "core")
+    if core.get("enabled") and site_key in {"fanduel", "draftkings"}:
+        install_five_core_rule(
+            optimizer,
+            size=int(core.get("size", FIVE_CORE_SIZE)),
+            cap=int(core.get("max_count", 0)),
+        )
+
+    overrides = exposure_hatch_overrides(_optimizer_pool(optimizer), gates, max_exposure)
+    request_count = count
+    _apply_solver_exposure_hatch(
+        optimizer,
+        overrides,
+        book_count=count,
+        request_n=request_count,
+    )
     lineups = _request_lineups(
         optimizer,
         request_count=request_count,
         count=count,
         max_exposure=max_exposure or None,
+        allow_short=not require_count,
     )
     if not lineups:
         raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
-    if max_exposure is not None or max_team_exposure is not None:
+    if (
+        max_exposure is not None
+        or max_team_exposure is not None
+        or overrides
+    ):
         lineups = select_with_exposure_caps(
             lineups,
             count,
             max_exposure=max_exposure,
             max_team_exposure=max_team_exposure,
+            exposure_overrides=overrides,
         )
     TEAM_DART_LOG.extend(dart_log)
     if require_count and len(lineups) < count:
@@ -624,6 +1138,14 @@ def generate_lineups(
     if require_count and len(lineups) != count:
         raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
     _assert_locks_and_excludes_hold(lineups, resolved_locks, resolved_excludes)
+    assert_gates_from_csv(
+        lineups,
+        csv_file,
+        gates=gates,
+        max_exposure=max_exposure,
+        exposure_overrides=overrides,
+        book_count=count,
+    )
     return lineups
 
 
@@ -670,6 +1192,7 @@ def optimize_lineups(
     player_soft_fade: Mapping[str, float] | Iterable[str] | None = None,
     min_skill_pool: int | None = None,
     open_qb_teams: Iterable[str] | None = None,
+    friday_trend_keys: Iterable[str] | None = None,
     report_path: str | Path | None = None,
     flag_wr_triples: bool = False,
     late_swap_audit: bool = False,
@@ -677,7 +1200,15 @@ def optimize_lineups(
     ownership_calibration: str | Path | None = None,
     flag_duplicate_cores: bool = False,
     dart_ceiling_report: bool = False,
+    flag_qb_starter: bool = False,
+    flag_stack_concentration: bool = False,
+    flag_correlated_pairs: bool = False,
+    defense_context_report: bool = False,
+    projection_bands: bool = False,
     environment: str | Path | None = None,
+    season: int | None = None,
+    week: int | None = None,
+    gates: Mapping[str, Any] | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -702,6 +1233,8 @@ def optimize_lineups(
         player_soft_fade=player_soft_fade,
         min_skill_pool=min_skill_pool,
         open_qb_teams=open_qb_teams,
+        friday_trend_keys=friday_trend_keys,
+        gates=gates,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
     from ceminidfs.export.review_reports import maybe_write_review_reports
@@ -716,7 +1249,15 @@ def optimize_lineups(
         ownership_calibration=ownership_calibration,
         flag_duplicate_cores=flag_duplicate_cores,
         dart_ceiling_report=dart_ceiling_report,
+        flag_qb_starter=flag_qb_starter,
+        flag_stack_concentration=flag_stack_concentration,
+        flag_correlated_pairs=flag_correlated_pairs,
+        defense_context_report=defense_context_report,
+        projection_bands=projection_bands,
         environment=environment,
+        season=season,
+        week=week,
+        core_cap=_gate_section(gates, "core").get("max_count"),
     )
     _write_build_report(
         lineups,
@@ -816,8 +1357,12 @@ def assert_locked_players_eligible(optimizer: Any) -> None:
 
 
 def _optimize_or_raise(optimizer: Any, **kwargs: Any) -> list[Any]:
+    allow_short = bool(kwargs.pop("allow_short", False))
+    built: list[Any] = []
     try:
-        return list(optimizer.optimize(**kwargs))
+        for lineup in optimizer.optimize(**kwargs):
+            built.append(lineup)
+        return built
     except KeyError as exc:
         raise ValueError(
             f"Locked player is not in the eligible optimizer pool: {exc}. "
@@ -826,7 +1371,15 @@ def _optimize_or_raise(optimizer: Any, **kwargs: Any) -> list[Any]:
     except Exception as exc:
         name = type(exc).__name__
         message = str(exc)
-        if name in {"LineupOptimizerException", "GenerateLineupException"} or "Unable to build" in message:
+        stopped = name in {"LineupOptimizerException", "GenerateLineupException"} or "Unable to build" in message
+        if allow_short and built and stopped:
+            requested = kwargs.get("n")
+            print(
+                f"optimizer stopped after {len(built)} lineups; requested {requested}",
+                file=sys.stderr,
+            )
+            return built
+        if stopped:
             raise ValueError(f"pydfs could not build lineups: {message}") from exc
         raise
 

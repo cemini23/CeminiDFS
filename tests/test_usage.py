@@ -59,9 +59,87 @@ def test_rolling_shares_l3_vs_season():
     wr2 = shares.loc[shares["player_id"] == "wr2"].iloc[0]
     rb1 = shares.loc[shares["player_id"] == "rb1"].iloc[0]
 
-    assert wr1["l3_target_share"] == pytest.approx(6 / 9)
+    # Week 1 has no wr1 row, so that team game stays out of his share.
+    assert wr1["l3_target_share"] == pytest.approx(6 / 8)
+    assert wr1["season_target_share"] == pytest.approx(6 / 8)
     assert wr2["season_target_share"] == pytest.approx(3 / 9)
     assert rb1["l3_carry_share"] == pytest.approx(1.0)
+
+
+def test_return_game_ignores_missed_weeks():
+    """A missed week stays out of the share after the player returns."""
+
+    rows = []
+    # Weeks 2 and 3 are the missed weeks. Week 1 and week 4 are the played games.
+    for week, star_targets, mate_targets in (
+        (1, 10, 27),
+        (2, 0, 50),
+        (3, 0, 25),
+        (4, 8, 18),
+    ):
+        if star_targets:
+            rows.append(_usage_row("star", "Star", week, star_targets))
+        rows.append(_usage_row("mate", "Mate", week, mate_targets))
+    shares = rolling_shares(pd.DataFrame(rows), team="HOU", through_week=5)
+
+    star = shares.loc[shares["player_id"] == "star"].iloc[0]
+    mate = shares.loc[shares["player_id"] == "mate"].iloc[0]
+    played_team_targets = (10 + 27) + (8 + 18)
+
+    assert star["l3_target_share"] == pytest.approx((10 + 8) / played_team_targets)
+    assert star["season_target_share"] == pytest.approx((10 + 8) / played_team_targets)
+    # The teammate played every recent week, so his window stays weeks 2-4.
+    assert mate["l3_target_share"] == pytest.approx((50 + 25 + 18) / (50 + 25 + 26))
+
+
+def test_missed_latest_game_keeps_calendar_share():
+    """A player who sat the team's last game stays on the calendar share."""
+
+    rows = [
+        _usage_row("jj", "JJ", 1, 10),
+        _usage_row("jj", "JJ", 2, 6),
+        _usage_row("jj", "JJ", 3, 2),
+        _usage_row("mate", "Mate", 1, 14),
+        _usage_row("mate", "Mate", 2, 13),
+        _usage_row("mate", "Mate", 3, 23),
+        _usage_row("mate", "Mate", 4, 33),
+    ]
+    shares = rolling_shares(pd.DataFrame(rows), team="HOU", through_week=5)
+    jj = shares.loc[shares["player_id"] == "jj"].iloc[0]
+    recent_team_targets = (6 + 13) + (2 + 23) + 33
+
+    assert jj["l3_target_share"] == pytest.approx((6 + 2) / recent_team_targets)
+
+
+def test_player_absent_from_the_recent_window_keeps_calendar_share():
+    rows = [
+        _usage_row("gone", "Gone", 1, 10),
+        _usage_row("mate", "Mate", 1, 20),
+        _usage_row("mate", "Mate", 2, 30),
+        _usage_row("mate", "Mate", 3, 30),
+        _usage_row("mate", "Mate", 4, 30),
+    ]
+    shares = rolling_shares(pd.DataFrame(rows), team="HOU", through_week=5)
+
+    gone = shares.loc[shares["player_id"] == "gone"].iloc[0]
+    assert gone["l3_target_share"] == pytest.approx(0.0)
+    assert gone["season_target_share"] == pytest.approx(10 / (30 + 30 + 30 + 30))
+
+
+def _usage_row(player_id: str, name: str, week: int, targets: int) -> dict[str, object]:
+    return {
+        "season": 2026,
+        "week": week,
+        "team": "HOU",
+        "game_id": f"g{week}",
+        "player_id": player_id,
+        "player_name": name,
+        "position": "WR",
+        "targets": targets,
+        "air_yards": targets * 10,
+        "carries": 0,
+        "pass_attempts": 0,
+    }
 
 
 def test_build_week_usage_end_to_end():
@@ -80,7 +158,7 @@ def test_build_week_usage_end_to_end():
     wr1 = usage.loc[usage["player_id"] == "wr1"].iloc[0]
     rb1 = usage.loc[usage["player_id"] == "rb1"].iloc[0]
 
-    expected_wr1_share = (0.5 * (6 / 9)) + (0.3 * (6 / 9)) + (0.2 * 0.18)
+    expected_wr1_share = (0.5 * (6 / 8)) + (0.3 * (6 / 8)) + (0.2 * 0.18)
     assert wr1["target_share"] == pytest.approx(expected_wr1_share)
     assert wr1["projected_targets"] == pytest.approx(expected_wr1_share * 30)
     assert rb1["projected_carries"] > 0

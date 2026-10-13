@@ -27,12 +27,45 @@ Architecture and research: [Gambling wiki — DIY NFL DFS model (K125)](https://
 | `--ownership-fade-report` | `leverage_fade_matrix.csv` | Read, then may `--exclude` / `--max-exposure` |
 | `--flag-duplicate-cores` | `duplicate_core_report.csv` | Read a QB and same two RB slots on >2 lineups. Do not drop a lineup. |
 | `--dart-ceiling-report` | `dart_ceiling_rank.csv` | Read players with salary ≤5500. Blank ceiling means file had no ceiling column. |
+| `--flag-qb-starter` | `qb_starter_report.csv` | Read a rostered QB who is not a confirmed starter. |
+| `--flag-stack-concentration` | `stack_concentration_report.csv` | Read prior-3-week target share on each QB stack partner. |
+| `--flag-correlated-pairs` | `correlated_pair_report.csv` | Read a TE and DST pair on more than one lineup. |
+| `--defense-context-report` | `defense_context_report.csv` | Read opponent context beside the pass multiplier. It does not down-weight a DST. |
+| `--projection-bands` | `projection_bands.csv` | Read P85 and P15 beside the projection. The projection stays the same. |
+| weather path | `environment.csv` | Read `prelock_fade_flag`. Do not attribute a miss to weather without `pass_rate_delta`. |
+| weather roof | `roof_flag` beside `game_total` | Read the roof. It does not boost a projection. |
 
 The operator reads each report, then may `--exclude`, `--max-exposure`, or `late-swap`. The agent does not Enter.
 
-**Merge lineups:** `ceminidfs merge-lineups --base <book.csv> --extra <lock.csv> --out <merged.csv> --max-exposure 0.20 --count 15` refuses to write when a later lock lineup would break the player cap.
+**Merge lineups:** `ceminidfs merge-lineups --base <book.csv> --extra <lock.csv> --out <merged.csv> --max-exposure 0.20 --count 15 --core-cap 12` refuses to write when a later lock lineup would break the player cap or the 5-player core cap.
 
-After the solver, `generate_lineups` keeps the written CSV under the player cap (default 0.35) and the team cap.
+**Build-time gates (`--profile gpp`):** the reports name a risk; the gates refuse it.
+The solver does not return a book that breaks a gate.
+
+| Gate | Rule |
+|------|------|
+| `core` | Any 5-player core appears on at most 12 lineups (cap in `config/nfl_dfs_gpp.yaml`). |
+| `max_exposure` | Every player stays at or under 20% of the book. |
+| `exposure_hatch` | One player per position reaches 30% when his projection leads the next player at that position by 4.0. |
+| `low_ceiling` | A lineup holds at most 1 skill player under 8.0 projected points. |
+
+The base profile leaves the gates off. The plain `optimize` command keeps the
+0.35 player cap. See [docs/SUNDAY.md](docs/SUNDAY.md).
+
+**Before lock:** `ceminidfs late-swap --lineups <book.csv> --players <normalized.csv> --prelock --profile gpp`
+writes `late_swap_alert_report.csv` and exits 1 when a `Q` or `D` player is over
+the 8% exposure cap. Run it before 1:00 p.m. ET.
+
+**Grade in buckets:** `ceminidfs buckets --totals <lineup_totals.csv>` writes
+`cash_bucket_report.csv` with the score range, median, and cash rate for ranks
+1–20, 21–40, 41–100, and 101–150.
+
+**Before upload:** `ceminidfs review --lineups <book.csv> --players <normalized.csv> --jev`
+runs the Jev pre-lock gate. It asks one atomic question per Q/D and over-cap
+player, screens the status packet for injection, ranks a legal late-swap
+alternative, and writes `jev_gate_report.csv`. The gate marks. The operator
+decides. A missing key or a network error blocks the gate and exits non-zero.
+See [docs/REVIEW-REPORTS.md](docs/REVIEW-REPORTS.md).
 
 Week 2 scratch = `--research-csv config/2026-w02-sun-scratch.csv`.
 
@@ -121,7 +154,8 @@ fetch → project ─────────┤ optional: simulate (floor/ceil)
 | `ceminidfs normalize` | Canonical → pydfs site CSV |
 | `ceminidfs optimize` | pydfs lineup generation |
 | `ceminidfs run` | Orchestrated multi-stage run with `RunManifest` |
-| `ceminidfs late-swap` | Re-optimize after teams lock |
+| `ceminidfs late-swap` | Pre-lock Q/D gate (`--prelock`), or re-optimize after teams lock |
+| `ceminidfs buckets` | Cash-line bucket distribution from a totals CSV |
 | `ceminidfs review` | Human-gate review CSVs from existing lineups (no re-solve) |
 | `ceminidfs backtest` | Walk-forward MAE / RMSE / Spearman vs realized PBP points |
 | `ceminidfs backtest-prepare` | Batch-fetch nflverse caches for a season range (offseason setup) |
