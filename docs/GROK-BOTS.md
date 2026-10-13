@@ -63,6 +63,25 @@ copy those rules:
 None of these fired the week's cash count. Fix them in the repo scorer, not in
 the Bot.
 
+### Do not "fix" these — verified correct
+
+Three models reported these as high-severity scoring bugs. The audit checked
+each against the live ESPN API. All three are false.
+
+| Claim | Truth |
+|-------|-------|
+| D/ST sacks are always zero | The input is the counting stat `dst_sacks`. NYJ recorded 8 in Week 5. |
+| D/ST interceptions and opponent fumbles lost are not scored | Both are scored. ESPN team stats carry `interceptions` and `fumblesLost`. |
+| Return-TD keys are wrong, so every return TD is dropped | The keys are `kickReturnTouchdowns` and `puntReturnTouchdowns`. The D/ST is paid through `dst_td`. |
+
+**The trap.** A proposed repair reads a team-level `ts[ab]['defensive']['sacks']`.
+ESPN team stats have no `defensive` category and no `sacks` key, only
+`sacksYardsLost`. That change would set every D/ST sack to zero. It would
+introduce the bug it claims to repair.
+
+`tests/test_scoring_audit_guards.py` pins all of this. Read it before you
+change a defensive scoring rule.
+
 ## Never
 
 - Enter / Submit / late-swap from the Bot

@@ -25,6 +25,7 @@ class CountingStats(TypedDict, total=False):
     dst_td: float
     dst_safety: float
     dst_blocked_kick: float
+    dst_points_allowed: float
 
 
 StatsMapping = Mapping[str, Any]
@@ -39,7 +40,18 @@ COUNTING_STAT_KEYS = (
     "rec_yds",
     "rec_td",
     "fumbles_lost",
+    "dst_sacks",
+    "dst_int",
+    "dst_opp_fumbles_lost",
+    "dst_td",
+    "dst_safety",
+    "dst_blocked_kick",
 )
+
+# Points allowed is not a counting stat. A missing value means "unknown", and
+# a zero means "shutout", which pays 10. The key must be absent when the source
+# row has no value. A fabricated zero would pay 10 points to every row.
+OPTIONAL_STAT_KEYS = ("dst_points_allowed",)
 
 
 def _stat(stats: StatsMapping, key: str) -> float:
@@ -169,9 +181,31 @@ def dk_points(stats: StatsMapping) -> float:
 
 
 def stats_to_counting_stats(row: Mapping[str, Any]) -> dict[str, float]:
-    """Map a PlayerStatProjection-like row into scoring counting stats."""
+    """Map a PlayerStatProjection-like row into scoring counting stats.
 
-    return {key: _stat(row, key) for key in COUNTING_STAT_KEYS}
+    The defensive keys are included, so a D/ST row scores here and not zero.
+    ``dst_points_allowed`` is copied only when the row carries a real number.
+    An empty or NaN value leaves the key out, so no row is paid a shutout it
+    did not earn.
+    """
+
+    stats = {key: _stat(row, key) for key in COUNTING_STAT_KEYS}
+    for key in OPTIONAL_STAT_KEYS:
+        value = _optional_stat(row.get(key))
+        if value is not None:
+            stats[key] = value
+    return stats
+
+
+def _optional_stat(value: Any) -> float | None:
+    """Return a real number, or None for empty, unreadable, and NaN input."""
+
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return None if pd.isna(number) else float(number)
 
 
 def fantasy_points_from_stats(row: Mapping[str, Any]) -> tuple[float, float]:
