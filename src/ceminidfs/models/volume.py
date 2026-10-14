@@ -10,7 +10,11 @@ import pandas as pd
 from ceminidfs.data.stadiums import normalize_team_abbr
 
 
-LEAGUE_SEC_PER_PLAY = 36.2
+# Mean seconds between scrimmage plays inside the neutral script, measured on
+# the 2026 season cache. neutral_seconds_per_play returns exactly this basis,
+# and projected_plays centers on it, so a stale value biases every team's
+# volume. Re-derive with neutral_seconds_per_play when the basis changes.
+LEAGUE_SEC_PER_PLAY = 32.45
 LEAGUE_TOTAL = 44.8
 PLAYS_INTERCEPT = 62.0
 BASE_PASS_RATE = 0.565
@@ -287,6 +291,12 @@ def _neutral_script(pbp: pd.DataFrame) -> pd.DataFrame:
     if "qtr" in neutral.columns:
         qtr = pd.to_numeric(neutral["qtr"], errors="coerce")
         neutral = neutral.loc[qtr <= 3]
+    if "play_type" in neutral.columns:
+        neutral = neutral.loc[neutral["play_type"].isin(("pass", "run"))]
+    elif {"pass_attempt", "rush_attempt"}.issubset(neutral.columns):
+        passes = pd.to_numeric(neutral["pass_attempt"], errors="coerce").fillna(0)
+        rushes = pd.to_numeric(neutral["rush_attempt"], errors="coerce").fillna(0)
+        neutral = neutral.loc[(passes == 1) | (rushes == 1)]
     return neutral
 
 

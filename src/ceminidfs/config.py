@@ -22,7 +22,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "seasons": [2024, 2025],
     "rolling_windows": [3, 5, 8],
     "volume": {
-        "league_sec_per_play": 36.2,
+        "league_sec_per_play": 32.45,
         "league_total": 44.8,
         "plays_intercept": 62.0,
         "base_pass_rate": 0.565,

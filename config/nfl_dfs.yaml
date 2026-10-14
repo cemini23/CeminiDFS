@@ -24,7 +24,7 @@ defense:
 dst:
   league_sacks_per_game: 2.4
 volume:
-  league_sec_per_play: 36.2
+  league_sec_per_play: 32.45
   league_total: 44.8
   plays_intercept: 62.0
   base_pass_rate: 0.565

@@ -7,6 +7,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.models.volume import (
+    LEAGUE_SEC_PER_PLAY,
+    LEAGUE_TOTAL,
+    PLAYS_INTERCEPT,
+    _neutral_script,
     allocate_play_volume,
     build_week_volume,
     neutral_seconds_per_play,
@@ -18,7 +22,8 @@ from ceminidfs.models.volume import (
 def test_projected_plays_formula():
     plays = projected_plays(team_sec=34.2, opp_sec=38.2, total=47.8)
 
-    assert plays == pytest.approx(62.54)
+    # 62 + 0.5*(32.45-34.2) + 0.35*(32.45-38.2) + 0.08*(47.8-44.8)
+    assert plays == pytest.approx(59.3525)
 
 
 def test_projected_pass_rate_favorite_runs_more():
@@ -205,3 +210,76 @@ def test_projected_pass_rate_treats_nan_wind_as_zero_adj():
     assert projected_pass_rate(team_spread=0, wind_mph=float("nan")) == pytest.approx(
         projected_pass_rate(team_spread=0, wind_mph=None)
     )
+
+
+def test_neutral_script_drops_non_scrimmage_plays():
+    """Only pass and run rows survive the neutral-script filter."""
+
+    pbp = pd.DataFrame(
+        [
+            {"posteam": "KC", "wp": 0.5, "qtr": 1, "play_type": "kickoff"},
+            {"posteam": "KC", "wp": 0.5, "qtr": 1, "play_type": "punt"},
+            {"posteam": "KC", "wp": 0.5, "qtr": 1, "play_type": "extra_point"},
+            {"posteam": "KC", "wp": 0.5, "qtr": 1, "play_type": "pass"},
+            {"posteam": "KC", "wp": 0.5, "qtr": 1, "play_type": "run"},
+        ]
+    )
+
+    neutral = _neutral_script(pbp)
+
+    assert list(neutral["play_type"]) == ["pass", "run"]
+
+
+def test_seconds_per_play_ignores_kickoffs():
+    """A kickoff between two snaps must not halve the measured pace."""
+
+    pbp = pd.DataFrame(
+        [
+            {
+                "game_id": "g1",
+                "posteam": "KC",
+                "wp": 0.5,
+                "qtr": 1,
+                "play_type": "pass",
+                "game_seconds_remaining": 3600,
+            },
+            {
+                "game_id": "g1",
+                "posteam": "KC",
+                "wp": 0.5,
+                "qtr": 1,
+                "play_type": "kickoff",
+                "game_seconds_remaining": 3595,
+            },
+            {
+                "game_id": "g1",
+                "posteam": "KC",
+                "wp": 0.5,
+                "qtr": 1,
+                "play_type": "run",
+                "game_seconds_remaining": 3570,
+            },
+        ]
+    )
+
+    assert neutral_seconds_per_play(pbp, "KC") == pytest.approx(30.0)
+
+
+def test_projected_plays_is_centered_at_league_pace():
+    """League-average pace and total must return the calibrated intercept."""
+
+    assert (
+        projected_plays(LEAGUE_SEC_PER_PLAY, LEAGUE_SEC_PER_PLAY, LEAGUE_TOTAL)
+        == PLAYS_INTERCEPT
+    )
+
+
+def test_league_sec_per_play_matches_neutral_script_basis():
+    """Pin the constant to the basis neutral_seconds_per_play actually returns.
+
+    Measured per-team mean on the 2026 season cache is 32.454 seconds. The raw
+    scrimmage mean without the win-probability and quarter filters is 30.7, and
+    using that instead under-projects plays by about 1.5 per team.
+    """
+
+    assert LEAGUE_SEC_PER_PLAY == 32.45
