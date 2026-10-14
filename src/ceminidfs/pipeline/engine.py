@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from ceminidfs.config import PRIOR_SEASON_THROUGH_WEEK
 from ceminidfs.data.fetch import week_cache_dir
 from ceminidfs.data.rosters import load_season_rosters
 from ceminidfs.data.stadiums import normalize_team_abbr
@@ -320,7 +321,7 @@ def _historical_pbp(pbp: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
     if "season" in frame.columns:
         season_num = pd.to_numeric(frame["season"], errors="coerce").fillna(season)
         keep_season = season_num == season
-        if week <= 1:
+        if week <= PRIOR_SEASON_THROUGH_WEEK:
             keep_season = keep_season | (season_num == season - 1)
         frame = frame.loc[keep_season].copy()
         season_num = pd.to_numeric(frame["season"], errors="coerce").fillna(season)
@@ -414,7 +415,7 @@ def _resolve_pbp_player_id(
 
 def _gsis_lookups_from_weekly_rosters(season: int, week: int) -> tuple[dict[str, str], dict[str, str]]:
     frames: list[pd.DataFrame] = []
-    seasons = (season, season - 1) if week <= 1 and season > 0 else (season,)
+    seasons = (season, season - 1) if week <= PRIOR_SEASON_THROUGH_WEEK and season > 0 else (season,)
     for roster_season in seasons:
         try:
             frame = load_season_rosters(roster_season)

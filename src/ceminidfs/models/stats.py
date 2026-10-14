@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from ceminidfs.config import PRIOR_SEASON_THROUGH_WEEK
 from ceminidfs.data.stadiums import get_stadium, normalize_team_abbr, roof_type_is_weather_exposed
 from ceminidfs.models.defense import (
     DEFAULT_DEFENSE_ALPHA,
@@ -292,7 +293,7 @@ def build_week_stats(
     if not historical_pbp.empty and "season" in historical_pbp.columns:
         season_num = pd.to_numeric(historical_pbp["season"], errors="coerce").fillna(season)
         keep_season = season_num == season
-        if week <= 1:
+        if week <= PRIOR_SEASON_THROUGH_WEEK:
             keep_season = keep_season | (season_num == season - 1)
         historical_pbp = historical_pbp.loc[keep_season].copy()
 

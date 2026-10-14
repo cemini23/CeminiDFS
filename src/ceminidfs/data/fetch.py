@@ -9,7 +9,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 import pandas as pd
 
-from ceminidfs.config import PROJECT_ROOT, load_config
+from ceminidfs.config import PRIOR_SEASON_THROUGH_WEEK, PROJECT_ROOT, load_config
 from ceminidfs.manifest import RunManifest, config_sha256, git_commit
 
 
@@ -170,8 +170,8 @@ def fetch_week_datasets(
     for kind, fetcher in fetchers.items():
         frame = _call_season_fetcher(fetcher, season, force=force)
         scope = "season"
-        # Week 1 has no same-season prior weeks; keep last season for DIY usage.
-        if kind == "pbp" and week <= 1 and season > 0:
+        # Keep last season while the same-season sample is still thin.
+        if kind == "pbp" and week <= PRIOR_SEASON_THROUGH_WEEK and season > 0:
             prior = fetcher(season - 1)
             if not prior.empty:
                 frame = pd.concat([prior, frame], ignore_index=True)

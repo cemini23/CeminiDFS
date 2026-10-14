@@ -7,6 +7,7 @@ from typing import Mapping
 
 import pandas as pd
 
+from ceminidfs.config import PRIOR_SEASON_THROUGH_WEEK
 from ceminidfs.data.fetch import _cache_dir
 
 INSTALL_HINT = "Install nflreadpy with `pip install nflreadpy` to fetch roster data."
@@ -51,7 +52,7 @@ def position_lookup_for_week(season: int, week: int) -> dict[str, str]:
     except (ImportError, FileNotFoundError, OSError, AttributeError, ValueError):
         rosters = pd.DataFrame()
     roster_season = season
-    if rosters.empty and week <= 1 and season > 0:
+    if rosters.empty and week <= PRIOR_SEASON_THROUGH_WEEK and season > 0:
         try:
             rosters = load_season_rosters(season - 1)
             roster_season = season - 1

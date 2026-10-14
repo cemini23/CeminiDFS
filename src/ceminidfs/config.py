@@ -11,6 +11,9 @@ PROFILE_CONFIG_PATHS = {
     "gpp": PROJECT_ROOT / "config" / "nfl_dfs_gpp.yaml",
 }
 
+# Prior-season data stays in the window through this week of the current season.
+PRIOR_SEASON_THROUGH_WEEK = 4
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "paths": {
         "artifacts_dir": "artifacts",
