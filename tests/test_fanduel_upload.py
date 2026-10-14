@@ -2,6 +2,7 @@ import csv
 import inspect
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -264,6 +265,26 @@ def test_report_prints_all_lineups_when_count_is_20_or_fewer():
     text = format_lineup_report(lineups)
     assert "All 12 lineups" in text
     assert "12. " in text
+
+
+def test_report_prints_team_next_to_player_name():
+    qb = _player("Healthy QB", "KC", ["QB"])
+    wr = _player("Healthy WR", "KC", ["WR"])
+
+    text = format_lineup_report([SimpleNamespace(players=[qb, wr])])
+
+    assert "Healthy QB (KC)" in text
+    assert "Healthy WR (KC)" in text
+
+
+def test_report_prints_kickoff_when_game_info_carries_a_start_time():
+    kickoff = datetime(2026, 10, 4, 13, 0, tzinfo=timezone.utc)
+    player = _player("Healthy QB", "KC", ["QB"])
+    player.game_info = SimpleNamespace(home_team="KC", away_team="BUF", starts_at=kickoff)
+
+    text = format_lineup_report([SimpleNamespace(players=[player])])
+
+    assert "Healthy QB (KC 13:00)" in text
 
 
 def test_cell_format_name_id_requires_player_id():

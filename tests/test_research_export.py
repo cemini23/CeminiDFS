@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from ceminidfs.cli import _review_report_overrides, build_parser, main
+from ceminidfs.export import research_export
 from ceminidfs.export.optimize import LINEUP_HEADERS
 from ceminidfs.export.research_export import (
     ENV_COLUMNS,
@@ -49,6 +50,36 @@ def _salary(path: Path, games: list[tuple[str, str]]) -> Path:
         index = 1
         for away, home in games:
             game = f"{away}@{home} {KICKOFF}"
+            for team, opp in ((away, home), (home, away)):
+                writer.writerow(
+                    {
+                        "Id": str(index),
+                        "Nickname": f"Player {index}",
+                        "Position": "WR",
+                        "Team": team,
+                        "Opponent": opp,
+                        "Salary": "5000",
+                        "FPPG": "10",
+                        "Game": game,
+                    }
+                )
+                index += 1
+    return path
+
+
+def _salary_no_time(path: Path, games: list[tuple[str, str]]) -> Path:
+    """A FanDuel salary file whose Game cell has no date and no clock."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["Id", "Nickname", "Position", "Team", "Opponent", "Salary", "FPPG", "Game"],
+        )
+        writer.writeheader()
+        index = 1
+        for away, home in games:
+            game = f"{away}@{home}"
             for team, opp in ((away, home), (home, away)):
                 writer.writerow(
                     {
@@ -183,6 +214,86 @@ def test_one_game_slate_is_two_rows_and_dome_does_not_call_nws(tmp_path: Path):
     assert len(rows) == 2
     assert calls == []
     assert {row["team"] for row in rows} == {"GB", "DET"}
+
+
+def _schedule_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "season": 2026,
+                "week": 4,
+                "home_team": "DET",
+                "away_team": "NO",
+                "gameday": "2026-10-04",
+                "gametime": "20:20",
+            },
+            {
+                "season": 2026,
+                "week": 4,
+                "home_team": "KC",
+                "away_team": "BUF",
+                "gameday": "2026-10-04",
+                "gametime": "13:00",
+            },
+        ]
+    )
+
+
+def test_environment_resolves_kickoff_from_schedule_for_no_time_game(tmp_path: Path, monkeypatch):
+    salary = _salary_no_time(tmp_path / "salary.csv", [("NO", "DET")])
+    captured: list[tuple[str, object]] = []
+
+    def fake_weather(home, exposed, kickoff, *, opener, retrieved_at):
+        captured.append((home, kickoff))
+        return {
+            "wind_mph": "",
+            "precip_pop": "",
+            "wind_source_url": "",
+            "wind_retrieved_at": "",
+            "precip_source_url": "",
+            "precip_retrieved_at": "",
+        }
+
+    monkeypatch.setattr(research_export, "_weather_for_home", fake_weather)
+    write_environment_csv(
+        salary,
+        tmp_path / "environment.csv",
+        season=2026,
+        week=4,
+        vegas_frame=None,
+        schedules_frame=_schedule_frame(),
+        retrieved_at="2026-10-04T12:00:00-04:00",
+    )
+
+    assert captured
+    home, kickoff = captured[0]
+    assert home == "DET"
+    assert kickoff is not None
+    assert kickoff.date().isoformat() == "2026-10-04"
+    # The weather parser keeps the hour; hourly periods do not need the minute.
+    assert (kickoff.hour, kickoff.minute) == (20, 0)
+
+
+def test_environment_writes_weather_for_outdoor_game_with_schedule_kickoff(tmp_path: Path):
+    salary = _salary_no_time(tmp_path / "salary.csv", [("BUF", "KC")])
+    calls: list[str] = []
+    out = write_environment_csv(
+        salary,
+        tmp_path / "environment.csv",
+        season=2026,
+        week=4,
+        vegas_frame=None,
+        schedules_frame=_schedule_frame(),
+        opener=_opener(calls),
+        retrieved_at="2026-10-04T12:00:00-04:00",
+    )
+
+    by_team = {row["team"]: row for row in _rows(out)}
+    assert by_team["KC"]["wind_mph"] == "12"
+    assert by_team["KC"]["precip_pop"] == "40"
+    assert by_team["KC"]["wind_source_url"] == HOURLY_URL
+    assert calls
+
 
 
 def test_status_maps_tokens_and_does_not_invent_one(tmp_path: Path):

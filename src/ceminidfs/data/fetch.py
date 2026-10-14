@@ -17,6 +17,7 @@ INSTALL_HINT = "Install nflreadpy with `pip install nflreadpy` to fetch NFL data
 
 WEEK_COLUMNS = ("week", "week_num")
 CACHE_TTL_SECONDS = 12 * 60 * 60
+CACHE_TTL_SECONDS_BY_KIND = {"injuries": 15 * 60}
 
 
 def fetch_schedules(season: int, *, force: bool = False) -> pd.DataFrame:
@@ -31,6 +32,16 @@ def fetch_pbp(season: int, *, force: bool = False) -> pd.DataFrame:
 
 def fetch_injuries(season: int, *, force: bool = False) -> pd.DataFrame:
     return _fetch_cached("injuries", season, ("load_injuries", "import_injuries"), force=force)
+
+
+def fetch_rosters(season: int, *, force: bool = False) -> pd.DataFrame:
+    """Warm the season roster cache. Reuse the rosters loader, not a second one."""
+
+    from ceminidfs.data.rosters import load_season_rosters
+
+    if force:
+        (_cache_dir() / f"rosters_{season}.parquet").unlink(missing_ok=True)
+    return load_season_rosters(season)
 
 
 def fetch_force_enabled(config: Mapping[str, Any] | None) -> bool:
@@ -52,7 +63,7 @@ def _fetch_cached(
     force: bool = False,
 ) -> pd.DataFrame:
     cache_path = _cache_dir() / f"{kind}_{season}.parquet"
-    if cache_path.exists() and not force and _cache_is_fresh(cache_path):
+    if cache_path.exists() and not force and _cache_is_fresh(cache_path, kind):
         mtime = datetime.fromtimestamp(cache_path.stat().st_mtime, tz=timezone.utc)
         print(f"WARNING: reusing cache {cache_path} (mtime {mtime.isoformat()})", file=sys.stderr)
         return pd.read_parquet(cache_path)
@@ -71,9 +82,10 @@ def _fetch_cached(
     return frame
 
 
-def _cache_is_fresh(cache_path: Path) -> bool:
+def _cache_is_fresh(cache_path: Path, kind: str | None = None) -> bool:
+    ttl = CACHE_TTL_SECONDS_BY_KIND.get(kind, CACHE_TTL_SECONDS) if kind else CACHE_TTL_SECONDS
     age = time.time() - cache_path.stat().st_mtime
-    return age < CACHE_TTL_SECONDS
+    return age < ttl
 
 
 def _call_season_fetcher(fetcher: Callable[..., pd.DataFrame], season: int, *, force: bool) -> pd.DataFrame:
@@ -154,7 +166,7 @@ def fetch_week_datasets(
     week: int,
     config: Mapping[str, Any] | None = None,
 ) -> dict:
-    """Fetch schedules/pbp/injuries, write week-scoped parquet copies."""
+    """Fetch schedules/pbp/injuries/rosters, write week-scoped parquet copies."""
     cfg = dict(config or {})
     out_dir = week_cache_dir(season, week)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +175,7 @@ def fetch_week_datasets(
         "schedules": fetch_schedules,
         "pbp": fetch_pbp,
         "injuries": fetch_injuries,
+        "rosters": fetch_rosters,
     }
 
     force = fetch_force_enabled(cfg)
@@ -176,7 +189,8 @@ def fetch_week_datasets(
             if not prior.empty:
                 frame = pd.concat([prior, frame], ignore_index=True)
         # PBP must retain prior weeks for DIY walk-forward projection cutoff.
-        if kind != "pbp" and week > 0 and _week_column(frame) is not None:
+        # Rosters are season-scoped, so they are never filtered by week.
+        if kind not in {"pbp", "rosters"} and week > 0 and _week_column(frame) is not None:
             frame = filter_by_week(frame, week)
             scope = "week"
         path = out_dir / f"{kind}.parquet"

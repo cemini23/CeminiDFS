@@ -117,3 +117,33 @@ def test_validate_lineups_csv_rejects_empty_slots(tmp_path: Path):
 
     with pytest.raises(ValueError, match="empty required slot"):
         validate_lineups_csv(path, expected_count=1)
+
+
+def test_validate_lineups_csv_rejects_all_zero_projections(tmp_path: Path):
+    lineups = tmp_path / "lineups.csv"
+    players = tmp_path / "players.csv"
+    _write_lineups(lineups, [_valid_row("a")])
+    with players.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Nickname", "FPPG"])
+        for slot in _valid_row("a"):
+            writer.writerow([slot, "0"])
+
+    with pytest.raises(ValueError, match="projected points"):
+        validate_lineups_csv(lineups, expected_count=1, players_csv=players)
+
+
+def test_validate_lineups_csv_accepts_positive_projections(tmp_path: Path):
+    lineups = tmp_path / "lineups.csv"
+    players = tmp_path / "players.csv"
+    _write_lineups(lineups, [_valid_row("a")])
+    with players.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Nickname", "FPPG"])
+        for slot in _valid_row("a"):
+            writer.writerow([slot, "10"])
+
+    result = validate_lineups_csv(lineups, expected_count=1, players_csv=players)
+
+    assert result["valid"] is True
+

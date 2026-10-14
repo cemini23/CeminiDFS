@@ -34,6 +34,33 @@ def player_name(player: Any) -> str:
     return str(getattr(player, "full_name", "") or "").strip()
 
 
+def player_kickoff(player: Any) -> str:
+    """Return the player's start time when the site importer already set one."""
+
+    game = getattr(player, "game_info", None)
+    if game is None:
+        return ""
+    starts_at = getattr(game, "starts_at", None)
+    if starts_at is None:
+        return ""
+    try:
+        return starts_at.strftime("%H:%M")
+    except (AttributeError, ValueError):
+        return ""
+
+
+def player_label(player: Any) -> str:
+    """Render one player as ``Name (TEAM kickoff)``. Omit a missing part."""
+
+    name = player_name(player)
+    if not name:
+        return ""
+    parts = [part for part in (player_team(player), player_kickoff(player)) if part]
+    if not parts:
+        return name
+    return f"{name} ({' '.join(parts)})"
+
+
 def opponent_team(player: Any) -> str:
     game = getattr(player, "game_info", None)
     team = player_team(player)
@@ -225,7 +252,9 @@ def format_lineup_report(
     shown_lineups = pool[:shown]
     for index, lineup in enumerate(shown_lineups, start=1):
         badges = lineup_stack_badges(lineup)
-        names = ", ".join(player_name(player) for player in lineup_players(lineup) if player_name(player))
+        names = ", ".join(
+            player_label(player) for player in lineup_players(lineup) if player_name(player)
+        )
         salary = getattr(lineup, "salary_costs", None)
         proj = getattr(lineup, "fantasy_points_projection", None)
         extra = []

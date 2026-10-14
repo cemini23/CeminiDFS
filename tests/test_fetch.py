@@ -134,10 +134,12 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
     schedules = pd.DataFrame({"week": [1, 2], "game_id": ["g1", "g2"]})
     pbp = pd.DataFrame({"week": [1, 1, 2], "play_id": [1, 2, 3]})
     injuries = pd.DataFrame({"week": [1, 2], "player": ["A", "B"]})
+    rosters = pd.DataFrame({"week": [1, 2], "player": ["A", "B"]})
 
     monkeypatch.setattr(fetch_module, "fetch_schedules", lambda season: schedules)
     monkeypatch.setattr(fetch_module, "fetch_pbp", lambda season: pbp)
     monkeypatch.setattr(fetch_module, "fetch_injuries", lambda season: injuries)
+    monkeypatch.setattr(fetch_module, "fetch_rosters", lambda season: rosters)
 
     datasets = _call_fetch_week_datasets(2024, 1)
 
@@ -147,6 +149,7 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
         "weather": week_dir / "weather.parquet",
         "pbp": week_dir / "pbp.parquet",
         "injuries": week_dir / "injuries.parquet",
+        "rosters": week_dir / "rosters.parquet",
     }
 
     for name, path in expected_files.items():
@@ -159,16 +162,50 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
             assert set(saved["week"]) == {1, 2}
             assert datasets["pbp"]["scope"] == "season"
             continue
+        if name == "rosters":
+            assert set(saved["week"]) == {1, 2}
+            assert datasets["rosters"]["scope"] == "season"
+            continue
         assert set(saved["week"]) == {1}
         source_name = "schedules" if name == "vegas" else name
         assert len(saved) == len(
             fetch_module.filter_by_week(
-                {"schedules": schedules, "pbp": pbp, "injuries": injuries}[source_name],
+                {"schedules": schedules, "pbp": pbp, "injuries": injuries, "rosters": rosters}[
+                    source_name
+                ],
                 1,
             )
         )
 
-    assert set(datasets) == {"schedules", "vegas", "weather", "pbp", "injuries"}
+    assert set(datasets) == {"schedules", "vegas", "weather", "pbp", "injuries", "rosters"}
+
+
+def test_fetch_week_datasets_warms_rosters(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "artifacts" / "cache"
+    week_dir = cache_root / "2024" / "week_1"
+
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "week_cache_dir", lambda season, week: week_dir)
+
+    frames = {
+        "schedules": pd.DataFrame({"week": [1], "game_id": ["g1"]}),
+        "pbp": pd.DataFrame({"week": [1], "play_id": [1]}),
+        "injuries": pd.DataFrame({"week": [1], "player": ["A"]}),
+        "rosters": pd.DataFrame({"week": [1, 2], "player": ["A", "B"]}),
+    }
+    for name, frame in frames.items():
+        monkeypatch.setattr(
+            fetch_module,
+            f"fetch_{name}",
+            lambda season, frame=frame, **kwargs: frame,
+        )
+
+    datasets = _call_fetch_week_datasets(2024, 1)
+
+    assert "rosters" in datasets
+    assert datasets["rosters"]["scope"] == "season"
+    saved = pd.read_parquet(week_dir / "rosters.parquet")
+    assert set(saved["week"]) == {1, 2}
 
 
 def test_fetch_cached_skips_parquet_older_than_ttl(tmp_path: Path, monkeypatch):
@@ -214,3 +251,19 @@ def test_fetch_force_enabled_reads_nested_config():
     assert fetch_module.fetch_force_enabled({"fetch": {"force": True}}) is True
     assert fetch_module.fetch_force_enabled({"force": True}) is True
     assert fetch_module.fetch_force_enabled({}) is False
+
+
+def test_injuries_cache_ttl_is_fifteen_minutes_and_default_is_twelve_hours(tmp_path: Path):
+    import os
+
+    assert fetch_module.CACHE_TTL_SECONDS == 12 * 60 * 60
+    assert fetch_module.CACHE_TTL_SECONDS_BY_KIND["injuries"] == 15 * 60
+
+    cache_path = tmp_path / "injuries_2026.parquet"
+    cache_path.write_bytes(b"")
+    age = time.time() - 20 * 60
+    os.utime(cache_path, (age, age))
+
+    assert fetch_module._cache_is_fresh(cache_path, "injuries") is False
+    assert fetch_module._cache_is_fresh(cache_path, "schedules") is True
+    assert fetch_module._cache_is_fresh(cache_path) is True

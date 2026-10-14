@@ -238,6 +238,13 @@ def _clean_money(value: str) -> str:
     return value.replace("$", "").replace(",", "").strip()
 
 
+def _projection_is_positive(value: str) -> bool:
+    try:
+        return float(_clean_money(value)) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _game(row: dict[str, str]) -> str:
     game = pick(row, GAME_KEYS)
     if game:
@@ -360,6 +367,7 @@ def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fandu
         raise FileNotFoundError(f"CSV not found: {inp}")
 
     rows_out: list[dict[str, str]] = []
+    positive_projection = False
     auto_id = 100000
     with inp.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -379,6 +387,9 @@ def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fandu
                 continue
             if is_unavailable_status(pick(row, INJURY_KEYS)):
                 continue
+
+            if _projection_is_positive(projection):
+                positive_projection = True
 
             if site_key == "fanduel":
                 first, last = split_name(name)
@@ -427,6 +438,11 @@ def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fandu
 
     if not rows_out:
         raise ValueError("no rows mapped; check column headers")
+    if not positive_projection:
+        raise ValueError(
+            f"{inp}: every projection is blank or zero; the input is probably a "
+            "canonical file that was never projected"
+        )
 
     fieldnames = list(SITE_FIELDS[site_key])
     for field in PASS_THROUGH_FIELDS:

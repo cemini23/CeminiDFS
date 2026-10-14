@@ -58,11 +58,14 @@ def validate_lineups_csv(
         )
 
     salary_lookup = _salary_lookup(players_csv, site_key) if players_csv else {}
+    projection_lookup = _projection_lookup(players_csv) if players_csv else {}
     salary_cap = SALARY_CAPS.get(site_key)
 
     empty_slots = 0
     duplicate_players = 0
     salary_violations = 0
+    matched_projection_players = 0
+    total_projected_points = 0.0
 
     for row_idx, row in enumerate(rows, start=2):
         if len(row) != len(expected_header):
@@ -74,6 +77,14 @@ def validate_lineups_csv(
         names = [cell.strip() for cell in row if cell.strip()]
         if len(names) != len(set(_normalize_name(name) for name in names)):
             duplicate_players += 1
+
+        if projection_lookup:
+            for name in names:
+                points = projection_lookup.get(_normalize_name(name))
+                if points is None:
+                    continue
+                matched_projection_players += 1
+                total_projected_points += points
 
         if salary_lookup and salary_cap is not None:
             if site_key in SHOWDOWN_SITES:
@@ -92,6 +103,10 @@ def validate_lineups_csv(
         raise ValueError(f"Lineups CSV contains {duplicate_players} lineup(s) with duplicate players")
     if salary_violations:
         raise ValueError(f"Lineups CSV contains {salary_violations} lineup(s) over the salary cap")
+    if projection_lookup and matched_projection_players and total_projected_points <= 0:
+        raise ValueError(
+            "Lineups CSV carries no projected points; every projection is blank or zero"
+        )
 
     return {
         "lineup_count": lineup_count,
@@ -148,12 +163,52 @@ def _salary_lookup(players_csv: str | Path, site_key: str) -> dict[str, Any]:
     return lookup
 
 
+def _projection_lookup(players_csv: str | Path) -> dict[str, float]:
+    """Map normalized player names to projected points from a players CSV."""
+
+    path = Path(players_csv)
+    if not path.is_file():
+        return {}
+    lookup: dict[str, float] = {}
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            projection = _parse_projection(row)
+            if projection is None:
+                continue
+            names: list[str] = []
+            for key in ("Nickname", "Name", "name", "player_name"):
+                value = str(row.get(key, "")).strip()
+                if value:
+                    names.append(value)
+            first = str(row.get("First Name", "")).strip()
+            last = str(row.get("Last Name", "")).strip()
+            if first and last:
+                names.append(f"{first} {last}")
+            for name in names:
+                lookup[_normalize_name(name)] = projection
+    return lookup
+
+
+def _parse_projection(row: dict[str, Any]) -> float | None:
+    for key in ("FPPG", "AvgPointsPerGame", "fd_projection", "dk_projection", "Projection"):
+        value = row.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).replace("$", "").replace(",", "").strip()
+        try:
+            return float(text)
+        except ValueError:
+            continue
+    return None
+
+
 def _showdown_slot_cost(
     lookup: dict[str, Any],
     slot: str,
     name: str,
 ) -> int:
     """Cost of one showdown lineup cell: captain slots pay the 1.5x row salary."""
+
     entry = lookup.get(_normalize_name(name)) or {}
     flex = entry.get("flex")
     cpt = entry.get("cpt")

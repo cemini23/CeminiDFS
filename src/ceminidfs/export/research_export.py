@@ -6,6 +6,7 @@ import csv
 import json
 import math
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -76,6 +77,7 @@ def write_environment_csv(
     week: int,
     slate_id: str | None = None,
     vegas_frame: pd.DataFrame | None | object = _USE_CACHE,
+    schedules_frame: pd.DataFrame | None | object = _USE_CACHE,
     opener: UrlOpener | None = None,
     retrieved_at: str | None = None,
 ) -> Path:
@@ -86,6 +88,7 @@ def write_environment_csv(
     vegas = _vegas_by_team(_resolve_vegas_frame(vegas_frame, season, week))
     stamp = retrieved_at or datetime.now(_EASTERN).isoformat(timespec="seconds")
     weather_by_home: dict[str, dict[str, str]] = {}
+    schedule_kickoffs: dict[str, datetime] | None = None
     rows: list[dict[str, str]] = []
     for team in sorted(teams, key=lambda item: (teams[item]["game_id"], item)):
         info = teams[team]
@@ -94,10 +97,24 @@ def write_environment_csv(
         stadium_team = home or team
         roof, exposed = _roof_for_team(stadium_team)
         if stadium_team not in weather_by_home:
+            kickoff = info["kickoff"]
+            if kickoff is None:
+                if schedule_kickoffs is None:
+                    schedule_kickoffs = schedule_kickoffs_by_home(
+                        _resolve_schedules_frame(schedules_frame, season),
+                        week,
+                    )
+                kickoff = schedule_kickoffs.get(stadium_team)
+                if kickoff is None:
+                    print(
+                        f"WARNING: no kickoff for {game_id or stadium_team}; "
+                        "leaving weather empty",
+                        file=sys.stderr,
+                    )
             weather_by_home[stadium_team] = _weather_for_home(
                 stadium_team,
                 exposed,
-                info["kickoff"],
+                kickoff,
                 opener=opener,
                 retrieved_at=stamp,
             )
@@ -568,6 +585,54 @@ def _read_vegas_cache(season: int, week: int) -> pd.DataFrame | None:
         if path.is_file():
             return pd.read_parquet(path)
     return None
+
+
+def _resolve_schedules_frame(
+    schedules_frame: pd.DataFrame | None | object,
+    season: int,
+) -> pd.DataFrame | None:
+    """Return the schedule frame. The default reads the cache-first fetch call."""
+
+    if schedules_frame is _USE_CACHE:
+        from ceminidfs.data.fetch import fetch_schedules
+
+        return fetch_schedules(season)
+    if schedules_frame is None:
+        return None
+    return schedules_frame  # type: ignore[return-value]
+
+
+def schedule_kickoffs_by_home(
+    schedules: pd.DataFrame | None,
+    week: int,
+) -> dict[str, datetime]:
+    """Map a home team code to its schedule kickoff. Week 0 matches any week."""
+
+    if schedules is None or schedules.empty:
+        return {}
+    from ceminidfs.data.weather import schedule_game_kickoff
+
+    found: dict[str, datetime] = {}
+    for record in schedules.to_dict(orient="records"):
+        home = normalize_team_abbr(str(record.get("home_team") or record.get("home") or ""))
+        if not home:
+            continue
+        if week:
+            week_value = record.get("week")
+            if week_value is not None and not _is_nan(week_value):
+                try:
+                    if int(week_value) != week:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+        kickoff = schedule_game_kickoff(record)
+        if kickoff is not None and home not in found:
+            found[home] = kickoff
+    return found
+
+
+def _is_nan(value: Any) -> bool:
+    return isinstance(value, float) and math.isnan(value)
 
 
 def _vegas_by_team(frame: pd.DataFrame | None) -> dict[str, tuple[str, str]]:

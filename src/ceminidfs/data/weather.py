@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -295,6 +296,20 @@ def _parse_game_time(value: Any) -> int:
         return int(hour_part)
     except ValueError:
         return 13
+
+
+def schedule_game_kickoff(row: Mapping[str, Any]) -> datetime | None:
+    """Combine a schedule gameday and gametime into one Eastern kickoff."""
+
+    game_date = _parse_game_date(_first_value(row, GAME_DATE_COLUMNS))
+    if game_date is None:
+        return None
+    try:
+        day = date.fromisoformat(game_date)
+    except ValueError:
+        return None
+    hour = _parse_game_time(_first_value(row, GAME_TIME_COLUMNS))
+    return datetime(day.year, day.month, day.day, hour, tzinfo=ZoneInfo(NFL_SCHEDULE_TIMEZONE))
 
 
 def _first_value(row: Mapping[str, Any], columns: tuple[str, ...]) -> Any:

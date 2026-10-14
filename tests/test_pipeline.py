@@ -104,3 +104,37 @@ def test_projection_base_writes_season_week_partitions(tmp_path: Path):
 
 def test_projection_partitions_absent_returns_empty_frame(tmp_path: Path):
     assert load_projection_partitions(tmp_path).empty
+
+
+def test_normalize_rejects_canonical_rows_with_no_projection(tmp_path: Path):
+    canonical = tmp_path / "canonical.csv"
+    fieldnames = list(CANONICAL_FIELDS) + ["name", "player_name"]
+    with canonical.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "slate_id": "2024_w1",
+                "player_key": "1",
+                "fd_id": "1",
+                "fd_position": "QB",
+                "fd_salary": "8500",
+                "fd_projection": "",
+                "team": "KC",
+                "opp": "BUF",
+                "game": "KC@BUF",
+                "name": "Patrick Mahomes",
+                "player_name": "Patrick Mahomes",
+            }
+        )
+
+    output = tmp_path / "players.csv"
+    with pytest.raises(ValueError) as excinfo:
+        normalize_csv(canonical, output, site="fanduel")
+
+    message = str(excinfo.value)
+    assert "blank or zero" in message
+    assert "never projected" in message
+    assert str(canonical) in message
+    assert not output.exists()
+
