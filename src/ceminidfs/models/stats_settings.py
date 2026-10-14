@@ -23,6 +23,13 @@ LEAGUE_INT_RATE = 0.025
 LEAGUE_TD_PER_ATT = 0.045
 LEAGUE_TD_PER_CARRY = 0.03
 LEAGUE_TD_PER_TARGET = 0.045
+# Fumbles lost per touch (carry plus reception). Basis: the local nflverse 2025
+# regular-season play-by-play file, artifacts/cache/pbp_2025.parquet. It has 138
+# lost-fumble plays whose fumbler is the tracked rusher or receiver, over 24657
+# carries plus receptions. That is one lost fumble per 179 touches. The 248 raw
+# ``fumble_lost`` plays include sack, return, and special-teams fumbles that a
+# skill-position touch does not own, so they stay out.
+LEAGUE_FUMBLE_LOST_RATE = 0.0056
 
 # Historical hardcoded shrinkage strengths (preserved as defaults).
 DEFAULT_PASS_SHRINKAGE_K = 250.0

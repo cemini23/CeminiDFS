@@ -20,6 +20,7 @@ from ceminidfs.models.stats_settings import (
     DEFAULT_RUSH_SHRINKAGE_K,
     LEAGUE_ADOT,
     LEAGUE_CATCH_RATE,
+    LEAGUE_FUMBLE_LOST_RATE,
     LEAGUE_INT_RATE,
     LEAGUE_TD_PER_ATT,
     LEAGUE_TD_PER_CARRY,
@@ -126,7 +127,65 @@ def player_efficiency_from_pbp(
         "catch_rate": rec_eff["catch_rate"],
         "adot": rec_eff["adot"],
         "td_per_target": rec_eff["td_per_target"],
+        "fumble_rate": _fumble_rate(historical, player),
     }
+
+
+def _fumble_rate(historical: pd.DataFrame, player_id: str) -> float:
+    """Return historical fumbles lost per touch, or the league rate when empty.
+
+    ``historical`` is the PBP frame. A touch is a carry plus a reception, and
+    the player must own the lost fumble, so an opponent return fumble does not
+    land on him.
+    """
+
+    if historical.empty:
+        return LEAGUE_FUMBLE_LOST_RATE
+    player = str(player_id)
+    touches = _touch_count(historical, player)
+    if touches <= 0:
+        return LEAGUE_FUMBLE_LOST_RATE
+    fumbles = _lost_fumble_count(historical, player)
+    return fumbles / touches
+
+
+def _touch_count(pbp: pd.DataFrame, player: str) -> float:
+    """Return carries plus receptions for one player in a PBP frame."""
+
+    touches = 0.0
+    rusher_col = _first_present(pbp, ("rusher_player_id", "rusher_id"))
+    if rusher_col is not None:
+        carries = _rush_flag(pbp).eq(1) & pbp[rusher_col].fillna("").astype(str).eq(player)
+        touches += float(carries.sum())
+    receiver_col = _first_present(pbp, ("receiver_player_id", "receiver_id"))
+    receptions_col = _first_present(pbp, ("complete_pass", "reception"))
+    if receiver_col is not None and receptions_col is not None:
+        receptions = (
+            pd.to_numeric(pbp[receptions_col], errors="coerce").fillna(0).eq(1)
+            & pbp[receiver_col].fillna("").astype(str).eq(player)
+        )
+        touches += float(receptions.sum())
+    return touches
+
+
+def _lost_fumble_count(pbp: pd.DataFrame, player: str) -> float:
+    """Return lost fumbles for one player, counting only plays he touched."""
+
+    lost_col = _first_present(pbp, ("fumble_lost",))
+    if lost_col is None:
+        return 0.0
+    lost = pd.to_numeric(pbp[lost_col], errors="coerce").fillna(0).gt(0)
+    owner = pd.Series(False, index=pbp.index)
+    for column in (
+        _first_present(pbp, ("rusher_player_id", "rusher_id")),
+        _first_present(pbp, ("receiver_player_id", "receiver_id")),
+    ):
+        if column is not None:
+            owner = owner | pbp[column].fillna("").astype(str).eq(player)
+    fumbler_col = _first_present(pbp, ("fumbled_1_player_id", "fumble_1_player_id"))
+    if fumbler_col is not None:
+        owner = owner & pbp[fumbler_col].fillna("").astype(str).eq(player)
+    return float(pbp.loc[lost & owner].shape[0])
 
 
 def project_player_stats(
@@ -154,6 +213,8 @@ def project_player_stats(
     td_rate = _mapping_float(efficiency, "td_rate", default=LEAGUE_TD_PER_ATT)
     td_per_carry = _mapping_float(efficiency, "td_per_carry", default=LEAGUE_TD_PER_CARRY)
     td_per_target = _mapping_float(efficiency, "td_per_target", default=LEAGUE_TD_PER_TARGET)
+    fumble_rate = _mapping_float(efficiency, "fumble_rate", default=LEAGUE_FUMBLE_LOST_RATE)
+    receptions = _non_negative(targets * catch_rate)
 
     return PlayerStatProjection(
         season=int(usage_row.get("season", 0) or 0),
@@ -168,10 +229,10 @@ def project_player_stats(
         int=_non_negative(pass_attempts * int_rate),
         rush_yds=_non_negative(carries * ypc * rush_mult),
         rush_td=_non_negative(carries * td_per_carry),
-        rec=_non_negative(targets * catch_rate),
+        rec=_non_negative(receptions),
         rec_yds=_non_negative(targets * ypt * pass_mult),
         rec_td=_non_negative(targets * td_per_target),
-        fumbles_lost=_non_negative(_mapping_float(usage_row, "fumbles_lost")),
+        fumbles_lost=_non_negative(fumble_rate * (carries + receptions)),
         ypa=ypa,
         ypc=ypc,
         ypt=ypt,
@@ -238,9 +299,12 @@ def apply_wind_passing_haircut(
     stats_df: pd.DataFrame,
     multipliers: Mapping[str, float],
 ) -> pd.DataFrame:
-    """Lower the passing-yards mean for an exposed venue with high wind.
+    """Lower the passing and receiving yards mean for an exposed venue with high wind.
 
-    This haircut changes only ``pass_yds``. It does not change pass rate.
+    An incomplete pass in wind is the same event for the passer and the
+    receiver, so ``pass_yds`` and ``rec_yds`` take the same per-team
+    multiplier. This haircut does not change pass rate, pass attempts, or
+    completion rate.
     """
 
     if stats_df.empty or not multipliers or "pass_yds" not in stats_df.columns:
@@ -252,6 +316,10 @@ def apply_wind_passing_haircut(
     output["pass_yds"] = (
         pd.to_numeric(output["pass_yds"], errors="coerce").fillna(0.0) * multiplier
     )
+    if "rec_yds" in output.columns:
+        output["rec_yds"] = (
+            pd.to_numeric(output["rec_yds"], errors="coerce").fillna(0.0) * multiplier
+        )
     return output
 
 
@@ -474,6 +542,7 @@ def _league_efficiency() -> dict[str, float]:
         "catch_rate": LEAGUE_CATCH_RATE,
         "adot": LEAGUE_ADOT,
         "td_per_target": LEAGUE_TD_PER_TARGET,
+        "fumble_rate": LEAGUE_FUMBLE_LOST_RATE,
     }
 
 

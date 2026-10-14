@@ -447,11 +447,31 @@ def _gsis_lookups_from_weekly_rosters(season: int, week: int) -> tuple[dict[str,
 
 
 def _abbrev_last_name(name: Any) -> str:
+    """Return the nflverse key for a name, for example ``A.St. Brown``.
+
+    nflverse stores the first initial of the given name, a period, then the
+    surname. ``Amon-Ra St. Brown`` becomes ``A.St. Brown`` and ``A.J. Brown``
+    becomes ``A.Brown``, which keeps the two players apart.
+
+    A middle name is dropped, but a surname particle is kept. The surname
+    starts at the last part, and steps back one part when that part ends with
+    a period, which is what separates ``St. Brown`` from ``Michael Sturdivant``.
+
+    nflverse adds a two-letter prefix, for example ``Mi.Wilson``, when two
+    players on one team share an initial. That rule needs the team and this
+    function holds one name, so that shape can miss. A miss falls through to
+    the other lookups in ``_resolve_pbp_player_id``. A collision would assign
+    the wrong player id, so a miss is safe and a collision is not.
+    """
+
     parts = [part for part in str(name or "").replace("'", "").split() if part]
     parts = [part for part in parts if part.lower().rstrip(".") not in _NAME_SUFFIXES]
     if len(parts) < 2:
         return ""
-    return f"{parts[0][0]}.{parts[-1]}"
+    start = len(parts) - 1
+    if start >= 2 and parts[start - 1].endswith("."):
+        start -= 1
+    return f"{parts[0][0]}.{' '.join(parts[start:])}"
 
 
 def _name_team_key(name: Any, team: Any) -> str:

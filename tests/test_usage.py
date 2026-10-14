@@ -367,6 +367,121 @@ def test_week1_lone_expensive_rb_keeps_min_share():
     assert star["carry_share"] >= 0.35
 
 
+def _receiver_team_pbp() -> pd.DataFrame:
+    """A 30 percent target-share WR1 and two depth receivers on team HOU."""
+
+    names = {
+        "qb1": "QB One",
+        "wr1": "WR One",
+        "wr2": "WR Two",
+        "wr3": "WR Three",
+        "rb1": "RB One",
+    }
+    rows: list[dict[str, object]] = []
+    for week, game_id in ((1, "g1"), (2, "g2"), (3, "g3")):
+        for player_id, count in (("wr1", 3), ("wr2", 1), ("wr3", 1)):
+            for _ in range(count):
+                rows.append(
+                    {
+                        "season": 2024,
+                        "week": week,
+                        "game_id": game_id,
+                        "posteam": "HOU",
+                        "pass_attempt": 1,
+                        "rush": 0,
+                        "passer_player_id": "qb1",
+                        "passer_player_name": names["qb1"],
+                        "receiver_player_id": player_id,
+                        "receiver_player_name": names[player_id],
+                        "air_yards": 10,
+                        "complete_pass": 1,
+                        "receiving_yards": 10,
+                    }
+                )
+        for _ in range(2):
+            rows.append(
+                {
+                    "season": 2024,
+                    "week": week,
+                    "game_id": game_id,
+                    "posteam": "HOU",
+                    "pass_attempt": 0,
+                    "rush": 1,
+                    "rusher_player_id": "rb1",
+                    "rusher_player_name": names["rb1"],
+                    "rushing_yards": 4,
+                    "fumble_lost": 0,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _receiver_team_roster(wr1_out: bool = False) -> pd.DataFrame:
+    rows = [
+        {"player_id": "qb1", "player_name": "QB One", "team": "HOU", "position": "QB"},
+        {"player_id": "wr1", "player_name": "WR One", "team": "HOU", "position": "WR"},
+        {"player_id": "wr2", "player_name": "WR Two", "team": "HOU", "position": "WR"},
+        {"player_id": "wr3", "player_name": "WR Three", "team": "HOU", "position": "WR"},
+        {"player_id": "rb1", "player_name": "RB One", "team": "HOU", "position": "RB"},
+    ]
+    if wr1_out:
+        for row in rows:
+            if row["player_id"] == "wr1":
+                row["injury_status"] = "Out"
+    return pd.DataFrame(rows)
+
+
+def _receiver_team_volume() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "season": 2024,
+                "week": 4,
+                "team": "HOU",
+                "opponent": "IND",
+                "pass_attempts": 30.0,
+                "rush_attempts": 20.0,
+            }
+        ]
+    )
+
+
+def test_excluded_player_shares_are_redistributed_to_the_team():
+    """Removing WR1 must raise the remaining receivers' projected targets.
+
+    A share is a fraction of the team total. Before the fix the excluded
+    player's share was dropped with no reallocation, so the team lost those
+    targets.
+    """
+
+    volume = _receiver_team_volume()
+    pbp = _receiver_team_pbp()
+
+    healthy = build_week_usage(
+        volume, pbp, season=2024, week=4, roster=_receiver_team_roster(wr1_out=False)
+    )
+    hurt = build_week_usage(
+        volume, pbp, season=2024, week=4, roster=_receiver_team_roster(wr1_out=True)
+    )
+
+    assert "wr1" not in set(hurt["player_id"])
+
+    healthy_targets = healthy.set_index("player_id")["projected_targets"]
+    hurt_targets = hurt.set_index("player_id")["projected_targets"]
+
+    assert hurt_targets["wr2"] > healthy_targets["wr2"]
+    assert hurt_targets["wr3"] > healthy_targets["wr3"]
+
+    healthy_shares = healthy.set_index("player_id")["l3_target_share"]
+    hurt_shares = hurt.set_index("player_id")["l3_target_share"]
+
+    assert healthy_shares.sum() == pytest.approx(1.0)
+    assert hurt_shares.sum() == pytest.approx(1.0)
+    # WR1 held 3 of 5 targets. The survivors split the whole team total.
+    assert hurt_shares["wr2"] == pytest.approx(0.5)
+    assert hurt_shares["wr3"] == pytest.approx(0.5)
+
+
 def test_rb_committee_zeros_deep_backups():
     volume = _volume_df()
     pbp = _synthetic_pbp()

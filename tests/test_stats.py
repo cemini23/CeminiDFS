@@ -7,14 +7,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ceminidfs.models.stats import (
+    _fumble_rate,
     build_week_stats,
     player_efficiency_from_pbp,
     project_player_stats,
     regress_rate,
 )
+from ceminidfs.models.scoring import fd_points, stats_to_counting_stats
 from ceminidfs.models.stats_settings import (
     LEAGUE_ADOT,
     LEAGUE_CATCH_RATE,
+    LEAGUE_FUMBLE_LOST_RATE,
     LEAGUE_TD_PER_TARGET,
     LEAGUE_YPA,
     LEAGUE_YPC,
@@ -103,6 +106,106 @@ def test_project_wr_receiving_stats():
     assert projection.rec_yds == pytest.approx(66.0)
     assert projection.rec_td == pytest.approx(0.48)
     assert projection.adot == pytest.approx(11.0)
+
+
+def _fumble_pbp() -> pd.DataFrame:
+    """Two carries plus one reception for ``rb1``, with one lost fumble."""
+
+    return pd.DataFrame(
+        [
+            {
+                "season": 2024,
+                "week": 1,
+                "game_id": "g1",
+                "posteam": "AAA",
+                "pass_attempt": 0,
+                "rush": 1,
+                "rusher_player_id": "rb1",
+                "rusher_player_name": "RB One",
+                "rushing_yards": 4.0,
+                "fumble_lost": 1,
+                "fumbled_1_player_id": "rb1",
+            },
+            {
+                "season": 2024,
+                "week": 1,
+                "game_id": "g1",
+                "posteam": "AAA",
+                "pass_attempt": 0,
+                "rush": 1,
+                "rusher_player_id": "rb1",
+                "rusher_player_name": "RB One",
+                "rushing_yards": 4.0,
+                "fumble_lost": 0,
+            },
+            {
+                "season": 2024,
+                "week": 1,
+                "game_id": "g1",
+                "posteam": "AAA",
+                "pass_attempt": 1,
+                "rush": 0,
+                "passer_player_id": "qb1",
+                "passer_player_name": "QB One",
+                "receiver_player_id": "rb1",
+                "receiver_player_name": "RB One",
+                "complete_pass": 1,
+                "receiving_yards": 6.0,
+                "fumble_lost": 0,
+            },
+        ]
+    )
+
+
+def test_fumble_rate_uses_carries_plus_receptions():
+    """Fumbles lost divided by touches, where a touch is a carry or a catch."""
+
+    pbp = _fumble_pbp()
+
+    # Three touches and one lost fumble give an observed rate of 1/3.
+    assert _fumble_rate(pbp, "rb1") == pytest.approx(1.0 / 3.0)
+    assert _fumble_rate(pbp, "missing") == pytest.approx(LEAGUE_FUMBLE_LOST_RATE)
+
+
+def test_projected_fumbles_lost_is_nonzero_and_reaches_the_score():
+    """A real fumble history must reach ``fumbles_lost`` and cut the score.
+
+    Before the fix ``project_player_stats`` read a ``fumbles_lost`` key that
+    the usage frame never carried, so every player scored zero fumbles.
+    """
+
+    efficiency = player_efficiency_from_pbp(_fumble_pbp(), "rb1", through_week=4, position="RB")
+    assert efficiency["fumble_rate"] == pytest.approx(1.0 / 3.0)
+
+    usage = {
+        "season": 2024,
+        "week": 4,
+        "team": "AAA",
+        "opponent": "BBB",
+        "player_id": "rb1",
+        "player_name": "RB One",
+        "position": "RB",
+        "projected_pass_attempts": 0.0,
+        "projected_carries": 12.0,
+        "projected_targets": 3.0,
+    }
+
+    projection = project_player_stats(usage, efficiency, week=4)
+
+    assert projection.fumbles_lost == pytest.approx(
+        efficiency["fumble_rate"] * (usage["projected_carries"] + projection.rec)
+    )
+    assert projection.fumbles_lost > 0.0
+
+    counted = stats_to_counting_stats(projection.to_dict())
+    assert fd_points(counted) == pytest.approx(
+        fd_points({**counted, "fumbles_lost": 0.0}) - projection.fumbles_lost * 2.0
+    )
+
+    without_fumbles = project_player_stats(usage, {**efficiency, "fumble_rate": 0.0}, week=4)
+
+    assert without_fumbles.fumbles_lost == pytest.approx(0.0)
+    assert fd_points(stats_to_counting_stats(without_fumbles.to_dict())) > fd_points(counted)
 
 
 def test_qb_efficiency_uses_lighter_shrinkage():

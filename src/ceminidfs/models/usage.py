@@ -49,6 +49,7 @@ class PlayerUsageProjection:
     projected_carries: float
     projected_pass_attempts: float
     routes_proxy: float | None = None
+    fumbles_lost: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -185,6 +186,8 @@ def player_game_stats_from_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
         "targets",
         "air_yards",
         "carries",
+        "receptions",
+        "fumbles_lost",
         "pass_attempts",
     ]
     if pbp.empty or "posteam" not in pbp.columns or "week" not in pbp.columns:
@@ -213,6 +216,11 @@ def player_game_stats_from_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
                     position="",
                     targets=1.0,
                     air_yards_col="air_yards" if "air_yards" in targets.columns else None,
+                    receptions_col=(
+                        "complete_pass" if "complete_pass" in targets.columns else None
+                    ),
+                    fumble_lost_col="fumble_lost",
+                    fumble_owner_cols=(receiver_id_col,),
                 )
             )
 
@@ -233,6 +241,8 @@ def player_game_stats_from_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
                     player_name_col=rusher_name_col,
                     position="",
                     carries=1.0,
+                    fumble_lost_col="fumble_lost",
+                    fumble_owner_cols=(rusher_id_col,),
                 )
             )
 
@@ -262,7 +272,7 @@ def player_game_stats_from_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
     stats = pd.concat(events, ignore_index=True)
     group_cols = ["season", "week", "team", "game_id", "player_id", "player_name"]
     result = stats.groupby(group_cols, dropna=False, as_index=False)[
-        ["targets", "air_yards", "carries", "pass_attempts"]
+        ["targets", "air_yards", "carries", "receptions", "fumbles_lost", "pass_attempts"]
     ].sum()
     result["position"] = ""
     result = result.reindex(columns=columns)
@@ -762,6 +772,7 @@ def build_week_usage(
                 for player in share_records
                 if str(player.get("player_id", "")) not in excluded_ids
             ]
+            _redistribute_excluded_shares(share_records, team=str(team))
         starter_id = identify_qb_starter(
             stats,
             team=team,
@@ -822,7 +833,18 @@ def _usage_events(
     air_yards_col: str | None = None,
     carries: float = 0.0,
     pass_attempts: float = 0.0,
+    receptions_col: str | None = None,
+    fumble_lost_col: str | None = None,
+    fumble_owner_cols: tuple[str | None, ...] = (),
 ) -> pd.DataFrame:
+    if fumble_lost_col and fumble_lost_col in plays.columns:
+        fumbles = pd.to_numeric(plays[fumble_lost_col], errors="coerce").fillna(0.0)
+        owner = _fumble_owner_series(plays, fumble_owner_cols)
+        if owner is not None:
+            fumbles = fumbles.where(owner, 0.0)
+    else:
+        fumbles = 0.0
+
     event = pd.DataFrame(
         {
             "season": plays["season"] if "season" in plays.columns else pd.NA,
@@ -837,10 +859,37 @@ def _usage_events(
             if air_yards_col
             else 0.0,
             "carries": carries,
+            "receptions": pd.to_numeric(plays[receptions_col], errors="coerce").fillna(0.0)
+            if receptions_col
+            else 0.0,
+            "fumbles_lost": fumbles,
             "pass_attempts": pass_attempts,
         }
     )
     return event
+
+
+def _fumble_owner_series(
+    plays: pd.DataFrame,
+    owner_cols: tuple[str | None, ...],
+) -> pd.Series | None:
+    """Return a mask that is True when the tracked player lost the fumble.
+
+    nflverse stores the fumbler in ``fumbled_1_player_id``. A raw
+    ``fumble_lost`` play can belong to the other team on a return or to a
+    special-teams unit, so the owner column must confirm the player.
+    """
+
+    fumbler_col = _first_present(plays, ("fumbled_1_player_id", "fumble_1_player_id"))
+    if fumbler_col is None:
+        return None
+    fumbler = plays[fumbler_col].fillna("").astype(str)
+    mask = pd.Series(False, index=plays.index)
+    for owner_col in owner_cols:
+        if not owner_col or owner_col not in plays.columns:
+            continue
+        mask = mask | fumbler.eq(plays[owner_col].fillna("").astype(str))
+    return mask
 
 
 def _share_frame(stats: pd.DataFrame, *, prefix: str) -> pd.DataFrame:
@@ -1009,6 +1058,59 @@ def _player_salary(player: Mapping[str, Any]) -> float:
         except (TypeError, ValueError):
             continue
     return 0.0
+
+
+def _redistribute_excluded_shares(
+    share_records: list[dict[str, Any]],
+    *,
+    team: str,
+) -> None:
+    """Renormalize share columns after excluded players left the pool.
+
+    Each share column is a fraction of the team total. Dropping a player
+    removes his fraction and leaves the team short, so the survivors scale up
+    until the column sums to 1.0 again. An explicit per-row override holds its
+    value and only the remainder scales. The caller reaches this function only
+    after a real exclusion, so a fully healthy team never renormalizes.
+    """
+
+    for column, override_key in _SHARE_OVERRIDE_KEYS.items():
+        total = 0.0
+        override_total = 0.0
+        override_players: list[dict[str, Any]] = []
+        for player in share_records:
+            if str(player.get("team", team)) != str(team):
+                continue
+            if player.get(override_key) is not None:
+                override_total += _mapping_float(player, override_key, override_key)
+                override_players.append(player)
+            else:
+                total += _mapping_float(player, column, column)
+        if total <= 0.0:
+            continue
+        if override_total >= 1.0:
+            print(
+                f"warning: {team} {override_key} overrides already reach "
+                f"{override_total:.3f}; {column} stays unchanged"
+            )
+            continue
+        scale = (1.0 - override_total) / total
+        for player in share_records:
+            if player in override_players:
+                continue
+            if str(player.get("team", team)) != str(team):
+                continue
+            player[column] = _mapping_float(player, column, column) * scale
+
+
+_SHARE_OVERRIDE_KEYS = {
+    "l3_target_share": "target_share_override",
+    "season_target_share": "target_share_override",
+    "l3_air_yards_share": "air_yards_share_override",
+    "season_air_yards_share": "air_yards_share_override",
+    "l3_carry_share": "carry_share_override",
+    "season_carry_share": "carry_share_override",
+}
 
 
 def _assign_rb_committee_shares(

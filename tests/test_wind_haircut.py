@@ -72,6 +72,36 @@ def test_build_multipliers_uses_home_roof_and_wind():
     assert multipliers["MIN"] == pytest.approx(1.0)
 
 
+def test_haircut_scales_receiving_yards_by_the_same_multiplier():
+    stats = pd.DataFrame(
+        [
+            {
+                "team": "KC",
+                "player_id": "qb1",
+                "position": "QB",
+                "pass_yds": 280.0,
+                "rec_yds": 0.0,
+            },
+            {
+                "team": "KC",
+                "player_id": "wr1",
+                "position": "WR",
+                "pass_yds": 0.0,
+                "rec_yds": 85.0,
+            },
+        ]
+    )
+
+    adjusted = apply_wind_passing_haircut(stats, {"KC": 0.90})
+
+    assert adjusted.loc[adjusted["player_id"] == "qb1", "pass_yds"].iloc[0] == pytest.approx(
+        252.0
+    )
+    assert adjusted.loc[adjusted["player_id"] == "wr1", "rec_yds"].iloc[0] == pytest.approx(
+        76.5
+    )
+
+
 def test_haircut_changes_only_pass_yds():
     stats = pd.DataFrame(
         [

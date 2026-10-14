@@ -17,6 +17,7 @@ from ceminidfs.export.pool_guards import (
     player_matches_participation,
 )
 from ceminidfs.orchestrator.run import _canonical_for_sim, run_pipeline
+from ceminidfs.pipeline.engine import _abbrev_last_name
 
 CANONICAL_HEADER = [
     "name",
@@ -306,7 +307,6 @@ def test_missing_pbp_raises_before_normalized_pool(tmp_path: Path, monkeypatch: 
 
 def test_role_gate_matches_nflverse_abbreviated_names():
     """FanDuel full names must match nflverse ``A.Jeanty`` and ``Mi.Wilson``."""
-
     names = {"a.jeanty", "j.chase", "k.walker", "mi.wilson", "a.st. brown"}
     assert player_matches_participation("Ashton Jeanty", names)
     assert player_matches_participation("Ja'Marr Chase", names)
@@ -332,6 +332,37 @@ def test_role_gate_matches_nflverse_abbreviated_names():
         "Kenneth Walker III",
         "Houston Texans",
     }
+
+
+def test_abbrev_last_name_keeps_distinct_players_distinct():
+    """A compound surname must not collide with a plain one.
+
+    ``Amon-Ra St. Brown`` and ``A.J. Brown`` are different players. Before the
+    fix both produced ``A.Brown``, so one player resolved to the other player's
+    id. A collision assigns the wrong player and is worse than a miss, because
+    ``_resolve_pbp_player_id`` falls through to the other lookups on a miss.
+
+    Known miss, not an oversight: ``Michael Wilson`` and ``Mitchell Wilson``
+    still share ``M.Wilson``. nflverse separates that pair with a per-team
+    two-letter prefix such as ``Mi.Wilson``, and one name alone cannot decide
+    which player owns it.
+    """
+
+    # These must equal the forms nflverse stores, so the abbreviation lookup
+    # actually resolves. See the sibling test above for the same strings.
+    assert _abbrev_last_name("Amon-Ra St. Brown") == "A.St. Brown"
+    assert _abbrev_last_name("A.J. Brown") == "A.Brown"
+    assert _abbrev_last_name("Ja'Marr Chase") == "J.Chase"
+    assert _abbrev_last_name("Kenneth Walker III") == "K.Walker"
+    assert _abbrev_last_name("Ashton Jeanty") == "A.Jeanty"
+    # A surname particle is kept, a given middle name is dropped.
+    assert _abbrev_last_name("J. Michael Sturdivant") == "J.Sturdivant"
+
+    names = ["Amon-Ra St. Brown", "A.J. Brown", "Michael Wilson", "Mitchell Wilson"]
+    keys = [_abbrev_last_name(name) for name in names]
+
+    assert keys[0] != keys[1]
+    assert _abbrev_last_name("Michael Wilson") == _abbrev_last_name("Mitchell Wilson") == "M.Wilson"
 
 
 def test_apply_participation_gate_on_three_row_frame():
