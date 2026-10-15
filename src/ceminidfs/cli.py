@@ -102,6 +102,30 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     format_benchmark_compare = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.pipeline.distributions import (
+        build_week_distributions,
+        format_distributions_summary,
+        parse_season_week,
+        write_distributions_csv,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    build_week_distributions = None  # type: ignore[assignment]
+    write_distributions_csv = None  # type: ignore[assignment]
+    format_distributions_summary = None  # type: ignore[assignment]
+    parse_season_week = None  # type: ignore[assignment]
+
+try:
+    from ceminidfs.pipeline.market_benchmark import (
+        format_market_benchmark,
+        run_market_benchmark,
+        write_market_benchmark_report,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    run_market_benchmark = None  # type: ignore[assignment]
+    write_market_benchmark_report = None  # type: ignore[assignment]
+    format_market_benchmark = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.pipeline.calibration import (
         build_calibration_report,
         render_calibration_brief,
@@ -572,6 +596,47 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("reports/benchmark_replay.json"),
     )
     benchmark_replay.set_defaults(handler=_cmd_benchmark_replay)
+
+    export_distributions = subparsers.add_parser(
+        "export-distributions",
+        help="Write per-player per-stat lognormal distributions for one week",
+    )
+    export_distributions.add_argument(
+        "--week",
+        dest="season_week",
+        required=True,
+        help="Season_week token, e.g. 2026_5",
+    )
+    export_distributions.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        required=True,
+        help="Output CSV path for the distributions handoff",
+    )
+    export_distributions.set_defaults(handler=_cmd_export_distributions)
+
+    market_benchmark_cmd = subparsers.add_parser(
+        "market-benchmark",
+        help="Compare model medians vs closing prop lines against realized stats",
+    )
+    market_benchmark_cmd.add_argument("--season", type=int, required=True)
+    market_benchmark_cmd.add_argument("--week", type=int, required=True)
+    market_benchmark_cmd.add_argument(
+        "--closing-props",
+        dest="closing_props",
+        type=Path,
+        required=True,
+        help="Closing prop lines CSV with player_key,stat_type,line columns",
+    )
+    market_benchmark_cmd.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=None,
+        help="Optional JSON report path",
+    )
+    market_benchmark_cmd.set_defaults(handler=_cmd_market_benchmark)
 
     lineup_backtest = subparsers.add_parser(
         "lineup-backtest",
@@ -1256,6 +1321,56 @@ def _cmd_benchmark_compare(args: argparse.Namespace) -> int:
     report_path = write_benchmark_compare_report(result, args.output_path)
     print(format_benchmark_compare(result))
     print(f"\nReport: {report_path}")
+    return 0
+
+
+def _cmd_export_distributions(args: argparse.Namespace) -> int:
+    if (
+        build_week_distributions is None
+        or write_distributions_csv is None
+        or format_distributions_summary is None
+        or parse_season_week is None
+    ):
+        raise RuntimeError(
+            "Distributions export unavailable: ceminidfs.pipeline.distributions import failed"
+        )
+    config = runtime_config()
+    try:
+        season, week = parse_season_week(args.season_week)
+        distributions = build_week_distributions(season, week, config=config)
+        path = write_distributions_csv(distributions, args.output_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(format_distributions_summary(distributions, season, week))
+    print(f"\nDistributions: {path}")
+    return 0
+
+
+def _cmd_market_benchmark(args: argparse.Namespace) -> int:
+    if (
+        run_market_benchmark is None
+        or format_market_benchmark is None
+        or write_market_benchmark_report is None
+    ):
+        raise RuntimeError(
+            "Market benchmark unavailable: ceminidfs.pipeline.market_benchmark import failed"
+        )
+    config = runtime_config()
+    try:
+        result = run_market_benchmark(
+            args.season,
+            args.week,
+            args.closing_props,
+            config=config,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(format_market_benchmark(result))
+    if args.output_path is not None:
+        path = write_market_benchmark_report(result, args.output_path)
+        print(f"\nReport: {path}")
     return 0
 
 
