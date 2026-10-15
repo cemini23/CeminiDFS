@@ -46,6 +46,13 @@ ID_KEYS = (
     "player_key",
 )
 
+RERANK_MODES = ("fpts", "ceiling", "leverage")
+DEFAULT_RERANK_MODE = "ceiling"
+MODE_QUANTILE = {"fpts": 0.5, "ceiling": 0.85}
+TOP_FRACTION = 0.01
+LEVERAGE_EXPONENT = 0.5
+THRESHOLD_SAMPLE = 256
+
 
 def build_player_index(normalized_csv: str | Path | Iterable[Mapping[str, Any]]) -> dict[str, int]:
     """Build player-id and name keys mapped to simulation matrix row order."""
@@ -136,6 +143,91 @@ def score_lineup(
     if not 0.0 < quantile < 1.0:
         raise ValueError("quantile must be between 0 and 1")
 
+    indexes = _lineup_indexes(player_names, player_index, player_ids, matrix)
+    lineup_totals = matrix[indexes, :].sum(axis=0)
+    score = float(np.quantile(lineup_totals, quantile))
+
+    if ownership_lookup and ownership_penalty > 0:
+        ownership_values = []
+        for idx, name in enumerate(player_names):
+            if not str(name).strip():
+                continue
+            player_id = player_ids[idx] if player_ids and idx < len(player_ids) else None
+            ownership_values.append(
+                _lookup_ownership(name, ownership_lookup, player_id=player_id)
+            )
+        if ownership_values:
+            score -= float(ownership_penalty) * float(np.mean(ownership_values))
+
+    return score
+
+
+def leverage_lineup_scores(
+    lineups: Sequence[Any],
+    sim_matrix: Any,
+    player_index: Mapping[str, int],
+    ownership_lookup: Mapping[str, float],
+    *,
+    top_fraction: float = TOP_FRACTION,
+    exponent: float = LEVERAGE_EXPONENT,
+    threshold_sample: int = THRESHOLD_SAMPLE,
+) -> tuple[list[float], float]:
+    """Score each lineup by ``P(score >= top_1pct) / geom_mean_own ** 0.5``.
+
+    The slate threshold is the ``(1 - top_fraction)`` quantile of the pooled
+    simulated totals from up to ``threshold_sample`` candidate lineups. Ownership
+    values are percentages and are divided by 100 before the geometric mean.
+    """
+
+    matrix = np.asarray(sim_matrix, dtype=float)
+    if matrix.ndim != 2:
+        raise ValueError("sim_matrix must be a 2D array")
+    if not 0.0 < top_fraction < 1.0:
+        raise ValueError("top_fraction must be between 0 and 1")
+
+    sample: list[np.ndarray] = []
+    for lineup in list(lineups)[: max(1, int(threshold_sample))]:
+        sample.append(
+            _lineup_total_vector(
+                lineup_player_names(lineup),
+                matrix,
+                player_index,
+                lineup_player_ids(lineup),
+            )
+        )
+    pooled = np.concatenate(sample) if sample else np.zeros(1)
+    threshold = float(np.quantile(pooled, 1.0 - top_fraction))
+
+    scores: list[float] = []
+    for lineup in lineups:
+        totals = _lineup_total_vector(
+            lineup_player_names(lineup),
+            matrix,
+            player_index,
+            lineup_player_ids(lineup),
+        )
+        tail_probability = float((totals >= threshold).mean())
+        ownership_fraction = _lineup_ownership_fraction(lineup, ownership_lookup)
+        scores.append(tail_probability / (ownership_fraction ** float(exponent)))
+    return scores, threshold
+
+
+def _lineup_total_vector(
+    player_names: Sequence[str],
+    matrix: np.ndarray,
+    player_index: Mapping[str, int],
+    player_ids: Sequence[str] | None = None,
+) -> np.ndarray:
+    indexes = _lineup_indexes(player_names, player_index, player_ids, matrix)
+    return matrix[indexes, :].sum(axis=0)
+
+
+def _lineup_indexes(
+    player_names: Sequence[str],
+    player_index: Mapping[str, int],
+    player_ids: Sequence[str] | None,
+    matrix: np.ndarray,
+) -> list[int]:
     indexes = []
     ids = list(player_ids or [])
     for idx, name in enumerate(player_names):
@@ -147,23 +239,22 @@ def score_lineup(
         raise ValueError("lineup has no player names")
     if max(indexes) >= matrix.shape[0]:
         raise ValueError("player_index contains row outside sim_matrix")
+    return indexes
 
-    lineup_totals = matrix[indexes, :].sum(axis=0)
-    score = float(np.quantile(lineup_totals, quantile))
 
-    if ownership_lookup and ownership_penalty > 0:
-        ownership_values = []
-        for idx, name in enumerate(player_names):
-            if not str(name).strip():
-                continue
-            player_id = ids[idx] if idx < len(ids) else None
-            ownership_values.append(
-                _lookup_ownership(name, ownership_lookup, player_id=player_id)
-            )
-        if ownership_values:
-            score -= float(ownership_penalty) * float(np.mean(ownership_values))
-
-    return score
+def _lineup_ownership_fraction(lineup: Any, ownership_lookup: Mapping[str, float]) -> float:
+    names = lineup_player_names(lineup)
+    ids = lineup_player_ids(lineup)
+    fractions: list[float] = []
+    for idx, name in enumerate(names):
+        if not str(name).strip():
+            continue
+        player_id = ids[idx] if idx < len(ids) else None
+        percent = _lookup_ownership(name, ownership_lookup, player_id=player_id)
+        fractions.append(max(float(percent), 0.0) / 100.0)
+    if not fractions:
+        return 1.0
+    return float(np.exp(np.mean(np.log(np.maximum(fractions, 1.0e-4)))))
 
 
 def rerank_lineups(
@@ -173,41 +264,65 @@ def rerank_lineups(
     final_count: int = 150,
     *,
     quantile: float = 0.85,
+    mode: str = DEFAULT_RERANK_MODE,
     ownership_lookup: Mapping[str, float] | None = None,
     ownership_penalty: float = 0.0,
     max_exposure: float | None = None,
     max_team_exposure: float | None = None,
     exposure_overrides: Mapping[str, float] | None = None,
 ) -> list[Any]:
-    """Score candidates by simulated tail quantile and return the top unique lineups."""
+    """Score candidates by mode and return the top unique lineups.
+
+    ``mode`` is ``fpts`` (median), ``ceiling`` (tail quantile), or ``leverage``
+    (``P(score >= top 1%) / geom_mean_own ** 0.5``). The leverage mode needs an
+    ``ownership_lookup``; without one it falls back to the ceiling mode.
+    """
 
     if final_count <= 0:
         raise ValueError("final_count must be positive")
+    if mode not in RERANK_MODES:
+        raise ValueError(f"mode must be one of {RERANK_MODES}")
 
-    ranked: list[tuple[float, float, int, Any]] = []
+    unique: list[Any] = []
     seen: set[tuple[str, ...]] = set()
-    for order, lineup in enumerate(lineup_rows):
+    for lineup in lineup_rows:
         names = lineup_player_names(lineup)
         key = tuple(sorted(_normalize_name(name) for name in names if str(name).strip()))
         if not key or key in seen:
             continue
         seen.add(key)
-        ranked.append(
-            (
-                score_lineup(
-                    names,
-                    sim_matrix,
-                    player_index,
-                    quantile=quantile,
-                    ownership_lookup=ownership_lookup,
-                    ownership_penalty=ownership_penalty,
-                    player_ids=lineup_player_ids(lineup),
-                ),
-                _projection_sum(lineup),
-                -order,
-                lineup,
-            )
+        unique.append(lineup)
+
+    effective_mode = mode
+    if effective_mode == "leverage" and not ownership_lookup:
+        effective_mode = "ceiling"
+
+    ranked: list[tuple[float, float, int, Any]] = []
+    if effective_mode == "leverage":
+        scores, _threshold = leverage_lineup_scores(
+            unique, sim_matrix, player_index, ownership_lookup or {}
         )
+        for order, (lineup, score) in enumerate(zip(unique, scores, strict=True)):
+            ranked.append((score, _projection_sum(lineup), -order, lineup))
+    else:
+        effective_quantile = MODE_QUANTILE.get(effective_mode, quantile)
+        for order, lineup in enumerate(unique):
+            ranked.append(
+                (
+                    score_lineup(
+                        lineup_player_names(lineup),
+                        sim_matrix,
+                        player_index,
+                        quantile=effective_quantile,
+                        ownership_lookup=ownership_lookup,
+                        ownership_penalty=ownership_penalty,
+                        player_ids=lineup_player_ids(lineup),
+                    ),
+                    _projection_sum(lineup),
+                    -order,
+                    lineup,
+                )
+            )
 
     ranked.sort(reverse=True)
     ordered = [lineup for _, _, _, lineup in ranked]
@@ -250,6 +365,7 @@ def optimize_with_sim_rerank(
     site: str = "fanduel",
     *,
     quantile: float = 0.85,
+    mode: str = DEFAULT_RERANK_MODE,
     ownership_lookup: Mapping[str, float] | None = None,
     ownership_penalty: float = 0.0,
     **kwargs: Any,
@@ -280,6 +396,7 @@ def optimize_with_sim_rerank(
         player_index,
         final_count=final,
         quantile=quantile,
+        mode=mode,
         ownership_lookup=ownership_lookup,
         ownership_penalty=ownership_penalty,
         max_exposure=exposure,

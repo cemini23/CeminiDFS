@@ -139,6 +139,19 @@ except ImportError:  # pragma: no cover - defensive for partial installs
     render_calibration_brief = None  # type: ignore[assignment]
 
 try:
+    from ceminidfs.pipeline.calibrate_jev import (
+        format_calibrate_jev_summary,
+        run_calibrate_jev,
+        write_calibrate_jev_json,
+        write_calibrate_jev_markdown,
+    )
+except ImportError:  # pragma: no cover - defensive for partial installs
+    run_calibrate_jev = None  # type: ignore[assignment]
+    write_calibrate_jev_json = None  # type: ignore[assignment]
+    write_calibrate_jev_markdown = None  # type: ignore[assignment]
+    format_calibrate_jev_summary = None  # type: ignore[assignment]
+
+try:
     from ceminidfs.pipeline.lineup_backtest import (
         format_lineup_backtest_summary,
         run_lineup_backtest,
@@ -271,6 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Candidate lineups before rerank (GPP profile default 500)",
     )
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
+    _add_rerank_mode_argument(optimize)
     _add_optimizer_build_arguments(optimize)
     _add_fade_guard_arguments(optimize)
     _add_review_report_arguments(optimize, default_on=True)
@@ -452,6 +466,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Candidate lineups before rerank (GPP profile default 500)",
     )
     run.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
+    _add_rerank_mode_argument(run)
     run.add_argument(
         "--stages",
         default="all",
@@ -709,6 +724,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Week for benchmark CSV (default: end-week)",
     )
     calibrate.set_defaults(handler=_cmd_calibrate)
+
+    calibrate_jev = subparsers.add_parser(
+        "calibrate-jev",
+        help="Walk-forward GMM + Jev calibration against the v6 report",
+    )
+    calibrate_jev.add_argument(
+        "--weeks",
+        required=True,
+        help="Season-week window token, e.g. 2025_w5-17",
+    )
+    calibrate_jev.add_argument(
+        "--out",
+        dest="output_path",
+        type=Path,
+        default=None,
+        help="Markdown report path (default: reports/calibration_<weeks>_v7_jev.md)",
+    )
+    calibrate_jev.add_argument(
+        "--json-out",
+        dest="json_output_path",
+        type=Path,
+        default=None,
+        help="JSON report path (default: reports/calibration_<weeks>_v7_jev.json)",
+    )
+    calibrate_jev.add_argument("--v6-report", type=Path, default=None, help="Baseline v6 JSON")
+    calibrate_jev.add_argument("--n-iterations", type=int, default=10000)
+    calibrate_jev.add_argument(
+        "--dispersion-scale",
+        type=float,
+        default=None,
+        help="Fix the sigma multiplier instead of fitting it on the window",
+    )
+    _add_jev_decision_arguments(calibrate_jev)
+    calibrate_jev.set_defaults(handler=_cmd_calibrate_jev)
 
     sleeper = subparsers.add_parser("sleeper", help="Sleeper public API tools (K129 buzz)")
     sleeper_sub = sleeper.add_subparsers(dest="sleeper_command")
@@ -1399,6 +1448,36 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_calibrate_jev(args: argparse.Namespace) -> int:
+    if (
+        run_calibrate_jev is None
+        or write_calibrate_jev_json is None
+        or write_calibrate_jev_markdown is None
+        or format_calibrate_jev_summary is None
+    ):
+        raise RuntimeError("Calibrate-jev unavailable: ceminidfs.pipeline.calibrate_jev import failed")
+
+    config = runtime_config()
+    provider = "prior" if bool(getattr(args, "no_jev", False)) else args.jev_provider
+    report = run_calibrate_jev(
+        args.weeks,
+        config=config,
+        provider=provider,
+        fallback=args.jev_fallback,
+        n_iterations=int(args.n_iterations),
+        cache_dir=args.jev_cache_dir,
+        v6_report=args.v6_report or Path("reports/calibration_2025_w5-17_v6.json"),
+        dispersion_scale=args.dispersion_scale,
+    )
+    default_stem = Path("reports") / f"calibration_{args.weeks}_v7_jev"
+    json_path = write_calibrate_jev_json(report, args.json_output_path or default_stem.with_suffix(".json"))
+    md_path = write_calibrate_jev_markdown(report, args.output_path or default_stem.with_suffix(".md"))
+    print(format_calibrate_jev_summary(report))
+    print(f"\nJSON: {json_path}")
+    print(f"Brief: {md_path}")
+    return 0
+
+
 def _cmd_lineup_backtest(args: argparse.Namespace) -> int:
     if (
         run_lineup_backtest is None
@@ -1732,6 +1811,40 @@ def _add_environment_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_jev_decision_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the tiered Jev decision-client flags (Choice and Score routing)."""
+
+    parser.add_argument(
+        "--jev-provider",
+        choices=("auto", "typesafe", "mcp", "openrouter", "prior"),
+        default="auto",
+        help="Tiered Jev provider routing (default: auto)",
+    )
+    parser.add_argument(
+        "--jev-fallback",
+        choices=("prior", "raise"),
+        default="prior",
+        help="Fallback when every network provider fails (default: prior)",
+    )
+    parser.add_argument(
+        "--jev-model-version",
+        default="jev-1.13",
+        help="Pinned Jev model version (default: jev-1.13)",
+    )
+    parser.add_argument(
+        "--jev-cache-dir",
+        type=Path,
+        default=None,
+        help="Jev answer cache directory (default: data/cache/jev)",
+    )
+    parser.add_argument(
+        "--no-jev",
+        action="store_true",
+        default=False,
+        help="Disable network providers and use the deterministic prior only",
+    )
+
+
 def _add_jev_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the Jev pre-lock gate flags. The gate marks. It does not swap."""
 
@@ -1890,6 +2003,18 @@ def _parse_soft_fade(values: list[str] | None) -> dict[str, float]:
     return weights
 
 
+def _add_rerank_mode_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--rerank-mode",
+        choices=("fpts", "ceiling", "leverage"),
+        default=None,
+        help=(
+            "Simulation rerank objective: fpts (median), ceiling (tail), or "
+            "leverage (P(score >= top 1%%) / geom_mean_own ** 0.5)"
+        ),
+    )
+
+
 def _sim_rerank_cli_override(args: argparse.Namespace) -> dict[str, Any]:
     override: dict[str, Any] = {
         "final_count": args.final_count,
@@ -1898,6 +2023,8 @@ def _sim_rerank_cli_override(args: argparse.Namespace) -> dict[str, Any]:
         override["candidates"] = args.candidates
     if getattr(args, "sim_rerank", None) is not None:
         override["enabled"] = args.sim_rerank
+    if getattr(args, "rerank_mode", None) is not None:
+        override["mode"] = args.rerank_mode
     return override
 
 

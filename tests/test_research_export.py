@@ -636,15 +636,16 @@ def test_handoff_prefers_fd_projection_and_environment_total(tmp_path: Path):
     maybe_write_review_reports(lineups, players, environment=environment)
     header, body = _read(tmp_path / "ceminidfs_handoff.csv")
     assert header == PARLAYS_HANDOFF_HEADER
-    by_name = {row[0]: row for row in body}
+    # Player-level contract: name is column 3, implied_total 7, fpts_median 9.
+    by_name = {row[3]: row for row in body}
     assert "Kansas City Chiefs" not in by_name
     bowers = by_name["Brock Bowers"]
-    assert bowers[2] == "7.08"
-    assert bowers[5] == "25"
-    assert bowers[6] == "Q"
+    assert bowers[7] == "25"
+    assert bowers[9] == "7.08"
+    assert bowers[8] == ""  # no spread cited in the environment file
     allen = by_name["Josh Allen"]
-    assert allen[2] == "19.5"
-    assert allen[5] == ""
+    assert allen[9] == "19.5"
+    assert allen[7] == ""
 
     bare = load_player_index(players)
     direct = write_parlays_handoff(
@@ -653,7 +654,7 @@ def test_handoff_prefers_fd_projection_and_environment_total(tmp_path: Path):
         bare,
     )
     _, direct_rows = _read(direct)
-    assert all(row[0] != "Kansas City Chiefs" for row in direct_rows)
+    assert all(row[3] != "Kansas City Chiefs" for row in direct_rows)
     assert direct_rows
 
 

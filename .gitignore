@@ -38,6 +38,9 @@ research/
 # BBM runtime data (ledger, registry snapshots)
 data/bbm/
 
+# Jev response cache (data/cache/jev/<sha256>.json — runtime, never commit)
+data/cache/
+
 # Local reports output (calibration, backtest, benchmarks)
 # Note: docs/benchmarks/ is tracked for committed benchmarks
 reports/

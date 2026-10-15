@@ -334,9 +334,10 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
 
         rerank_cfg = _sim_rerank_config(config)
         sim_matrix, player_index = _load_or_build_sim_rerank_inputs(input_path, config)
+        mode = str(rerank_cfg.get("mode", "ceiling") or "ceiling")
         ownership_lookup = None
         ownership_penalty = float(rerank_cfg.get("ownership_penalty", 0.0) or 0.0)
-        if ownership_penalty > 0:
+        if ownership_penalty > 0 or mode == "leverage":
             from ceminidfs.export.sim_rerank import build_ownership_lookup
 
             ownership_lookup = build_ownership_lookup(input_path)
@@ -349,6 +350,7 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
             final=int(rerank_cfg.get("final_count", config.get("final_count", count))),
             site=str(config.get("site", "fanduel")),
             quantile=float(rerank_cfg.get("quantile", 0.85)),
+            mode=mode,
             ownership_lookup=ownership_lookup,
             ownership_penalty=ownership_penalty,
             **build_kwargs,

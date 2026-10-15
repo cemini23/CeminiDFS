@@ -17,6 +17,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, Mapping, Sequence
 
+from ceminidfs.export.handoff import (
+    HANDOFF_COLUMNS,
+    HandoffContext,
+    PlayerHandoff,
+    build_handoff_context,
+    normalize_handoff_name,
+)
 from ceminidfs.export.lineup_report import lineup_stack_badges
 from ceminidfs.export.normalize import normalize_site
 from ceminidfs.export.optimize import LINEUP_HEADERS
@@ -28,15 +35,9 @@ from ceminidfs.models.ownership import (
 
 
 PARLAYS_HANDOFF_NAME = "ceminidfs_handoff.csv"
-PARLAYS_HANDOFF_HEADER = [
-    "player",
-    "team",
-    "projection",
-    "lineup_exposure_pct",
-    "game",
-    "implied_total",
-    "injury_status",
-]
+# The upgraded player-level contract. Imported so the CLI, tests, and the writer
+# share one source of truth. See ``ceminidfs.export.handoff``.
+PARLAYS_HANDOFF_HEADER = list(HANDOFF_COLUMNS)
 
 STACK_FRAGILITY_NAME = "stack_fragility_report.csv"
 LATE_SWAP_ALERT_NAME = "late_swap_alert_report.csv"
@@ -60,6 +61,10 @@ LEVERAGE_FADE_HEADER = [
     "projected_own_pct",
     "leverage",
     "flag",
+    "jev_proj_own",
+    "player_leverage_ratio",
+    "jev_regime_top_state",
+    "jev_provider",
 ]
 DUPLICATE_CORE_HEADER = [
     "qb",
@@ -180,6 +185,8 @@ def maybe_write_review_reports(
     season: int | None = None,
     week: int | None = None,
     core_cap: int | None = None,
+    handoff_context: HandoffContext | None = None,
+    build_handoff: bool = True,
 ) -> list[Path]:
     """Write the selected review CSVs next to the lineup file (or into ``out_dir``)."""
 
@@ -198,6 +205,10 @@ def maybe_write_review_reports(
     lineups = parse_lineup_csv(lineups_file, site=site_key, players=players)
     implied_totals = _implied_totals_from_environment(environment)
 
+    context = handoff_context
+    if context is None and build_handoff:
+        context = _build_handoff_context(dest)
+
     written: list[Path] = []
     written.append(
         write_parlays_handoff(
@@ -205,6 +216,7 @@ def maybe_write_review_reports(
             lineups,
             players,
             implied_totals=implied_totals,
+            context=context,
         )
     )
 
@@ -220,6 +232,7 @@ def maybe_write_review_reports(
                 players,
                 site=site_key,
                 calibration_path=ownership_calibration,
+                context=context,
             )
         )
     if flag_duplicate_cores:
@@ -325,6 +338,8 @@ def pop_review_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         "season": kwargs.pop("season", None),
         "week": kwargs.pop("week", None),
         "core_cap": kwargs.pop("core_cap", None),
+        "handoff_context": kwargs.pop("handoff_context", None),
+        "build_handoff": bool(kwargs.pop("build_handoff", True)),
     }
 
 
@@ -528,8 +543,13 @@ def write_leverage_fade_matrix(
     *,
     site: str = "fanduel",
     calibration_path: str | Path | None = None,
+    context: HandoffContext | None = None,
 ) -> Path:
-    """Exposure vs projected own%. Never writes FPPG. Never excludes players."""
+    """Exposure vs projected own%. Never writes FPPG. Never excludes players.
+
+    The trailing columns report the zero-scrape synthetic ownership and the Jev
+    regime routing when a :class:`HandoffContext` is available.
+    """
 
     total = len(lineups)
     counts: Counter[str] = Counter()
@@ -550,6 +570,7 @@ def write_leverage_fade_matrix(
         flag = ""
         if own >= OWN_FLAG_MIN_PCT and exposure >= own:
             flag = NEGATIVE_LEVERAGE
+        record = context.lookup(name) if context is not None else None
         rows.append(
             [
                 display.get(name, name),
@@ -557,6 +578,10 @@ def write_leverage_fade_matrix(
                 f"{own:.1f}",
                 f"{leverage:.1f}",
                 flag,
+                record.jev_proj_own if record is not None else "",
+                record.leverage_ratio() if record is not None else "",
+                record.jev_regime_state if record is not None else "",
+                record.jev_provider if record is not None else "",
             ]
         )
     return _write_report(path, LEVERAGE_FADE_HEADER, rows)
@@ -1055,49 +1080,79 @@ def write_parlays_handoff(
     players: Mapping[str, PlayerMeta],
     *,
     implied_totals: Mapping[str, str] | None = None,
+    context: HandoffContext | None = None,
+    slate_id: str = "",
 ) -> Path:
-    """Write the parlays handoff CSV next to the lineup file.
+    """Write the upgraded player-level handoff CSV next to the lineup file.
 
-    projection is fd_projection when that column is present.
-    implied_total stays blank when no cited total exists.
-    DST, DEF, and D rows are omitted. No FanDuel contest IDs, no salary.
-    Exposure = 100 * (lineups containing the player) / n_lineups, one decimal.
+    When a :class:`HandoffContext` is supplied the file covers the whole slate
+    with disaggregated stat-level GMM bands. Without one it falls back to the
+    players rostered in ``lineups``: identity and environment fields are filled
+    from the player index and only ``fpts_median`` carries a point estimate
+    (the FanDuel projection). DST, DEF, and D rows are omitted. No FanDuel
+    contest IDs and no salary are written.
     """
+
+    if context is not None and len(context):
+        rows = [record.row() for record in context.ordered()]
+        return _write_report(path, PARLAYS_HANDOFF_HEADER, rows)
 
     totals = implied_totals or {}
     normalized_lineups = _extract_lineup_names(lineups)
-    total = len(normalized_lineups)
-    counts: Counter[str] = Counter()
-    display: dict[str, str] = {}
+    seen: dict[str, PlayerHandoff] = {}
     for seats in normalized_lineups:
-        names = {_canonical_name(players, name) for _slot, name in seats if name}
-        counts.update(names)
-        for name in names:
-            display.setdefault(name, name)
-
-    rows: list[list[str]] = []
-    for name in sorted(counts.keys()):
-        meta = _lookup(players, name)
-        if _is_defense(meta):
-            continue
-        exposure = (counts[name] / total * 100.0) if total else 0.0
-        team = meta.team if meta is not None else ""
-        projection = _handoff_projection(meta)
-        game = meta.game_raw if meta is not None else ""
-        injury_status = meta.injury if meta is not None else ""
-        implied_total = totals.get(team.upper(), "") if team else ""
-        rows.append(
-            [
-                display.get(name, name),
-                team,
-                projection,
-                f"{exposure:.1f}",
-                game,
-                implied_total,
-                injury_status,
-            ]
-        )
+        for _slot, name in seats:
+            if not name:
+                continue
+            meta = _lookup(players, name)
+            if _is_defense(meta):
+                continue
+            record = _fallback_handoff(meta, name, implied_totals=totals, slate_id=slate_id)
+            seen.setdefault(normalize_handoff_name(record.player_name), record)
+    ordered = sorted(seen.values(), key=lambda record: normalize_handoff_name(record.player_name))
+    rows = [record.row() for record in ordered]
     return _write_report(path, PARLAYS_HANDOFF_HEADER, rows)
+
+
+def _fallback_handoff(
+    meta: PlayerMeta | None,
+    name: str,
+    *,
+    implied_totals: Mapping[str, str],
+    slate_id: str,
+) -> PlayerHandoff:
+    """Build a handoff record from the player index when no run context exists."""
+
+    team = meta.team if meta is not None else ""
+    game_id = meta.game_id if meta is not None else ""
+    projection = _handoff_projection(meta) if meta is not None else ""
+    return PlayerHandoff(
+        player_name=meta.name if meta is not None else name,
+        player_id=meta.player_id if meta is not None else "",
+        slate_id=slate_id,
+        game_id=game_id,
+        team=team,
+        opp=_opponent(meta, game_id),
+        position=meta.position if meta is not None else "",
+        implied_total=implied_totals.get(team.upper(), "") if team else "",
+        fpts_median=projection,
+    )
+
+
+def _opponent(meta: PlayerMeta | None, game_id: str) -> str:
+    if meta is not None:
+        opp = str(meta.row.get("opp") or meta.row.get("Opponent") or "").strip().upper()
+        if opp:
+            return opp
+    if game_id and "@" in game_id:
+        away, home = game_id.split("@", 1)
+        if meta is not None and meta.team:
+            team = meta.team.upper()
+            if team == away:
+                return home
+            if team == home:
+                return away
+    return ""
 
 
 def _handoff_projection(meta: PlayerMeta | None) -> str:
@@ -1117,6 +1172,20 @@ def _is_defense(meta: PlayerMeta | None) -> bool:
     tokens = {str(meta.position or "").upper()}
     tokens.update(str(item).upper() for item in meta.positions)
     return bool(tokens & {"D", "DEF", "DST"})
+
+
+def _build_handoff_context(dest: Path) -> HandoffContext | None:
+    """Build the slate-wide handoff context from a run directory, or ``None``.
+
+    A directory without a projection base (a bare optimize on an arbitrary CSV)
+    returns ``None`` so the writer falls back to the lineup-level summary. Any
+    build error also returns ``None``: the handoff is a report, not a gate.
+    """
+
+    try:
+        return build_handoff_context(dest)
+    except Exception:  # pragma: no cover - a report must never break the solve.
+        return None
 
 
 def _implied_totals_from_environment(environment: str | Path | None) -> dict[str, str] | None:

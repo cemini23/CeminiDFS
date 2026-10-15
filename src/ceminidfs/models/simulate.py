@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any, Mapping
 
 import numpy as np
@@ -108,6 +108,213 @@ def simulate_fd_points_copula(
     marginal_normals = _normal_ppf(uniforms)
     log_multiplier = sigma[:, None] * marginal_normals
     return np.maximum(0.0, medians[:, None] * np.exp(log_multiplier))
+
+
+# --------------------------------------------------------------------------- #
+# Injury / role regime Gaussian mixture (Integration A).
+#
+# A unimodal lognormal draw misses the bimodal decoy and re-aggravation tails.
+# The mixture keeps the same central mass but moves weight into a low decoy mode
+# and a truncated early-exit mode. Weights come from the Jev regime router.
+# --------------------------------------------------------------------------- #
+GMM_COMPONENT_NAMES = ("full_role", "snap_count_decoy", "in_game_reaggravation_exit")
+GMM_FULL_ROLE_SCALE = 1.15
+GMM_DECOY_LOC = 0.55
+GMM_DECOY_SCALE = 0.75
+GMM_EXIT_LOC = 0.22
+GMM_EXIT_SCALE = 0.45
+# (p85 - p15) of a standard normal is 2 * 1.0364. sigma_eff divides it back out.
+SIGMA_EFF_DENOMINATOR = 2.073
+_TRUNCATION_EPSILON = 1.0e-9
+
+
+def simulate_fd_points_gmm(
+    df: pd.DataFrame,
+    regime_weights: Mapping[Any, Sequence[float]],
+    n_iterations: int = 10000,
+    seed: int | None = None,
+    site: str = "fanduel",
+    config: Mapping[str, Any] | None = None,
+    *,
+    dispersion_scale: float = 1.0,
+) -> np.ndarray:
+    """Return FanDuel points from a conditional 3-component Gaussian mixture.
+
+    ``regime_weights`` maps a player id (or name) to three active weights
+    ``(w_full_role, w_decoy, w_exit)`` that sum to one. A player with no entry
+    falls back to the healthy prior mixture. ``sigma`` is the position relative
+    dispersion times the projection, in FanDuel points. ``dispersion_scale``
+    multiplies ``sigma`` and is the single variance-calibration knob the
+    walk-forward coverage fit sets.
+    """
+
+    _validate_inputs(df, n_iterations)
+    seed = _seed_from_config(config, seed)
+    if df.empty:
+        return np.empty((0, n_iterations), dtype=float)
+
+    rng = np.random.default_rng(seed)
+    projections = pd.to_numeric(df["fd_projection"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    medians = projections.to_numpy(dtype=float)
+
+    cv = df.apply(lambda row: position_cv_for_row(row, config=config), axis=1).to_numpy(dtype=float)
+    sigmas = np.maximum(cv * medians, 0.0) * max(0.0, float(dispersion_scale))
+
+    weights = _regime_weight_matrix(df, regime_weights)
+    return sample_regime_gmm(medians, sigmas, weights, n_iterations=n_iterations, rng=rng)
+
+
+def sample_regime_gmm(
+    medians: np.ndarray,
+    sigmas: np.ndarray,
+    weights: np.ndarray,
+    *,
+    n_iterations: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample ``n_players`` rows of ``n_iterations`` draws from the mixture.
+
+    Component 1 is ``N(mu, (1.15 sigma)^2)``. Component 2 is
+    ``N(0.55 mu, (0.75 sigma)^2)``. Component 3 is
+    ``TruncatedNormal(0.22 mu, (0.45 sigma)^2, low=0)``. Draws are floored at 0.
+    """
+
+    medians = np.asarray(medians, dtype=float).reshape(-1, 1)
+    sigmas = np.asarray(sigmas, dtype=float).reshape(-1, 1)
+    weights = _normalize_weight_matrix(np.asarray(weights, dtype=float))
+    n_players = medians.shape[0]
+    if n_iterations <= 0:
+        raise ValueError("n_iterations must be positive")
+
+    uniforms = rng.random((n_players, n_iterations))
+    cumulative = np.cumsum(weights, axis=1)
+    component = (uniforms[:, :, None] > cumulative[:, None, :]).sum(axis=2)
+
+    standard = rng.standard_normal((n_players, n_iterations))
+    full_role = medians + (GMM_FULL_ROLE_SCALE * sigmas * standard)
+    decoy = (GMM_DECOY_LOC * medians) + (GMM_DECOY_SCALE * sigmas * standard)
+    exit_draws = _truncated_normal_lower(
+        loc=GMM_EXIT_LOC * medians,
+        scale=GMM_EXIT_SCALE * sigmas,
+        low=0.0,
+        uniforms=rng.random((n_players, n_iterations)),
+    )
+
+    draws = np.where(component == 0, full_role, np.where(component == 1, decoy, exit_draws))
+    return np.maximum(0.0, draws)
+
+
+def gmm_summary(
+    draws: np.ndarray,
+    player_ids: Iterable[Any],
+) -> pd.DataFrame:
+    """Return empirical percentile bands and ``sigma_eff`` per player.
+
+    ``p15``, ``p50_median``, ``p85``, and ``p95_ceiling`` come straight from the
+    draws. ``sigma_eff = (p85 - p15) / 2.073`` is the effective standard
+    deviation implied by the central band.
+    """
+
+    matrix = np.asarray(draws, dtype=float)
+    ids = list(player_ids)
+    if matrix.ndim != 2:
+        raise ValueError("draws must be a 2D array")
+    if len(ids) != matrix.shape[0]:
+        raise ValueError("player_ids length must match draws rows")
+
+    p15, median, p85, p95 = np.quantile(matrix, (0.15, 0.5, 0.85, 0.95), axis=1)
+    sigma_eff = (p85 - p15) / SIGMA_EFF_DENOMINATOR
+    return pd.DataFrame(
+        {
+            "player_id": ids,
+            "p15": p15,
+            "p50_median": median,
+            "p85": p85,
+            "p95_ceiling": p95,
+            "sigma_eff": sigma_eff,
+        }
+    )
+
+
+def _regime_weight_matrix(
+    df: pd.DataFrame, regime_weights: Mapping[Any, Sequence[float]] | None
+) -> np.ndarray:
+    n_players = len(df)
+    if not regime_weights:
+        return _normalize_weight_matrix(np.tile(_healthy_weights(), (n_players, 1)))
+
+    from ceminidfs.models.regime_gmm import HEALTHY_PRIOR
+
+    healthy = np.array(
+        [
+            HEALTHY_PRIOR["full_role"],
+            HEALTHY_PRIOR["snap_count_decoy"],
+            HEALTHY_PRIOR["in_game_reaggravation_exit"],
+        ],
+        dtype=float,
+    )
+    lookup = dict(regime_weights)
+    if "player_id" in df.columns:
+        ids = df["player_id"].fillna("").astype(str).to_numpy()
+    else:
+        ids = np.array([""] * n_players)
+    names = df.get("player_name", pd.Series("", index=df.index)).fillna("").astype(str).to_numpy()
+
+    rows = np.empty((n_players, len(GMM_COMPONENT_NAMES)), dtype=float)
+    for index in range(n_players):
+        weights = lookup.get(ids[index]) or lookup.get(names[index])
+        if weights is None:
+            rows[index] = healthy
+        else:
+            rows[index] = np.asarray(list(weights)[: len(GMM_COMPONENT_NAMES)], dtype=float)
+    return _normalize_weight_matrix(rows)
+
+
+def _healthy_weights() -> list[float]:
+    from ceminidfs.models.regime_gmm import HEALTHY_PRIOR
+
+    return [
+        HEALTHY_PRIOR["full_role"],
+        HEALTHY_PRIOR["snap_count_decoy"],
+        HEALTHY_PRIOR["in_game_reaggravation_exit"],
+    ]
+
+
+def _normalize_weight_matrix(weights: np.ndarray) -> np.ndarray:
+    matrix = np.asarray(weights, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[1] != len(GMM_COMPONENT_NAMES):
+        raise ValueError("weights must be a 2D array with three columns")
+    matrix = np.clip(matrix, 0.0, None)
+    totals = matrix.sum(axis=1, keepdims=True)
+    safe = np.where(totals > 0.0, totals, 1.0)
+    return matrix / safe
+
+
+def _truncated_normal_lower(
+    *,
+    loc: np.ndarray,
+    scale: np.ndarray,
+    low: float,
+    uniforms: np.ndarray,
+) -> np.ndarray:
+    """Inverse-CDF draw of ``N(loc, scale^2)`` truncated to ``[low, inf)``."""
+
+    loc = np.asarray(loc, dtype=float)
+    scale = np.asarray(scale, dtype=float)
+    uniforms = np.asarray(uniforms, dtype=float)
+    result = np.maximum(loc, low)
+    positive = scale > 0.0
+    if not np.any(positive):
+        return result
+
+    alpha = np.divide(
+        low - loc, scale, out=np.full_like(loc, -np.inf), where=positive
+    )
+    phi_alpha = _normal_cdf(alpha)
+    upper = np.clip(phi_alpha + (uniforms * (1.0 - phi_alpha)), _TRUNCATION_EPSILON, 1.0 - _TRUNCATION_EPSILON)
+    quantile = _normal_ppf(upper)
+    truncated = loc + (scale * quantile)
+    return np.where(positive, truncated, result)
 
 
 def simulation_summary(
