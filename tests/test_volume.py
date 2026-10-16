@@ -16,6 +16,7 @@ from ceminidfs.models.volume import (
     neutral_seconds_per_play,
     projected_pass_rate,
     projected_plays,
+    project_team_volume,
 )
 
 
@@ -42,6 +43,27 @@ def test_allocate_play_volume_sums_reasonably():
     assert allocation["dropbacks"] + allocation["rush_attempts"] - (
         allocation["dropbacks"] * 0.08
     ) == pytest.approx(64.0)
+
+
+def test_project_team_volume_pass_attempts_use_pass_attempt_share():
+    """Pass attempts land on the pass-attempt share of plays, not a shrink of it."""
+
+    projection = project_team_volume(
+        season=2025,
+        week=5,
+        team="KC",
+        opponent="BUF",
+        implied_total=27.0,
+        game_total=47.0,
+        spread_team=-3.0,
+        team_sec=LEAGUE_SEC_PER_PLAY,
+        opp_sec=LEAGUE_SEC_PER_PLAY,
+    )
+
+    assert projection.pass_attempts == pytest.approx(
+        projection.plays_projected * projection.pass_rate
+    )
+    assert projection.dropbacks > projection.pass_attempts
 
 
 def test_neutral_seconds_per_play_synthetic_pbp():

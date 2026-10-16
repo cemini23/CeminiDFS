@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 import pandas as pd
@@ -13,6 +14,58 @@ LEAGUE_INTERCEPTIONS_PER_GAME = 0.85
 LEAGUE_FUMBLE_RECOVERIES = 0.55
 LEAGUE_DEF_TD = 0.12
 
+# Spread of a team's actual points scored around its implied total. Measured
+# from the repo's own PBP cache at 9.94 points across 544 team-games in the 2025
+# season; rounded to 10.0 so the smoothed points-allowed term is stable while
+# still reproducing the raw step rule as the deviation shrinks to zero.
+DST_POINTS_ALLOWED_SD = 10.0
+
+# FanDuel points-allowed tiers as (upper bound of opponent points, DST points).
+# The first tier covers every score at or below zero, matching the clamp inside
+# ``fd_dst_points_allowed``.
+_DST_POINTS_ALLOWED_TIERS: tuple[tuple[float, float], ...] = (
+    (0.0, 10.0),
+    (6.0, 7.0),
+    (13.0, 4.0),
+    (20.0, 1.0),
+    (27.0, 0.0),
+    (34.0, -1.0),
+    (math.inf, -4.0),
+)
+
+
+def expected_dst_points_allowed(
+    points_allowed: float,
+    *,
+    sd: float = DST_POINTS_ALLOWED_SD,
+) -> float:
+    """Return E[fd_dst_points_allowed(X)] for X ~ Normal(points_allowed, sd).
+
+    The FanDuel points-allowed rule is a step function of the opponent's score,
+    so evaluating it at the implied total alone collapses every defense onto a
+    handful of tied values and washes out the cross-sectional signal. Taking the
+    expectation over the opponent's scoring distribution restores a smooth term,
+    stays monotone decreasing in the implied total, and reproduces the raw step
+    rule as ``sd`` goes to zero.
+    """
+
+    mean = max(0.0, float(points_allowed))
+    sigma = float(sd)
+    if sigma <= 0.0:
+        return fd_dst_points_allowed(mean)
+
+    expectation = 0.0
+    lower_cdf = 0.0
+    for upper, value in _DST_POINTS_ALLOWED_TIERS:
+        upper_cdf = 1.0 if math.isinf(upper) else _normal_cdf(upper, mean, sigma)
+        expectation += value * max(0.0, upper_cdf - lower_cdf)
+        lower_cdf = upper_cdf
+    return expectation
+
+
+def _normal_cdf(x: float, mean: float, sd: float) -> float:
+    return 0.5 * (1.0 + math.erf((x - mean) / (sd * math.sqrt(2.0))))
+
 
 def project_dst_fantasy_points(
     *,
@@ -20,21 +73,28 @@ def project_dst_fantasy_points(
     opponent: str,
     opponent_implied_total: float,
     opponent_pass_rate: float | None = None,
+    defense_event_rates: Mapping[str, float] | None = None,
 ) -> tuple[float, float]:
-    """Project FanDuel/DraftKings DST points from opponent implied scoring and event priors."""
+    """Project FanDuel/DraftKings DST points from opponent scoring and event priors.
+
+    ``defense_event_rates`` carries the defense's own trailing per-game event
+    rates (sacks, interceptions, opponent fumbles recovered, defensive TDs). It
+    gives the event term real team signal; when it is missing, the league
+    constants stand in.
+    """
 
     del team, opponent
     implied = max(0.0, float(opponent_implied_total))
     pass_rate = 0.565 if opponent_pass_rate is None else float(opponent_pass_rate)
     pass_rate = max(0.35, min(0.75, pass_rate))
 
-    pa_points = fd_dst_points_allowed(implied)
-    event_points = (
-        LEAGUE_SACKS_PER_GAME * 1.0
-        + LEAGUE_INTERCEPTIONS_PER_GAME * 2.0
-        + LEAGUE_FUMBLE_RECOVERIES * 2.0
-        + LEAGUE_DEF_TD * 6.0
-    )
+    pa_points = expected_dst_points_allowed(implied)
+    rates = defense_event_rates or {}
+    sacks = float(rates.get("sacks", LEAGUE_SACKS_PER_GAME))
+    interceptions = float(rates.get("interceptions", LEAGUE_INTERCEPTIONS_PER_GAME))
+    recoveries = float(rates.get("fumbles_recovered", LEAGUE_FUMBLE_RECOVERIES))
+    def_tds = float(rates.get("def_tds", LEAGUE_DEF_TD))
+    event_points = sacks * 1.0 + interceptions * 2.0 + recoveries * 2.0 + def_tds * 6.0
     # Pass-heavy offenses create slightly more sack/INT opportunity.
     event_points *= 0.95 + (0.1 * pass_rate)
 
@@ -155,8 +215,14 @@ def build_week_dst_projections(
     season: int,
     week: int,
     config: Mapping[str, Any] | None = None,
+    pbp: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Return one DST projection row per team on the weekly slate."""
+    """Return one DST projection row per team on the weekly slate.
+
+    ``pbp`` is the walk-forward play-by-play history. When supplied, each defense
+    is scored from its own trailing event rates; otherwise the league constants
+    are used.
+    """
 
     _ = config
     columns = [
@@ -189,8 +255,16 @@ def build_week_dst_projections(
             if team and plays > 0:
                 pass_rate_by_team[team] = passes / plays
 
+    slate_teams = teams_on_slate(vegas)
+    defense_rates_by_team: dict[str, dict[str, float]] = {}
+    if pbp is not None and not pbp.empty:
+        for team in slate_teams:
+            rates = _defense_trailing_event_rates(pbp, team, season=season, week=week)
+            if rates is not None:
+                defense_rates_by_team[team] = rates
+
     rows: list[dict[str, Any]] = []
-    for team in teams_on_slate(vegas):
+    for team in slate_teams:
         opponent = opponent_for_team(vegas, team)
         implied = implied_total_for_team(vegas, opponent) if opponent else None
         if implied is None:
@@ -200,6 +274,7 @@ def build_week_dst_projections(
             opponent=opponent,
             opponent_implied_total=implied,
             opponent_pass_rate=pass_rate_by_team.get(opponent),
+            defense_event_rates=defense_rates_by_team.get(team),
         )
         rows.append(
             {
@@ -311,16 +386,69 @@ def _points_allowed_for_team(
     return 0.0
 
 
+def _defense_trailing_event_rates(
+    pbp: pd.DataFrame,
+    team: str,
+    *,
+    season: int,
+    week: int,
+) -> dict[str, float] | None:
+    """Return one defense's own per-game event rates from weeks before ``week``.
+
+    Walk-forward only: current-season weeks at or after ``week`` are dropped, so
+    the projection never sees the game it is predicting. A defense with no prior
+    games returns ``None`` and the caller falls back to the league constants.
+    """
+
+    if pbp is None or pbp.empty:
+        return None
+    history = _pbp_before_week(pbp, season, week)
+    if history.empty:
+        return None
+    defense = _defense_frame(history, team)
+    if defense.empty:
+        return None
+    games = _defense_games(defense)
+    if games <= 0:
+        return None
+    events = _defensive_events(history, team)
+    return {key: value / games for key, value in events.items()}
+
+
+def _pbp_before_week(pbp: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
+    """Keep prior games only, leaving prior-season history intact."""
+
+    if "week" not in pbp.columns:
+        return pbp
+    week_num = pd.to_numeric(pbp["week"], errors="coerce")
+    if "season" in pbp.columns:
+        season_num = pd.to_numeric(pbp["season"], errors="coerce").fillna(season)
+        current = season_num == season
+        return pbp.loc[~current | (week_num < week)]
+    return pbp.loc[week_num < week]
+
+
+def _defense_frame(pbp: pd.DataFrame, team: str) -> pd.DataFrame:
+    if pbp.empty or "defteam" not in pbp.columns:
+        return pbp.iloc[0:0]
+    return pbp.loc[pbp["defteam"].astype(str).str.upper().eq(str(team).strip().upper())]
+
+
+def _defense_games(defense: pd.DataFrame) -> int:
+    if "game_id" in defense.columns:
+        ids = defense["game_id"].dropna().astype(str).str.strip()
+        unique = ids.loc[ids.ne("") & ids.ne("nan")].nunique()
+        if unique > 0:
+            return int(unique)
+    if "week" in defense.columns:
+        weeks = pd.to_numeric(defense["week"], errors="coerce").dropna()
+        if not weeks.empty:
+            return int(weeks.nunique())
+    return 1 if len(defense) > 0 else 0
+
+
 def _defensive_events(pbp: pd.DataFrame, team: str) -> dict[str, float]:
-    if "defteam" not in pbp.columns:
-        return {
-            "sacks": 0.0,
-            "interceptions": 0.0,
-            "fumbles_recovered": 0.0,
-            "def_tds": 0.0,
-            "safeties": 0.0,
-        }
-    defense = pbp.loc[pbp["defteam"].astype(str).str.upper().eq(team.strip().upper())]
+    defense = _defense_frame(pbp, team)
     if defense.empty:
         return {
             "sacks": 0.0,

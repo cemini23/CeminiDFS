@@ -120,7 +120,12 @@ def projected_pass_rate(
     wind_mph: float | None = None,
     base: float = BASE_PASS_RATE,
 ) -> float:
-    """Project pass rate from PROE, spread, and wind."""
+    """Project pass rate from PROE, spread, and wind.
+
+    The result is a pass-attempt share of scrimmage plays, not a dropback share:
+    its league base (``BASE_PASS_RATE``) matches the observed pass-attempt share,
+    and sacks and scrambles are removed downstream when dropbacks are allocated.
+    """
 
     spread_val = pd.to_numeric(team_spread, errors="coerce")
     spread_adj = 0.0 if pd.isna(spread_val) else 0.005 * float(spread_val)
@@ -134,6 +139,26 @@ def projected_pass_rate(
 
     pass_rate = base + (0.8 * (neutral_proe / 100.0)) + spread_adj + wind_adj
     return max(0.35, min(0.75, pass_rate))
+
+
+def dropback_rate_for_pass_share(
+    pass_rate: float,
+    sack_rate: float = DEFAULT_SACK_RATE,
+    scramble_rate: float = DEFAULT_SCRAMBLE_RATE,
+) -> float:
+    """Convert a pass-attempt share of plays into the dropback share.
+
+    ``projected_pass_rate`` returns attempts as a share of scrimmage plays, while
+    ``allocate_play_volume`` expects the dropback share and then strips sacks and
+    scrambles to recover attempts. Dividing by ``1 - sack_rate - scramble_rate``
+    inverts that step, so the allocated pass attempts land on the pass-attempt
+    share instead of being scaled down a second time.
+    """
+
+    retained = 1.0 - sack_rate - scramble_rate
+    if retained <= 0.0:
+        return float(pass_rate)
+    return float(pass_rate) / retained
 
 
 def allocate_play_volume(
@@ -178,7 +203,12 @@ def project_team_volume(
         neutral_proe=neutral_proe,
         wind_mph=wind_mph,
     )
-    allocation = allocate_play_volume(plays=plays, pass_rate=pass_rate)
+    # projected_pass_rate is a pass-attempt share; allocate_play_volume wants the
+    # dropback share so it does not strip sacks and scrambles twice.
+    allocation = allocate_play_volume(
+        plays=plays,
+        pass_rate=dropback_rate_for_pass_share(pass_rate),
+    )
 
     return TeamVolumeProjection(
         season=season,

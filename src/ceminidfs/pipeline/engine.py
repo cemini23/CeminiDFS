@@ -227,6 +227,7 @@ def build_diy_projections_from_frames(
         season=season,
         week=week,
         config=config,
+        pbp=historical_pbp,
     )
     if not dst_df.empty:
         scored = pd.concat([scored, dst_df], ignore_index=True, sort=False)
