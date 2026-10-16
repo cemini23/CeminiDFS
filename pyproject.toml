@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-data = ["nflreadpy>=0.1.0", "pyarrow>=14.0"]
+data = ["nflreadpy>=0.1.0", "pyarrow>=14.0", "scipy>=1.11"]
 eval = ["sportsdataverse>=0.0.60", "nflreadpy>=0.1.0", "pyarrow>=14.0"]
 optimize = ["pydfs-lineup-optimizer>=3.6"]
 bbm = ["rapidfuzz>=3.0", "nflreadpy>=0.1.0"]
