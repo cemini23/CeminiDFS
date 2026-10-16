@@ -99,7 +99,13 @@ def compute_team_luck_table(
 ) -> pd.DataFrame:
     """Aggregate team luck: actual wins minus Pythagorean expected wins."""
 
-    sched = schedules if schedules is not None else fetch_schedules(season)
+    if schedules is None:
+        try:
+            sched = fetch_schedules(season)
+        except ImportError:
+            sched = pd.DataFrame()
+    else:
+        sched = schedules
     games = team_game_rows(sched, through_week)
     if games.empty:
         return pd.DataFrame(

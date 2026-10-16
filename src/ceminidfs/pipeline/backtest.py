@@ -70,7 +70,10 @@ def resolve_vegas_for_week(season: int, week: int) -> pd.DataFrame:
     if not vegas.empty:
         return vegas
 
-    schedules = fetch_schedules(season)
+    try:
+        schedules = fetch_schedules(season)
+    except ImportError:
+        return pd.DataFrame()
     week_schedules = filter_by_week(schedules, week)
     if week_schedules.empty:
         return pd.DataFrame()
