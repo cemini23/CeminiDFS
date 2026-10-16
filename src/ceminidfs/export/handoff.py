@@ -197,13 +197,17 @@ def _gmm_bands(
 ) -> dict[str, np.ndarray]:
     """Return median/sigma/p15/p85/mean arrays for a stacked batch of draws."""
 
-    from ceminidfs.models.simulate import sample_regime_gmm
+    from ceminidfs.models.simulate import median_recenter_factors, sample_regime_gmm
 
+    medians = np.asarray(medians, dtype=float)
+    sigmas = np.asarray(sigmas, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    factors = median_recenter_factors(medians, sigmas, weights)
     rng = np.random.default_rng(int(seed))
     draws = sample_regime_gmm(
-        np.asarray(medians, dtype=float),
-        np.asarray(sigmas, dtype=float),
-        np.asarray(weights, dtype=float),
+        medians * factors,
+        sigmas,
+        weights,
         n_iterations=int(n_iterations),
         rng=rng,
     )

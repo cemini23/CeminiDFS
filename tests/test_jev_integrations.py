@@ -23,6 +23,7 @@ import pytest
 from ceminidfs.export.handoff import (
     HANDOFF_BASE_COLUMNS,
     HANDOFF_COLUMNS,
+    _gmm_bands,
     build_handoff_context,
 )
 from ceminidfs.export.review_reports import (
@@ -41,7 +42,12 @@ from ceminidfs.models.regime_gmm import (
     active_weights,
     inactive_risk,
 )
-from ceminidfs.models.simulate import sample_regime_gmm
+from ceminidfs.models.simulate import (
+    GMM_DECOY_LOC,
+    GMM_EXIT_LOC,
+    median_recenter_factors,
+    sample_regime_gmm,
+)
 from ceminidfs.models.synthetic_ownership import (
     POSITION_OWNERSHIP_TARGET,
     normalize_position_ownership,
@@ -333,6 +339,188 @@ def test_inactive_risk_flag_threshold() -> None:
     assert inactive_risk({"pre_game_inactive": 0.51}) is True
     assert inactive_risk({"pre_game_inactive": 0.50}) is False
     assert inactive_risk(HEALTHY_PRIOR) is False
+
+
+# --------------------------------------------------------------------------- #
+# Median re-centering and the consensus Brier.
+# --------------------------------------------------------------------------- #
+def _recentered_draws(
+    median: float,
+    sigma: float,
+    weights: tuple[float, float, float],
+    *,
+    n: int = 200_000,
+    seed: int = 20261015,
+) -> tuple[float, np.ndarray]:
+    factor = median_recenter_factors(
+        np.array([median]), np.array([sigma]), np.array([weights])
+    )[0]
+    draws = sample_regime_gmm(
+        np.array([factor * median]),
+        np.array([sigma]),
+        np.array([weights]),
+        n_iterations=n,
+        rng=np.random.default_rng(seed),
+    )[0]
+    return float(factor), draws
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [(0.92, 0.05, 0.03), (0.50, 0.30, 0.20), (0.60, 0.25, 0.15)],
+)
+def test_recentered_mixture_centres_on_mu(weights: tuple[float, float, float]) -> None:
+    median, sigma = 20.0, 6.0
+    factor, draws = _recentered_draws(median, sigma, weights)
+    assert factor >= 1.0
+    # The mixture median is mu by construction...
+    assert np.median(draws) == pytest.approx(median, rel=0.01)
+    # ...so P(draw > mu) lands on 0.5, not the 0.46 a mean-centred mixture gives.
+    assert (draws > median).mean() == pytest.approx(0.5, abs=0.01)
+    # The mean is pulled toward mu from the left-skewed blend as well.
+    assert np.mean(draws) == pytest.approx(median, rel=0.05)
+
+
+def test_recenter_preserves_component_location_ratios() -> None:
+    median, sigma = 20.0, 4.0
+    factor = median_recenter_factors(
+        np.array([median]), np.array([sigma]), np.array([[0.5, 0.3, 0.2]])
+    )[0]
+    scaled = factor * median
+
+    def component_median(weights: tuple[float, float, float]) -> float:
+        draws = sample_regime_gmm(
+            np.array([scaled]),
+            np.array([sigma]),
+            np.array([weights]),
+            n_iterations=200_000,
+            rng=np.random.default_rng(7),
+        )[0]
+        return float(np.median(draws))
+
+    full_role = component_median((1.0, 0.0, 0.0))
+    decoy = component_median((0.0, 1.0, 0.0))
+    exit_ = component_median((0.0, 0.0, 1.0))
+    # Locations stay 1.0 / 0.55 / 0.22 after the shared factor is applied.
+    assert full_role / decoy == pytest.approx(1.0 / GMM_DECOY_LOC, rel=0.02)
+    assert full_role / exit_ == pytest.approx(1.0 / GMM_EXIT_LOC, rel=0.10)
+
+
+# --------------------------------------------------------------------------- #
+# Handoff bands share the engine's median re-centering.
+# --------------------------------------------------------------------------- #
+def _healthy_weight_matrix(n_players: int) -> np.ndarray:
+    healthy = np.array(
+        [
+            HEALTHY_PRIOR["full_role"],
+            HEALTHY_PRIOR["snap_count_decoy"],
+            HEALTHY_PRIOR["in_game_reaggravation_exit"],
+        ],
+        dtype=float,
+    )
+    return np.tile(healthy, (n_players, 1))
+
+
+def test_handoff_gmm_bands_are_recentred_on_projection() -> None:
+    """The handoff band median tracks the input projection, not the raw ~0.95x."""
+
+    projections = np.array([6.0, 10.0, 14.0, 20.0, 26.0, 32.0])
+    sigmas = 0.5 * projections
+    weights = _healthy_weight_matrix(projections.shape[0])
+    seed = 20261015
+    iterations = 40_000
+
+    bands = _gmm_bands(projections, sigmas, weights, n_iterations=iterations, seed=seed)
+
+    # Re-centred: the sampled median lands within a few percent of the input.
+    assert np.allclose(bands["median"], projections, rtol=0.03)
+
+    # A raw (un-recentred) sample on the same inputs and seed stays biased low.
+    raw_draws = sample_regime_gmm(
+        projections,
+        sigmas,
+        weights,
+        n_iterations=iterations,
+        rng=np.random.default_rng(seed),
+    )
+    raw_medians = np.quantile(raw_draws, 0.5, axis=1)
+    assert np.all(raw_medians < projections)
+    assert float(np.mean(raw_medians / projections)) < 0.97
+    # The two consumers of the same mixture no longer agree.
+    assert np.all(bands["median"] > raw_medians)
+
+
+def test_handoff_injury_blend_widens_the_band() -> None:
+    """A heavy decoy/exit routing still returns a wider band than healthy."""
+
+    medians = np.array([18.0, 18.0])
+    sigmas = np.array([6.0, 6.0])
+    healthy = np.array(
+        [
+            HEALTHY_PRIOR["full_role"],
+            HEALTHY_PRIOR["snap_count_decoy"],
+            HEALTHY_PRIOR["in_game_reaggravation_exit"],
+        ],
+        dtype=float,
+    )
+    injury = np.array([0.20, 0.50, 0.30], dtype=float)
+    weights = np.vstack([healthy, injury])
+
+    bands = _gmm_bands(medians, sigmas, weights, n_iterations=40_000, seed=20261015)
+
+    healthy_band = bands["p85"][0] - bands["p15"][0]
+    injury_band = bands["p85"][1] - bands["p15"][1]
+    assert injury_band > healthy_band
+
+
+def test_consensus_brier_beats_climatology_when_discriminating() -> None:
+    from ceminidfs.pipeline.calibrate_jev import brier_consensus
+
+    designated = pd.DataFrame(
+        {
+            "fd_consensus": [10.0, 10.0, 10.0, 10.0],
+            "fd_actual": [20.0, 20.0, 5.0, 5.0],
+            "p_above_consensus": [0.95, 0.95, 0.05, 0.05],
+        }
+    )
+    metrics = brier_consensus(designated)
+    assert metrics["score"] is not None
+    assert metrics["climatology"] is not None
+    assert metrics["score"] < metrics["climatology"]
+    assert metrics["n"] == 4
+    assert metrics["n_excluded"] == 0
+
+
+def test_consensus_brier_loses_climatology_when_anti_discriminating() -> None:
+    from ceminidfs.pipeline.calibrate_jev import brier_consensus
+
+    designated = pd.DataFrame(
+        {
+            "fd_consensus": [10.0, 10.0, 10.0, 10.0],
+            "fd_actual": [20.0, 20.0, 5.0, 5.0],
+            "p_above_consensus": [0.05, 0.05, 0.95, 0.95],
+        }
+    )
+    metrics = brier_consensus(designated)
+    assert metrics["score"] is not None
+    assert metrics["climatology"] is not None
+    assert metrics["score"] > metrics["climatology"]
+
+
+def test_consensus_brier_excludes_players_without_baseline() -> None:
+    from ceminidfs.pipeline.calibrate_jev import brier_consensus
+
+    designated = pd.DataFrame(
+        {
+            "fd_consensus": [10.0, float("nan"), 0.0, 10.0],
+            "fd_actual": [20.0, 20.0, 20.0, 5.0],
+            "p_above_consensus": [0.8, 0.8, 0.8, 0.2],
+        }
+    )
+    metrics = brier_consensus(designated)
+    assert metrics["n"] == 2  # the missing and zero baselines are dropped
+    assert metrics["n_excluded"] == 2
+    assert metrics["observed_rate"] == pytest.approx(0.5)
 
 
 # --------------------------------------------------------------------------- #

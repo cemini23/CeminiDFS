@@ -126,6 +126,11 @@ GMM_EXIT_SCALE = 0.45
 # (p85 - p15) of a standard normal is 2 * 1.0364. sigma_eff divides it back out.
 SIGMA_EFF_DENOMINATOR = 2.073
 _TRUNCATION_EPSILON = 1.0e-9
+# Candidate shared scale factors for the median re-centering. Every component
+# location is at or below ``mu`` before correction, so the mixture median sits
+# at or below ``mu`` and the required ``f`` is ``>= 1``. The upper bound covers a
+# certain exit-regime mixture (``1 / GMM_EXIT_LOC`` ~ 4.5) with headroom.
+RECENTER_FACTOR_GRID = np.geomspace(1.0, 12.0, 512)
 
 
 def simulate_fd_points_gmm(
@@ -146,6 +151,10 @@ def simulate_fd_points_gmm(
     dispersion times the projection, in FanDuel points. ``dispersion_scale``
     multiplies ``sigma`` and is the single variance-calibration knob the
     walk-forward coverage fit sets.
+
+    The mixture is re-centred on its **median** before sampling: every component
+    location is multiplied by a per-player ``f_i`` so ``P(draw > mu_i)`` lands on
+    ``0.5``. See :func:`median_recenter_factors`.
     """
 
     _validate_inputs(df, n_iterations)
@@ -154,14 +163,120 @@ def simulate_fd_points_gmm(
         return np.empty((0, n_iterations), dtype=float)
 
     rng = np.random.default_rng(seed)
+    medians, sigmas, weights = _gmm_inputs(df, regime_weights, dispersion_scale, config)
+    factors = median_recenter_factors(medians, sigmas, weights)
+    return sample_regime_gmm(
+        medians * factors, sigmas, weights, n_iterations=n_iterations, rng=rng
+    )
+
+
+def gmm_recenter_factors(
+    df: pd.DataFrame,
+    regime_weights: Mapping[Any, Sequence[float]],
+    *,
+    dispersion_scale: float = 1.0,
+    config: Mapping[str, Any] | None = None,
+) -> np.ndarray:
+    """Return the per-player median re-centering factors for ``df``.
+
+    Mirrors the mixture inputs :func:`simulate_fd_points_gmm` samples, so a
+    caller can report ``mean``/``spread`` of ``f_i`` without resampling.
+    """
+
+    medians, sigmas, weights = _gmm_inputs(df, regime_weights, dispersion_scale, config)
+    return median_recenter_factors(medians, sigmas, weights)
+
+
+def _gmm_inputs(
+    df: pd.DataFrame,
+    regime_weights: Mapping[Any, Sequence[float]],
+    dispersion_scale: float,
+    config: Mapping[str, Any] | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``(medians, sigmas, weights)`` for the conditional mixture."""
+
     projections = pd.to_numeric(df["fd_projection"], errors="coerce").fillna(0.0).clip(lower=0.0)
     medians = projections.to_numpy(dtype=float)
-
     cv = df.apply(lambda row: position_cv_for_row(row, config=config), axis=1).to_numpy(dtype=float)
     sigmas = np.maximum(cv * medians, 0.0) * max(0.0, float(dispersion_scale))
-
     weights = _regime_weight_matrix(df, regime_weights)
-    return sample_regime_gmm(medians, sigmas, weights, n_iterations=n_iterations, rng=rng)
+    return medians, sigmas, weights
+
+
+def median_recenter_factors(
+    medians: np.ndarray,
+    sigmas: np.ndarray,
+    weights: np.ndarray,
+    *,
+    factor_grid: np.ndarray | None = None,
+) -> np.ndarray:
+    """Return per-player scale factors ``f_i`` so the mixture median equals ``mu_i``.
+
+    The component locations are ``f*mu``, ``f*0.55*mu`` and ``f*0.22*mu``, so a
+    single shared ``f`` keeps the ratios ``1.0 / 0.55 / 0.22`` while the spreads
+    (``1.15``, ``0.75``, ``0.45`` times ``sigma``) are untouched. Because every
+    location is at or below ``mu`` before correction, the mixture CDF at ``mu``
+    is ``>= 0.5`` and decreases monotonically in ``f``; the factor is where it
+    crosses ``0.5``. It is found on a log grid and linearly interpolated.
+
+    Degenerate players (``mu <= 0`` or ``sigma <= 0``) keep ``f = 1``.
+    """
+
+    mu = np.asarray(medians, dtype=float).reshape(-1)
+    sg = np.asarray(sigmas, dtype=float).reshape(-1)
+    weight_matrix = _normalize_weight_matrix(np.asarray(weights, dtype=float))
+    n_players = mu.shape[0]
+    if sg.shape[0] != n_players or weight_matrix.shape[0] != n_players:
+        raise ValueError("medians, sigmas, and weights must share a length")
+
+    grid = RECENTER_FACTOR_GRID if factor_grid is None else np.asarray(factor_grid, dtype=float)
+    factors = np.ones(n_players, dtype=float)
+    active = (mu > _TRUNCATION_EPSILON) & (sg > _TRUNCATION_EPSILON)
+    if not np.any(active):
+        return factors
+
+    mu_a = mu[active].reshape(-1, 1)
+    sg_a = sg[active].reshape(-1, 1)
+    w_a = weight_matrix[active]
+    f = grid.reshape(1, -1)
+
+    loc0 = f * mu_a
+    loc1 = GMM_DECOY_LOC * f * mu_a
+    loc2 = GMM_EXIT_LOC * f * mu_a
+    scale0 = GMM_FULL_ROLE_SCALE * sg_a
+    scale1 = GMM_DECOY_SCALE * sg_a
+    scale2 = GMM_EXIT_SCALE * sg_a
+
+    cdf0 = _normal_cdf((mu_a - loc0) / scale0)
+    cdf1 = _normal_cdf((mu_a - loc1) / scale1)
+    lower_exit = _normal_cdf((0.0 - loc2) / scale2)
+    cdf2 = (_normal_cdf((mu_a - loc2) / scale2) - lower_exit) / (1.0 - lower_exit)
+    cdf = (w_a[:, 0:1] * cdf0) + (w_a[:, 1:2] * cdf1) + (w_a[:, 2:3] * cdf2)
+
+    below = cdf <= 0.5
+    rows = np.arange(mu_a.shape[0])
+    first_below = np.argmax(below, axis=1)
+    # Players whose CDF never drops to 0.5 on the grid pin to the top of it;
+    # with sigma > 0 the crossing always exists inside the grid.
+    no_cross = ~below.any(axis=1)
+    upper_index = np.where(no_cross, grid.shape[0] - 1, first_below)
+    lower_index = np.maximum(upper_index - 1, 0)
+
+    cdf_upper = cdf[rows, lower_index]
+    cdf_lower = cdf[rows, upper_index]
+    denominator = cdf_upper - cdf_lower
+    safe = np.abs(denominator) > 1e-12
+    fraction = np.divide(
+        cdf_upper - 0.5,
+        denominator,
+        out=np.zeros_like(denominator),
+        where=safe,
+    )
+    fraction = np.clip(fraction, 0.0, 1.0)
+    interpolated = grid[lower_index] + fraction * (grid[upper_index] - grid[lower_index])
+    interpolated = np.where(upper_index == 0, grid[0], interpolated)
+    factors[active] = interpolated
+    return factors
 
 
 def sample_regime_gmm(
@@ -177,6 +292,10 @@ def sample_regime_gmm(
     Component 1 is ``N(mu, (1.15 sigma)^2)``. Component 2 is
     ``N(0.55 mu, (0.75 sigma)^2)``. Component 3 is
     ``TruncatedNormal(0.22 mu, (0.45 sigma)^2, low=0)``. Draws are floored at 0.
+
+    This is the raw component geometry. Callers that need the mixture centred on
+    its median (see :func:`median_recenter_factors`) pass ``medians`` already
+    scaled by that shared factor.
     """
 
     medians = np.asarray(medians, dtype=float).reshape(-1, 1)

@@ -739,14 +739,14 @@ def build_parser() -> argparse.ArgumentParser:
         dest="output_path",
         type=Path,
         default=None,
-        help="Markdown report path (default: reports/calibration_<weeks>_v7_jev.md)",
+        help="Markdown report path (default: reports/calibration_<weeks>_v8_jev.md)",
     )
     calibrate_jev.add_argument(
         "--json-out",
         dest="json_output_path",
         type=Path,
         default=None,
-        help="JSON report path (default: reports/calibration_<weeks>_v7_jev.json)",
+        help="JSON report path (default: reports/calibration_<weeks>_v8_jev.json)",
     )
     calibrate_jev.add_argument("--v6-report", type=Path, default=None, help="Baseline v6 JSON")
     calibrate_jev.add_argument("--n-iterations", type=int, default=10000)
@@ -1469,7 +1469,7 @@ def _cmd_calibrate_jev(args: argparse.Namespace) -> int:
         v6_report=args.v6_report or Path("reports/calibration_2025_w5-17_v6.json"),
         dispersion_scale=args.dispersion_scale,
     )
-    default_stem = Path("reports") / f"calibration_{args.weeks}_v7_jev"
+    default_stem = Path("reports") / f"calibration_{args.weeks}_v8_jev"
     json_path = write_calibrate_jev_json(report, args.json_output_path or default_stem.with_suffix(".json"))
     md_path = write_calibrate_jev_markdown(report, args.output_path or default_stem.with_suffix(".md"))
     print(format_calibrate_jev_summary(report))

@@ -6,8 +6,10 @@ router, samples the conditional 3-component mixture, and measures:
 
 1. Empirical 15th-85th percentile coverage (the 57% -> 70% band defect).
 2. Point MAE and Spearman rank correlation against the v6 DIY baseline.
-3. Brier score on the model-implied median threshold for injury-designated
-   players (``Questionable`` / ``LP``).
+3. A Brier score against an **independent** consensus threshold (the rolling
+   trailing-mean FPPG baseline) for injury-designated players (``Questionable``
+   / ``LP``), with the self-referential model-implied-median score kept as a
+   secondary diagnostic.
 
 Every Jev answer is cached on disk, so a repeated run costs nothing and lands
 the same numbers.
@@ -26,6 +28,7 @@ import pandas as pd
 
 from ceminidfs.config import load_config
 from ceminidfs.data.fetch import week_cache_dir
+from ceminidfs.data.historical_slate import walk_forward_fppg
 from ceminidfs.jev_client import PROVIDER_PRIOR, TieredJevClient, build_jev_client
 from ceminidfs.models.regime_gmm import (
     RegimeRouting,
@@ -33,7 +36,12 @@ from ceminidfs.models.regime_gmm import (
     regime_weight_lookup,
     route_regimes,
 )
-from ceminidfs.models.simulate import gmm_summary, simulate_fd_points, simulate_fd_points_gmm
+from ceminidfs.models.simulate import (
+    gmm_recenter_factors,
+    gmm_summary,
+    simulate_fd_points,
+    simulate_fd_points_gmm,
+)
 from ceminidfs.pipeline import backtest
 from ceminidfs.pipeline.calibration import (
     MAE_TARGETS,
@@ -45,8 +53,8 @@ from ceminidfs.pipeline.engine import build_diy_projections_from_frames
 from ceminidfs.pipeline.metrics import accuracy_metrics
 
 DEFAULT_V6_REPORT = Path("reports/calibration_2025_w5-17_v6.json")
-DEFAULT_OUT_JSON = Path("reports/calibration_2025_w5-17_v7_jev.json")
-DEFAULT_OUT_MD = Path("reports/calibration_2025_w5-17_v7_jev.md")
+DEFAULT_OUT_JSON = Path("reports/calibration_2025_w5-17_v8_jev.json")
+DEFAULT_OUT_MD = Path("reports/calibration_2025_w5-17_v8_jev.md")
 DEFAULT_ITERATIONS = 10000
 DEFAULT_SEED = 20261015
 SHADOW_BASELINE_COVERAGE = 0.57
@@ -79,7 +87,8 @@ class WeekBand:
     n_designated: int
     coverage: float
     baseline_coverage: float
-    brier: float | None
+    brier_vs_own_median: float | None
+    brier_consensus: float | None = None
     provider_counts: dict[str, int] = field(default_factory=dict)
 
 
@@ -96,11 +105,23 @@ class CalibrateJevReport:
     baseline_coverage: float
     target_band: tuple[float, float]
     shadow_baseline: float
-    brier: float | None
-    brier_climatology: float | None
+    brier_vs_own_median: float | None
+    brier_vs_own_median_climatology: float | None
+    brier_vs_own_median_mean_predicted: float | None
+    brier_vs_own_median_observed_rate: float | None
+    brier_consensus: float | None
+    brier_consensus_climatology: float | None
+    brier_consensus_mean_predicted: float | None
+    brier_consensus_observed_rate: float | None
     n_designated: int
+    n_designated_with_consensus: int
+    n_designated_excluded: int
     n_player_weeks: int
     comparison: dict[str, Any]
+    median_minus_projection_mean: float | None
+    p_above_mu_mean: float | None
+    recenter_factor_mean: float | None
+    recenter_factor_std: float | None
     regime_provider_counts: dict[str, int] = field(default_factory=dict)
     dispersion_scale: float = 1.0
 
@@ -194,8 +215,8 @@ def run_calibrate_jev(
     )
 
     designated = merged.loc[merged["injury_designated"].astype(bool)]
-    brier = _brier(designated) if not designated.empty else None
-    brier_climatology = _brier_climatology(designated) if not designated.empty else None
+    own_median = brier_vs_own_median(designated) if not designated.empty else _empty_brier()
+    consensus = brier_consensus(designated) if not designated.empty else _empty_brier()
 
     diy_gmm = _model_metrics("diy_gmm_jev", merged["p50_median"], merged["fd_actual"], merged["position"])
     models = [diy_gmm]
@@ -210,6 +231,11 @@ def run_calibrate_jev(
             "spearman_delta_vs_v6": float(diy_gmm["spearman_fd"] - reference["spearman_fd"]),
         }
 
+    projection = pd.to_numeric(merged["fd_projection"], errors="coerce").to_numpy(dtype=float)
+    median = pd.to_numeric(merged["p50_median"], errors="coerce").to_numpy(dtype=float)
+    p_above_mu = pd.to_numeric(merged["p_above_mu"], errors="coerce").to_numpy(dtype=float)
+    factors = pd.to_numeric(merged["recenter_factor"], errors="coerce").to_numpy(dtype=float)
+
     return CalibrateJevReport(
         season=season,
         start_week=start_week,
@@ -222,11 +248,23 @@ def run_calibrate_jev(
         baseline_coverage=baseline_coverage,
         target_band=TARGET_BAND,
         shadow_baseline=SHADOW_BASELINE_COVERAGE,
-        brier=brier,
-        brier_climatology=brier_climatology,
+        brier_vs_own_median=own_median["score"],
+        brier_vs_own_median_climatology=own_median["climatology"],
+        brier_vs_own_median_mean_predicted=own_median["mean_predicted"],
+        brier_vs_own_median_observed_rate=own_median["observed_rate"],
+        brier_consensus=consensus["score"],
+        brier_consensus_climatology=consensus["climatology"],
+        brier_consensus_mean_predicted=consensus["mean_predicted"],
+        brier_consensus_observed_rate=consensus["observed_rate"],
         n_designated=int(len(designated)),
+        n_designated_with_consensus=int(consensus["n"]),
+        n_designated_excluded=int(consensus["n_excluded"]),
         n_player_weeks=int(len(merged)),
         comparison=comparison,
+        median_minus_projection_mean=_finite_mean(median - projection),
+        p_above_mu_mean=_finite_mean(p_above_mu),
+        recenter_factor_mean=_finite_mean(factors),
+        recenter_factor_std=_finite_std(factors),
         regime_provider_counts=regime_counts,
         dispersion_scale=fitted_scale,
     )
@@ -369,6 +407,9 @@ def build_week_rows(
         return None
 
     merged = _attach_injuries(merged, _injury_frame(season, week))
+    merged["fd_consensus"] = pd.to_numeric(
+        merged["player_id"].map(walk_forward_fppg(pbp, season, week)), errors="coerce"
+    )
     rows = merged.to_dict("records")
     routings = route_regimes(client, rows, implied_totals=_implied_totals(vegas))
     weights = regime_weight_lookup(routings)
@@ -410,6 +451,23 @@ def _sample_week(
 
     mu = pd.to_numeric(merged["fd_projection"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
     merged["p_above_mu"] = (draws > mu[:, None]).mean(axis=1)
+
+    consensus = (
+        pd.to_numeric(merged["fd_consensus"], errors="coerce").to_numpy(dtype=float)
+        if "fd_consensus" in merged.columns
+        else np.full(len(merged), np.nan)
+    )
+    valid_consensus = np.isfinite(consensus) & (consensus > 0.0)
+    p_above_consensus = np.full(len(merged), np.nan, dtype=float)
+    if valid_consensus.any():
+        p_above_consensus[valid_consensus] = (
+            draws[valid_consensus] > consensus[valid_consensus][:, None]
+        ).mean(axis=1)
+    merged["p_above_consensus"] = p_above_consensus
+
+    merged["recenter_factor"] = gmm_recenter_factors(
+        merged, weights, dispersion_scale=dispersion_scale, config=config
+    )
     merged["injury_designated"] = [is_injury_designated(row) for row in rows]
     merged["season"] = season
     merged["week"] = week
@@ -427,6 +485,8 @@ def _week_band(merged: pd.DataFrame, routings: dict[str, RegimeRouting]) -> Week
         provider_counts[routing.provider_used] = provider_counts.get(routing.provider_used, 0) + 1
     season = int(merged["season"].iloc[0])
     week = int(merged["week"].iloc[0])
+    own_median = brier_vs_own_median(designated) if not designated.empty else _empty_brier()
+    consensus = brier_consensus(designated) if not designated.empty else _empty_brier()
     return WeekBand(
         season=season,
         week=week,
@@ -434,13 +494,24 @@ def _week_band(merged: pd.DataFrame, routings: dict[str, RegimeRouting]) -> Week
         n_designated=int(len(designated)),
         coverage=coverage,
         baseline_coverage=baseline_coverage,
-        brier=_brier(designated) if not designated.empty else None,
+        brier_vs_own_median=own_median["score"],
+        brier_consensus=consensus["score"],
         provider_counts=provider_counts,
     )
 
 
 def _empty_band(season: int, week: int) -> WeekBand:
-    return WeekBand(season, week, 0, 0, float("nan"), float("nan"), None, {})
+    return WeekBand(
+        season=season,
+        week=week,
+        n_players=0,
+        n_designated=0,
+        coverage=float("nan"),
+        baseline_coverage=float("nan"),
+        brier_vs_own_median=None,
+        brier_consensus=None,
+        provider_counts={},
+    )
 
 
 def _merge(projections: pd.DataFrame, actuals: pd.DataFrame) -> pd.DataFrame:
@@ -511,30 +582,90 @@ def _implied_totals(vegas: pd.DataFrame) -> dict[str, float]:
     return totals
 
 
-def _brier(designated: pd.DataFrame) -> float | None:
+def _finite_mean(values: np.ndarray) -> float | None:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return float(finite.mean()) if finite.size else None
+
+
+def _finite_std(values: np.ndarray) -> float | None:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    return float(finite.std()) if finite.size else None
+
+
+def _empty_brier() -> dict[str, Any]:
+    return {
+        "score": None,
+        "climatology": None,
+        "mean_predicted": None,
+        "observed_rate": None,
+        "n": 0,
+        "n_excluded": 0,
+    }
+
+
+def _brier_metrics(probabilities: np.ndarray, outcomes: np.ndarray) -> dict[str, Any]:
+    """Score, climatology, and calibration pair for one probability forecast."""
+
+    prob = np.asarray(probabilities, dtype=float).reshape(-1)
+    out = np.asarray(outcomes, dtype=float).reshape(-1)
+    mask = np.isfinite(prob) & np.isfinite(out)
+    metrics = _empty_brier()
+    if not mask.any():
+        return metrics
+    probabilities_valid = prob[mask]
+    outcomes_valid = out[mask]
+    base_rate = float(outcomes_valid.mean())
+    metrics.update(
+        score=float(np.mean((probabilities_valid - outcomes_valid) ** 2)),
+        climatology=float(np.mean((base_rate - outcomes_valid) ** 2)),
+        mean_predicted=float(probabilities_valid.mean()),
+        observed_rate=base_rate,
+        n=int(mask.sum()),
+        n_excluded=int(prob.shape[0] - mask.sum()),
+    )
+    return metrics
+
+
+def brier_vs_own_median(designated: pd.DataFrame) -> dict[str, Any]:
+    """Self-referential score: ``P(draw > fd_projection)`` vs ``actual > fd_projection``.
+
+    ``fd_projection`` is the model's own projection, so this question carries no
+    skill by construction; it is kept only as a secondary diagnostic.
+    """
+
     if designated.empty:
-        return None
+        return _empty_brier()
     probabilities = pd.to_numeric(designated["p_above_mu"], errors="coerce").to_numpy(dtype=float)
     mu = pd.to_numeric(designated["fd_projection"], errors="coerce").to_numpy(dtype=float)
     actual = pd.to_numeric(designated["fd_actual"], errors="coerce").to_numpy(dtype=float)
-    outcomes = (actual > mu).astype(float)
-    mask = np.isfinite(probabilities) & np.isfinite(outcomes)
-    if not mask.any():
-        return None
-    return float(np.mean((probabilities[mask] - outcomes[mask]) ** 2))
+    outcomes = np.where(np.isfinite(mu) & np.isfinite(actual), actual > mu, np.nan).astype(float)
+    return _brier_metrics(probabilities, outcomes)
 
 
-def _brier_climatology(designated: pd.DataFrame) -> float | None:
+def brier_consensus(designated: pd.DataFrame) -> dict[str, Any]:
+    """Brier score against an independent rolling-FPPG consensus threshold.
+
+    ``threshold`` is the player's trailing-mean FPPG baseline (``fd_consensus``).
+    Players with no baseline (a missing or non-positive value) are excluded from
+    the score and reported through ``n_excluded``.
+    """
+
     if designated.empty:
-        return None
-    mu = pd.to_numeric(designated["fd_projection"], errors="coerce").to_numpy(dtype=float)
+        return _empty_brier()
+    if "fd_consensus" not in designated.columns or "p_above_consensus" not in designated.columns:
+        metrics = _empty_brier()
+        metrics["n_excluded"] = int(len(designated))
+        return metrics
+    threshold = pd.to_numeric(designated["fd_consensus"], errors="coerce").to_numpy(dtype=float)
+    probabilities = pd.to_numeric(designated["p_above_consensus"], errors="coerce").to_numpy(dtype=float)
     actual = pd.to_numeric(designated["fd_actual"], errors="coerce").to_numpy(dtype=float)
-    outcomes = (actual > mu).astype(float)
-    mask = np.isfinite(outcomes)
-    if not mask.any():
-        return None
-    base_rate = float(outcomes[mask].mean())
-    return float(np.mean((base_rate - outcomes[mask]) ** 2))
+    valid = np.isfinite(threshold) & (threshold > 0.0) & np.isfinite(actual)
+    outcomes = np.full(threshold.shape[0], np.nan, dtype=float)
+    outcomes[valid] = (actual[valid] > threshold[valid]).astype(float)
+    masked_probabilities = np.where(valid, probabilities, np.nan)
+    return _brier_metrics(masked_probabilities, outcomes)
 
 
 def _model_metrics(
@@ -623,8 +754,11 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
             f"(target {report.target_band[0]:.0%}-{report.target_band[1]:.0%}; "
             f"shadow baseline {report.shadow_baseline:.0%}). "
             f"MAE **{diy['mae_fd']:.2f}**, Spearman **{diy['spearman_fd']:.3f}**. "
-            f"Brier on injury-designated median thresholds "
-            f"**{_fmt(report.brier)}** ({report.n_designated} players)."
+            f"Brier vs rolling-FPPG consensus "
+            f"**{_fmt(report.brier_consensus)}** "
+            f"(climatology {_fmt(report.brier_consensus_climatology)}) over "
+            f"{report.n_designated_with_consensus} of {report.n_designated} "
+            f"injury-designated players."
         ),
         "",
         "## Headline numbers",
@@ -635,9 +769,25 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
         f"| Unimodal baseline coverage | {report.baseline_coverage:.1%} | — |",
         f"| MAE (FD pts) | {diy['mae_fd']:.2f} | — |",
         f"| Spearman | {diy['spearman_fd']:.3f} | — |",
-        f"| Brier (Q/LP median) | {_fmt(report.brier)} | lower is better |",
-        f"| Brier (climatology) | {_fmt(report.brier_climatology)} | — |",
+        f"| Brier vs consensus | {_fmt(report.brier_consensus)} | lower is better |",
+        f"| Brier consensus climatology | {_fmt(report.brier_consensus_climatology)} | — |",
+        f"| Brier vs own median (diagnostic) | {_fmt(report.brier_vs_own_median)} | — |",
+        f"| Own-median climatology | {_fmt(report.brier_vs_own_median_climatology)} | — |",
         f"| Dispersion scale (fitted) | {report.dispersion_scale:.3f} | — |",
+        "",
+        "## Brier calibration",
+        "",
+        "| Brier | Score | Climatology | Mean predicted | Observed rate | n |",
+        "|---|---:|---:|---:|---:|---:|",
+        f"| vs rolling-FPPG consensus | {_fmt(report.brier_consensus)} | "
+        f"{_fmt(report.brier_consensus_climatology)} | {_fmt(report.brier_consensus_mean_predicted)} | "
+        f"{_fmt(report.brier_consensus_observed_rate)} | {report.n_designated_with_consensus} |",
+        f"| vs own median (diagnostic) | {_fmt(report.brier_vs_own_median)} | "
+        f"{_fmt(report.brier_vs_own_median_climatology)} | {_fmt(report.brier_vs_own_median_mean_predicted)} | "
+        f"{_fmt(report.brier_vs_own_median_observed_rate)} | {report.n_designated} |",
+        "",
+        (f"Consensus threshold unavailable for {report.n_designated_excluded} designated "
+         f"player-weeks (no rolling-FPPG history); excluded from the consensus score."),
         "",
     ]
     if report.comparison:
@@ -645,7 +795,7 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
             [
                 "## vs v6",
                 "",
-                "| Metric | v6 | v7 Jev | Delta |",
+                "| Metric | v6 | Jev | Delta |",
                 "|---|---:|---:|---:|",
                 f"| MAE | {report.comparison['v6_mae_fd']:.2f} | {diy['mae_fd']:.2f} | "
                 f"{report.comparison['mae_delta_vs_v6']:+.2f} |",
@@ -667,11 +817,12 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
             f"| {row['position']} | {row['n']} | {row['mae_fd']:.2f} | {row['rmse_fd']:.2f} | "
             f"{row['spearman_fd']:.3f} | {row['bias_fd']:+.2f} | {row['verdict']} |"
         )
-    lines.extend(["", "## Per week", "", "| Week | n | Q/LP | Coverage | Baseline | Brier |", "|---|---:|---:|---:|---:|---:|"])
+    lines.extend(["", "## Per week", "", "| Week | n | Q/LP | Coverage | Baseline | Brier (consensus) | Brier (own) |", "|---|---:|---:|---:|---:|---:|---:|"])
     for band in report.weeks:
         lines.append(
             f"| {band.week} | {band.n_players} | {band.n_designated} | "
-            f"{_fmt_pct(band.coverage)} | {_fmt_pct(band.baseline_coverage)} | {_fmt(band.brier)} |"
+            f"{_fmt_pct(band.coverage)} | {_fmt_pct(band.baseline_coverage)} | "
+            f"{_fmt(band.brier_consensus)} | {_fmt(band.brier_vs_own_median)} |"
         )
     lines.extend(
         [
@@ -680,9 +831,13 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
             "",
             "- Walk-forward: projections use only PBP with `week < target`.",
             "- Regimes: Jev `Choice` over four mutually exclusive injury/role regimes.",
-            "- Sampling: conditional 3-component GMM (full role, decoy, re-aggravation exit).",
+            "- Sampling: conditional 3-component GMM (full role, decoy, re-aggravation exit),",
+            "  re-centred per player so the mixture median equals `fd_projection`.",
             "- Coverage: fraction of actuals inside the empirical p15-p85 band.",
-            "- Brier: injury-designated (Q/LP) players, model-implied median threshold.",
+            "- Brier (primary): injury-designated (Q/LP) players, threshold is the player's",
+            "  rolling trailing-mean FPPG baseline (independent consensus), not the model's",
+            "  own median. Players without a baseline are excluded and counted.",
+            "- Brier (diagnostic): the self-referential `P(actual > fd_projection)` score.",
             "- Dispersion scale: one global sigma multiplier, fitted so coverage is nominal 70%.",
             f"- Provider: `{report.provider}` fallback `{report.fallback}`.",
             "",
@@ -714,8 +869,19 @@ def format_calibrate_jev_summary(report: CalibrateJevReport) -> str:
         f"unimodal baseline {report.baseline_coverage:.1%})",
         f"  MAE: {diy['mae_fd']:.3f}  Spearman: {diy['spearman_fd']:.3f}"
         + (f"  (vs v6 delta MAE {report.comparison['mae_delta_vs_v6']:+.3f})" if report.comparison else ""),
-        f"  Brier (Q/LP median): {_fmt(report.brier)} on {report.n_designated} players "
-        f"(climatology {_fmt(report.brier_climatology)})",
+        f"  Brier vs consensus: {_fmt(report.brier_consensus)} "
+        f"(climatology {_fmt(report.brier_consensus_climatology)}) on "
+        f"{report.n_designated_with_consensus}/{report.n_designated} designated players; "
+        f"mean predicted {_fmt(report.brier_consensus_mean_predicted)} vs "
+        f"observed rate {_fmt(report.brier_consensus_observed_rate)}",
+        f"  Brier vs own median (diagnostic): {_fmt(report.brier_vs_own_median)} "
+        f"(climatology {_fmt(report.brier_vs_own_median_climatology)}); "
+        f"mean predicted {_fmt(report.brier_vs_own_median_mean_predicted)} vs "
+        f"observed rate {_fmt(report.brier_vs_own_median_observed_rate)}",
+        f"  median(p50)-projection: {_fmt(report.median_minus_projection_mean)} "
+        f"  P(draw>mu): {_fmt(report.p_above_mu_mean)} "
+        f"  recenter factor mean/std: {_fmt(report.recenter_factor_mean)}/"
+        f"{_fmt(report.recenter_factor_std)}",
     ]
     return "\n".join(lines)
 
