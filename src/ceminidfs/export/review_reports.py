@@ -20,6 +20,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from ceminidfs.export.handoff import (
     HANDOFF_COLUMNS,
     HandoffContext,
+    HandoffInputError,
     PlayerHandoff,
     build_handoff_context,
     normalize_handoff_name,
@@ -1178,12 +1179,16 @@ def _build_handoff_context(dest: Path) -> HandoffContext | None:
     """Build the slate-wide handoff context from a run directory, or ``None``.
 
     A directory without a projection base (a bare optimize on an arbitrary CSV)
-    returns ``None`` so the writer falls back to the lineup-level summary. Any
-    build error also returns ``None``: the handoff is a report, not a gate.
+    returns ``None`` so the writer falls back to the lineup-level summary. A
+    present-but-unreadable input raises :class:`HandoffInputError` and is
+    re-raised: that is a corrupt run artifact, not a missing optional file. Any
+    other build error also returns ``None``: the handoff is a report, not a gate.
     """
 
     try:
         return build_handoff_context(dest)
+    except HandoffInputError:
+        raise
     except Exception:  # pragma: no cover - a report must never break the solve.
         return None
 

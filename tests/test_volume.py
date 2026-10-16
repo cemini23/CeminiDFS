@@ -66,6 +66,34 @@ def test_project_team_volume_pass_attempts_use_pass_attempt_share():
     assert projection.dropbacks > projection.pass_attempts
 
 
+def test_project_team_volume_rush_and_pass_attempts_match_actuals():
+    """Both attempts land near their 2025 actuals and split the play total.
+
+    Measured actuals over 2025 weeks 5-17 (384 team-games): pass attempts 34.68,
+    rush attempts 26.98. ``project_team_volume`` now returns
+    ``plays - pass_attempts`` for rush, so the rush side is not docked a sack
+    that was never part of the pass+rush attempt total.
+    """
+
+    projection = project_team_volume(
+        season=2025,
+        week=5,
+        team="KC",
+        opponent="BUF",
+        implied_total=LEAGUE_TOTAL / 2.0,
+        game_total=LEAGUE_TOTAL,
+        spread_team=0.0,
+        team_sec=LEAGUE_SEC_PER_PLAY,
+        opp_sec=LEAGUE_SEC_PER_PLAY,
+    )
+
+    assert projection.pass_attempts == pytest.approx(34.68, abs=0.5)
+    assert projection.rush_attempts == pytest.approx(26.98, abs=0.5)
+    assert projection.pass_attempts + projection.rush_attempts == pytest.approx(
+        projection.plays_projected
+    )
+
+
 def test_neutral_seconds_per_play_synthetic_pbp():
     pbp = pd.DataFrame(
         [

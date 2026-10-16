@@ -29,6 +29,10 @@ from ceminidfs.models.stats import (
     build_wind_pass_yards_multipliers,
 )
 from ceminidfs.models.dst import build_week_dst_projections
+from ceminidfs.models.ngs_elasticity import (
+    NGS_SKIP_MARKER,
+    apply_receiving_elasticity,
+)
 from ceminidfs.models.usage import build_week_usage, history_week_cutoff, player_game_stats_from_pbp
 from ceminidfs.models.volume import build_week_volume
 
@@ -219,6 +223,13 @@ def build_diy_projections_from_frames(
             settings=coherence_settings,
         )
         stats_df = apply_pass_protection_penalties(stats_df, stress_by_team, coherence_settings)
+
+    # Receiving elasticity: applies the NGS multiplier when the NGS cache is
+    # present, and otherwise returns an explicit skip marker that we print so the
+    # skip reaches the run output instead of silently doing nothing.
+    stats_df, ngs_marker = apply_receiving_elasticity(stats_df, season=season)
+    if ngs_marker == NGS_SKIP_MARKER:
+        print(ngs_marker)
 
     scored = add_fantasy_points(stats_df)
     dst_df = build_week_dst_projections(

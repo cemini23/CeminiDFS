@@ -267,3 +267,143 @@ def test_injuries_cache_ttl_is_fifteen_minutes_and_default_is_twelve_hours(tmp_p
     assert fetch_module._cache_is_fresh(cache_path, "injuries") is False
     assert fetch_module._cache_is_fresh(cache_path, "schedules") is True
     assert fetch_module._cache_is_fresh(cache_path) is True
+
+
+def _ngs_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "season": [2025, 2025],
+            "week": [1, 2],
+            "player_gsis_id": ["00-0001", "00-0002"],
+            "player_display_name": ["Alpha", "Beta"],
+            "avg_separation": [2.0, 3.0],
+            "avg_cushion": [5.0, 6.0],
+            "percent_share_of_intended_air_yards": [0.2, 0.3],
+            "yards": [50.0, 60.0],
+            "targets": [5.0, 6.0],
+        }
+    )
+
+
+def test_fetch_ngs_receiving_caches_canonicalized_frame(tmp_path: Path, monkeypatch):
+    """The NGS fetcher passes ``stat_type`` and caches ``player_id``/``player_name``."""
+
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    captured: dict = {}
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "_require_nflreadpy", lambda: object())
+
+    def fake_call(module, stat_type, season):
+        captured["module"] = module
+        captured["stat_type"] = stat_type
+        captured["season"] = season
+        return _ngs_frame()
+
+    monkeypatch.setattr(fetch_module, "_call_nextgen_stats", fake_call)
+
+    result = fetch_module.fetch_ngs_receiving(2025)
+
+    assert captured["stat_type"] == "receiving"
+    assert captured["season"] == 2025
+    cache_path = cache_root / "ngs_receiving_2025.parquet"
+    assert cache_path.is_file()
+    assert result["player_id"].tolist() == ["00-0001", "00-0002"]
+    assert "player_name" in result.columns
+    saved = pd.read_parquet(cache_path)
+    assert "player_id" in saved.columns and "player_name" in saved.columns
+
+
+def test_fetch_ngs_passing_uses_passing_stat_type(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    captured: dict = {}
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "_require_nflreadpy", lambda: object())
+    monkeypatch.setattr(
+        fetch_module,
+        "_call_nextgen_stats",
+        lambda module, stat_type, season: captured.update(stat_type=stat_type) or _ngs_frame(),
+    )
+
+    fetch_module.fetch_ngs_passing(2025)
+
+    assert captured["stat_type"] == "passing"
+    assert (cache_root / "ngs_passing_2025.parquet").is_file()
+
+
+def test_fetch_ngs_reuses_fresh_cache(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    pd.DataFrame({"player_id": ["cached"]}).to_parquet(
+        cache_root / "ngs_receiving_2025.parquet", index=False
+    )
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+
+    def boom(*args, **kwargs):  # pragma: no cover - guards the loader call
+        raise AssertionError("loader must not run when a fresh NGS cache exists")
+
+    monkeypatch.setattr(fetch_module, "_call_nextgen_stats", boom)
+
+    result = fetch_module.fetch_ngs_receiving(2025)
+
+    assert result["player_id"].tolist() == ["cached"]
+
+
+def test_fetch_ngs_tolerates_out_of_range_season(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    cache_root.mkdir()
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "_require_nflreadpy", lambda: object())
+
+    def out_of_range(module, stat_type, season):
+        raise ValueError("Season must be between 2016 and 2025")
+
+    monkeypatch.setattr(fetch_module, "_call_nextgen_stats", out_of_range)
+
+    result = fetch_module.fetch_ngs_receiving(1999)
+
+    assert result.empty
+
+
+def test_warm_ngs_caches_degrades_without_nflreadpy(tmp_path: Path, monkeypatch):
+    """A missing nflreadpy must degrade to empty frames, not raise."""
+
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: tmp_path / "cache")
+
+    warmed = fetch_module.warm_ngs_caches(2025)
+
+    assert set(warmed) == {"receiving", "passing"}
+    assert all(frame.empty for frame in warmed.values())
+
+
+def test_fetch_week_datasets_warms_ngs_caches(tmp_path: Path, monkeypatch):
+    cache_root = tmp_path / "artifacts" / "cache"
+    week_dir = cache_root / "2024" / "week_1"
+
+    monkeypatch.setattr(fetch_module, "_cache_dir", lambda: cache_root)
+    monkeypatch.setattr(fetch_module, "week_cache_dir", lambda season, week: week_dir)
+
+    frames = {
+        "schedules": pd.DataFrame({"week": [1], "game_id": ["g1"]}),
+        "pbp": pd.DataFrame({"week": [1], "play_id": [1]}),
+        "injuries": pd.DataFrame({"week": [1], "player": ["A"]}),
+        "rosters": pd.DataFrame({"week": [1], "player": ["A"]}),
+    }
+    for name, frame in frames.items():
+        monkeypatch.setattr(
+            fetch_module,
+            f"fetch_{name}",
+            lambda season, frame=frame, **kwargs: frame,
+        )
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        fetch_module,
+        "warm_ngs_caches",
+        lambda season, force=False: calls.append(season) or {"receiving": pd.DataFrame()},
+    )
+
+    fetch_module.fetch_week_datasets(2024, 1)
+
+    assert calls == [2024]

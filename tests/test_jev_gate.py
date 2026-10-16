@@ -424,3 +424,30 @@ def test_mcp_client_is_not_started_without_a_key(tmp_path: Path, monkeypatch: py
 
     with pytest.raises(JevUnavailableError):
         MCPJevClient(command=str(tmp_path / "absent"), key_path=tmp_path / "absent-key")
+
+
+def test_gate_seam_and_tiered_router_have_distinct_surfaces():
+    """The gate seam and the tiered router must stay separate clients.
+
+    ``integrations.jev`` is the fail-closed pre-lock gate (verify/screen/find over
+    stdio MCP, fixture-replayable). ``ceminidfs.jev_client`` is the model-wide
+    tiered router (jev_choice/jev_score over provider tiers with a prior
+    fallback). Merging them would give the gate a silent-prior path, so each must
+    expose only its own surface.
+    """
+
+    from ceminidfs import jev_client as tiered
+
+    gate = build_jev_client(fixture={"verify": [{}], "screen": [{}], "find": [{}]})
+    router = tiered.build_jev_client(provider=tiered.PROVIDER_PRIOR)
+
+    for primitive in (VERIFY, SCREEN, FIND):
+        assert hasattr(gate, primitive)
+    assert not hasattr(gate, "jev_choice")
+    assert not hasattr(gate, "jev_score")
+
+    assert hasattr(router, "jev_choice")
+    assert hasattr(router, "jev_score")
+    assert not hasattr(router, "verify")
+    assert not hasattr(router, "screen")
+    assert not hasattr(router, "find")

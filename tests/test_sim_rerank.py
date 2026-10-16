@@ -7,7 +7,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ceminidfs.export.sim_rerank import build_player_index, rerank_lineups, score_lineup
+from ceminidfs.export.sim_rerank import (
+    TOP_FRACTION,
+    build_player_index,
+    leverage_lineup_scores,
+    rerank_lineups,
+    score_lineup,
+)
 
 
 def test_build_player_index_from_normalized_csv(tmp_path: Path):
@@ -113,3 +119,28 @@ def test_rerank_lineups_greedy_final_portfolio_exposure():
     assert selected == [["A", "B"], ["C", "D"]]
     names = [name for lineup in selected for name in lineup]
     assert names.count("A") == 1
+
+
+def test_leverage_threshold_and_scores_share_one_population():
+    """The slate threshold is the quantile over every lineup that is scored.
+
+    With more lineups than the old 256-row threshold sample, a subset threshold
+    would diverge from the full-population one; the fix computes one pooled
+    population, so they agree.
+    """
+
+    n_lineups = 300
+    n_iterations = 10
+    matrix = np.repeat(np.arange(n_lineups, dtype=float)[:, None], n_iterations, axis=1)
+    player_index = {f"p{i}": i for i in range(n_lineups)}
+    lineups = [[f"p{i}"] for i in range(n_lineups)]
+    ownership = {f"p{i}": 10.0 for i in range(n_lineups)}
+
+    _scores, threshold = leverage_lineup_scores(lineups, matrix, player_index, ownership)
+
+    totals = np.concatenate([matrix[[i], :].sum(axis=0) for i in range(n_lineups)])
+    expected = float(np.quantile(totals, 1.0 - TOP_FRACTION))
+    subset_expected = float(np.quantile(totals[: 256 * n_iterations], 1.0 - TOP_FRACTION))
+
+    assert threshold == pytest.approx(expected)
+    assert threshold != pytest.approx(subset_expected)

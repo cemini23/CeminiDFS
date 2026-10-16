@@ -18,6 +18,19 @@ to the installed ``mcp-jev`` launcher.
 Every path fails closed. A missing key, a missing launcher, a start failure, a
 timeout, a JSON-RPC error, or a malformed payload raises. The caller must block
 and ask the operator. No path returns an empty judgement that reads as a pass.
+
+Relationship to ``ceminidfs.jev_client``
+----------------------------------------
+Two Jev clients ship, and they are not duplicates. This module is the pre-lock
+**gate** seam: three fail-closed primitives (``verify``/``screen``/``find``)
+spoken over stdio MCP, plus a fixture replayer so the gate tests run with no key
+and no network. Every failure raises and the caller blocks. ``ceminidfs.jev_client``
+is the model-wide **tiered router** used by the projection and calibration path
+(structured ``Choice``/``Score`` routing over provider tiers, with a deterministic
+prior fallback and a disk cache). The gate must block on doubt; the router must
+degrade to a prior so a backtest stays reproducible offline. Opposite failure
+policies, so the two stay apart. Gate callers import from here; the projection
+path imports ``ceminidfs.jev_client``.
 """
 
 from __future__ import annotations

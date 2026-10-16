@@ -51,7 +51,6 @@ DEFAULT_RERANK_MODE = "ceiling"
 MODE_QUANTILE = {"fpts": 0.5, "ceiling": 0.85}
 TOP_FRACTION = 0.01
 LEVERAGE_EXPONENT = 0.5
-THRESHOLD_SAMPLE = 256
 
 
 def build_player_index(normalized_csv: str | Path | Iterable[Mapping[str, Any]]) -> dict[str, int]:
@@ -170,13 +169,14 @@ def leverage_lineup_scores(
     *,
     top_fraction: float = TOP_FRACTION,
     exponent: float = LEVERAGE_EXPONENT,
-    threshold_sample: int = THRESHOLD_SAMPLE,
 ) -> tuple[list[float], float]:
     """Score each lineup by ``P(score >= top_1pct) / geom_mean_own ** 0.5``.
 
     The slate threshold is the ``(1 - top_fraction)`` quantile of the pooled
-    simulated totals from up to ``threshold_sample`` candidate lineups. Ownership
-    values are percentages and are divided by 100 before the geometric mean.
+    simulated totals from every candidate lineup, and each lineup is scored
+    against those same totals, so the threshold and the scores share one
+    population. Ownership values are percentages and are divided by 100 before
+    the geometric mean.
     """
 
     matrix = np.asarray(sim_matrix, dtype=float)
@@ -185,9 +185,9 @@ def leverage_lineup_scores(
     if not 0.0 < top_fraction < 1.0:
         raise ValueError("top_fraction must be between 0 and 1")
 
-    sample: list[np.ndarray] = []
-    for lineup in list(lineups)[: max(1, int(threshold_sample))]:
-        sample.append(
+    totals_by_lineup: list[np.ndarray] = []
+    for lineup in lineups:
+        totals_by_lineup.append(
             _lineup_total_vector(
                 lineup_player_names(lineup),
                 matrix,
@@ -195,17 +195,11 @@ def leverage_lineup_scores(
                 lineup_player_ids(lineup),
             )
         )
-    pooled = np.concatenate(sample) if sample else np.zeros(1)
+    pooled = np.concatenate(totals_by_lineup) if totals_by_lineup else np.zeros(1)
     threshold = float(np.quantile(pooled, 1.0 - top_fraction))
 
     scores: list[float] = []
-    for lineup in lineups:
-        totals = _lineup_total_vector(
-            lineup_player_names(lineup),
-            matrix,
-            player_index,
-            lineup_player_ids(lineup),
-        )
+    for lineup, totals in zip(lineups, totals_by_lineup, strict=True):
         tail_probability = float((totals >= threshold).mean())
         ownership_fraction = _lineup_ownership_fraction(lineup, ownership_lookup)
         scores.append(tail_probability / (ownership_fraction ** float(exponent)))

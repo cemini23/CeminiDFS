@@ -44,6 +44,36 @@ def fetch_rosters(season: int, *, force: bool = False) -> pd.DataFrame:
     return load_season_rosters(season)
 
 
+def fetch_ngs_receiving(season: int, *, force: bool = False) -> pd.DataFrame:
+    """Fetch nflverse Next Gen Stats receiving, caching ``ngs_receiving_<season>.parquet``."""
+
+    return _fetch_ngs("receiving", season, force=force)
+
+
+def fetch_ngs_passing(season: int, *, force: bool = False) -> pd.DataFrame:
+    """Fetch nflverse Next Gen Stats passing, caching ``ngs_passing_<season>.parquet``."""
+
+    return _fetch_ngs("passing", season, force=force)
+
+
+def warm_ngs_caches(season: int, *, force: bool = False) -> dict[str, pd.DataFrame]:
+    """Warm both season NGS caches for the receiving-elasticity layer.
+
+    NGS is auxiliary to the projection engine, so a missing ``nflreadpy`` or an
+    unreachable release degrades to empty frames (and a warning) instead of
+    failing the whole fetch.
+    """
+
+    warmed: dict[str, pd.DataFrame] = {}
+    for stat_type, fetcher in (("receiving", fetch_ngs_receiving), ("passing", fetch_ngs_passing)):
+        try:
+            warmed[stat_type] = fetcher(season, force=force)
+        except (ImportError, OSError) as exc:
+            print(f"WARNING: ngs {stat_type} fetch unavailable: {exc}", file=sys.stderr)
+            warmed[stat_type] = pd.DataFrame()
+    return warmed
+
+
 def fetch_force_enabled(config: Mapping[str, Any] | None) -> bool:
     """Return True when config asks fetch to ignore a fresh parquet cache."""
 
@@ -76,6 +106,29 @@ def _fetch_cached(
             raise
         return pd.DataFrame()
     frame = _to_pandas(data)
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(cache_path, index=False)
+    return frame
+
+
+def _fetch_ngs(stat_type: str, season: int, *, force: bool = False) -> pd.DataFrame:
+    """Cache one NGS stat type with the same freshness rules as ``_fetch_cached``."""
+
+    cache_path = _cache_dir() / f"ngs_{stat_type}_{season}.parquet"
+    if cache_path.exists() and not force and _cache_is_fresh(cache_path):
+        mtime = datetime.fromtimestamp(cache_path.stat().st_mtime, tz=timezone.utc)
+        print(f"WARNING: reusing cache {cache_path} (mtime {mtime.isoformat()})", file=sys.stderr)
+        return pd.read_parquet(cache_path)
+
+    nflreadpy = _require_nflreadpy()
+    try:
+        data = _call_nextgen_stats(nflreadpy, stat_type, season)
+    except ValueError as exc:
+        if "Season must be between" not in str(exc):
+            raise
+        return pd.DataFrame()
+    frame = _canonicalize_ngs_frame(_to_pandas(data))
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(cache_path, index=False)
@@ -121,6 +174,32 @@ def _call_with_season(loader: Callable[..., Any], season: int) -> Any:
         except TypeError:
             continue
     return loader(seasons=[season])
+
+
+def _call_nextgen_stats(module: Any, stat_type: str, season: int) -> Any:
+    """Call ``load_nextgen_stats``; it takes ``stat_type`` so it needs its own entry point."""
+
+    loader = getattr(module, "load_nextgen_stats", None)
+    if loader is None:
+        raise AttributeError("nflreadpy does not expose load_nextgen_stats")
+    return loader(seasons=season, stat_type=stat_type)
+
+
+def _canonicalize_ngs_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Map nflverse NGS columns onto the names the receiving elasticity consumes.
+
+    nflverse ships the player identifier as ``player_gsis_id`` and the display
+    name as ``player_display_name``; the elasticity layer keys on ``player_id``
+    (a GSIS id) and ``player_name``. Renaming here keeps the cache directly
+    consumable without weakening the loader.
+    """
+
+    rename: dict[str, str] = {}
+    if "player_gsis_id" in frame.columns and "player_id" not in frame.columns:
+        rename["player_gsis_id"] = "player_id"
+    if "player_display_name" in frame.columns and "player_name" not in frame.columns:
+        rename["player_display_name"] = "player_name"
+    return frame.rename(columns=rename) if rename else frame
 
 
 def _to_pandas(data: Any) -> pd.DataFrame:
@@ -217,6 +296,10 @@ def fetch_week_datasets(
                 "rows": int(len(weather)),
                 "scope": scope,
             }
+
+    # NGS is season-scoped and consumed by the receiving elasticity. Warm it
+    # without recording a week-scoped artifact (it lives at the cache root).
+    warm_ngs_caches(season, force=force)
     return datasets
 
 

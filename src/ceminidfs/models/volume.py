@@ -166,13 +166,32 @@ def allocate_play_volume(
     pass_rate: float,
     sack_rate: float = DEFAULT_SACK_RATE,
     scramble_rate: float = DEFAULT_SCRAMBLE_RATE,
+    *,
+    plays_include_sacks: bool = True,
 ) -> dict[str, float]:
-    """Allocate plays into dropbacks, pass attempts, and rush attempts."""
+    """Allocate plays into dropbacks, pass attempts, and rush attempts.
+
+    ``pass_rate`` is the dropback share. ``plays_include_sacks`` says whether
+    ``plays`` already contains the sack and scramble plays that the dropbacks
+    count: with ``True`` the rush side is ``plays - dropbacks + scrambles``, so a
+    sack displaces a rush attempt.
+
+    ``projected_plays`` instead returns the pass + rush attempt total, exactly
+    the number that ``projected_pass_rate`` is a share of. Feeding that total
+    here with the default removes a sack's worth of rush attempts that were
+    never in the total, so the model passes ``plays_include_sacks=False`` and
+    reconciles rush attempts as the complement of the pass-attempt share. Both
+    attempts then land on the play total instead of one being fixed at the
+    other's expense.
+    """
 
     dropbacks = plays * pass_rate
     scrambles = dropbacks * scramble_rate
     pass_attempts = dropbacks * (1.0 - sack_rate - scramble_rate)
-    rush_attempts = plays - dropbacks + scrambles
+    if plays_include_sacks:
+        rush_attempts = plays - dropbacks + scrambles
+    else:
+        rush_attempts = plays - pass_attempts
     return {
         "dropbacks": dropbacks,
         "pass_attempts": pass_attempts,
@@ -204,10 +223,14 @@ def project_team_volume(
         wind_mph=wind_mph,
     )
     # projected_pass_rate is a pass-attempt share; allocate_play_volume wants the
-    # dropback share so it does not strip sacks and scrambles twice.
+    # dropback share so it does not strip sacks and scrambles twice. projected_plays
+    # already returns the pass+rush attempt total, so plays_include_sacks=False keeps
+    # rush attempts as the complement of the pass-attempt share instead of removing a
+    # sack's worth of attempts that were never in the total.
     allocation = allocate_play_volume(
         plays=plays,
         pass_rate=dropback_rate_for_pass_share(pass_rate),
+        plays_include_sacks=False,
     )
 
     return TeamVolumeProjection(

@@ -27,3 +27,18 @@ def disable_open_meteo_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
         "ceminidfs.pipeline.lineup_backtest",
     ):
         monkeypatch.setattr(f"{module}.resolve_weather_for_week", _weather_cache_only)
+
+
+@pytest.fixture(autouse=True)
+def disable_ngs_network_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NGS fetches must never reach nflverse in the test suite.
+
+    The projection engine fetches NGS on demand, so simulate ``nflreadpy`` being
+    missing: the fetch-first receiving path then degrades to the neutral fallback
+    offline. Tests that need the loader inject a fake locally with ``monkeypatch``.
+    """
+
+    def _missing_nflreadpy():
+        raise ImportError("nflreadpy unavailable in tests")
+
+    monkeypatch.setattr("ceminidfs.data.fetch._require_nflreadpy", _missing_nflreadpy)

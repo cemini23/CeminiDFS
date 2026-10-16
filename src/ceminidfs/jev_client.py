@@ -23,6 +23,17 @@ Every path fails closed. A response that violates the schema, or carries a NaN
 or null confidence, triggers one backup-provider retry. If that also fails the
 client raises ``JevValidationError`` (or applies the prior fallback when the
 caller asked for it). No path returns a silent pass.
+
+Relationship to ``ceminidfs.integrations.jev``
+---------------------------------------------
+This module is the model-wide **tiered router**: structured ``Choice``/``Score``
+routing across provider tiers (typesafe / mcp / openrouter) with a deterministic
+prior fallback and a sha256 disk cache. It is what the projection and calibration
+path imports. ``ceminidfs.integrations.jev`` is the separate pre-lock **gate**
+seam: three fail-closed primitives (``verify``/``screen``/``find``) over stdio MCP
+with a fixture replayer, where every failure raises and the caller blocks. The
+router degrades to a prior offline; the gate never does. Keep gate callers on
+``integrations.jev`` and routing callers here.
 """
 
 from __future__ import annotations

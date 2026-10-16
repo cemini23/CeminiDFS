@@ -32,6 +32,16 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+
+class HandoffInputError(RuntimeError):
+    """A handoff input exists on disk but cannot be read.
+
+    A missing optional input stays lenient: the handoff degrades to an empty
+    frame or ``None``. A file that is present but unreadable is a real defect,
+    so it raises instead of silently collapsing to the fallback.
+    """
+
+
 # --------------------------------------------------------------------------- #
 # Contract header. The order is fixed: CeminiParlays reads by column name, but
 # a positional consumer must see the documented order.
@@ -243,8 +253,8 @@ def read_canonical(root: str | Path) -> pd.DataFrame:
         return pd.DataFrame()
     try:
         return pd.read_csv(candidates[-1])
-    except (OSError, ValueError):  # pragma: no cover - corrupt file is a miss.
-        return pd.DataFrame()
+    except (OSError, ValueError) as exc:
+        raise HandoffInputError(f"cannot read canonical projections file {candidates[-1]}: {exc}") from exc
 
 
 def _read_vegas(season: int | None, week: int | None) -> pd.DataFrame:
@@ -257,8 +267,8 @@ def _read_vegas(season: int | None, week: int | None) -> pd.DataFrame:
         return pd.DataFrame()
     try:
         return pd.read_parquet(path)
-    except (OSError, ValueError):  # pragma: no cover - corrupt cache is a miss.
-        return pd.DataFrame()
+    except (OSError, ValueError) as exc:
+        raise HandoffInputError(f"cannot read vegas file {path}: {exc}") from exc
 
 
 def _team_environment(vegas: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
@@ -320,8 +330,8 @@ def build_handoff_context(
         return None
     try:
         base = pd.read_parquet(base_path)
-    except (OSError, ValueError):  # pragma: no cover - corrupt cache is a miss.
-        return None
+    except (OSError, ValueError) as exc:
+        raise HandoffInputError(f"cannot read projection base {base_path}: {exc}") from exc
     if base.empty:
         return None
 

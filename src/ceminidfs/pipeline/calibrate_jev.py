@@ -30,6 +30,11 @@ from ceminidfs.config import load_config
 from ceminidfs.data.fetch import week_cache_dir
 from ceminidfs.data.historical_slate import walk_forward_fppg
 from ceminidfs.jev_client import PROVIDER_PRIOR, TieredJevClient, build_jev_client
+from ceminidfs.models.ngs_elasticity import (
+    NGS_SKIP_MARKER,
+    ngs_elasticity_diagnostics,
+    ngs_marker as ngs_status_marker,
+)
 from ceminidfs.models.regime_gmm import (
     RegimeRouting,
     is_injury_designated,
@@ -124,6 +129,8 @@ class CalibrateJevReport:
     recenter_factor_std: float | None
     regime_provider_counts: dict[str, int] = field(default_factory=dict)
     dispersion_scale: float = 1.0
+    ngs_marker: str = NGS_SKIP_MARKER
+    ngs_diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -267,6 +274,8 @@ def run_calibrate_jev(
         recenter_factor_std=_finite_std(factors),
         regime_provider_counts=regime_counts,
         dispersion_scale=fitted_scale,
+        ngs_marker=ngs_status_marker(season),
+        ngs_diagnostics=ngs_elasticity_diagnostics(season),
     )
 
 
@@ -774,6 +783,9 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
         f"| Brier vs own median (diagnostic) | {_fmt(report.brier_vs_own_median)} | — |",
         f"| Own-median climatology | {_fmt(report.brier_vs_own_median_climatology)} | — |",
         f"| Dispersion scale (fitted) | {report.dispersion_scale:.3f} | — |",
+        f"| NGS receiving marker | `{report.ngs_marker}` | — |",
+        f"| NGS `delta_ngs` (mean / mean abs) | {_fmt_ngs_mean(report.ngs_diagnostics)} | — |",
+        f"| NGS alignment interaction | {_fmt_ngs_interaction(report.ngs_diagnostics)} | — |",
         "",
         "## Brier calibration",
         "",
@@ -839,6 +851,7 @@ def render_calibrate_jev_markdown(report: CalibrateJevReport) -> str:
             "  own median. Players without a baseline are excluded and counted.",
             "- Brier (diagnostic): the self-referential `P(actual > fd_projection)` score.",
             "- Dispersion scale: one global sigma multiplier, fitted so coverage is nominal 70%.",
+            f"- NGS receiving elasticity: {report.ngs_marker} ({_fmt_ngs_diagnostics(report.ngs_diagnostics)}).",
             f"- Provider: `{report.provider}` fallback `{report.fallback}`.",
             "",
         ]
@@ -882,12 +895,40 @@ def format_calibrate_jev_summary(report: CalibrateJevReport) -> str:
         f"  P(draw>mu): {_fmt(report.p_above_mu_mean)} "
         f"  recenter factor mean/std: {_fmt(report.recenter_factor_mean)}/"
         f"{_fmt(report.recenter_factor_std)}",
+        f"  NGS receiving: {report.ngs_marker} ({_fmt_ngs_diagnostics(report.ngs_diagnostics)})",
     ]
     return "\n".join(lines)
 
 
 def _fmt(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.4f}"
+
+
+def _fmt_ngs_mean(diagnostics: Mapping[str, Any] | None) -> str:
+    if not diagnostics or not diagnostics.get("available"):
+        return "n/a"
+    return f"{diagnostics['delta_mean']:+.4f} / {diagnostics['delta_abs_mean']:.4f}"
+
+
+def _fmt_ngs_interaction(diagnostics: Mapping[str, Any] | None) -> str:
+    if not diagnostics or not diagnostics.get("available"):
+        return "n/a"
+    return f"{diagnostics['interaction']:.3f}"
+
+
+def _fmt_ngs_diagnostics(diagnostics: Mapping[str, Any] | None) -> str:
+    if not diagnostics or not diagnostics.get("available"):
+        return "no NGS frames"
+    bound = diagnostics.get("share_at_bound") or {}
+    return (
+        f"delta_ngs mean {diagnostics['delta_mean']:+.4f}, "
+        f"sd {diagnostics.get('delta_sd', 0.0):.4f}, "
+        f"mean abs {diagnostics['delta_abs_mean']:.4f}, "
+        f"range {diagnostics['delta_min']:+.4f}..{diagnostics['delta_max']:+.4f}, "
+        f"at -bound {bound.get('lower', 0.0):.1%} / at +bound {bound.get('upper', 0.0):.1%}, "
+        f"nonzero rows {diagnostics['delta_nonzero_rows']}/{diagnostics.get('n_receiving_rows', 0)}; "
+        f"alignment interaction {diagnostics['interaction']:.3f}"
+    )
 
 
 def _fmt_pct(value: float | None) -> str:

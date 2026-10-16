@@ -13,6 +13,7 @@ No NGS frame is required. When the frame is absent the multiplier is neutral
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -49,6 +50,14 @@ DEFENSE_FEATURES = (
     "yards_per_attempt_allowed",
 )
 ALL_FEATURES = PLAYER_FEATURES + DEFENSE_FEATURES
+# ``build_ngs_features`` emits ``z_``-prefixed columns (both the player-side
+# rolling z-scores and the opponent defense z-scores), so the consumed feature
+# names must carry the same prefix. ``ALL_FEATURES`` stays the canonical
+# unprefixed list and this constant is what the model consumes.
+ZSCORE_FEATURES = tuple(f"z_{name}" for name in ALL_FEATURES)
+
+NGS_SKIP_MARKER = "ngs: skipped (no NGS cache)"
+NGS_APPLIED_MARKER = "ngs: applied"
 
 _CACHE_DIR = Path("artifacts/cache")
 
@@ -108,15 +117,38 @@ def build_ngs_features(
 
 
 def _defense_lookup(defenses: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """Return per-opponent defense z-scores for the two defense features.
+
+    The raw columns carry different units and magnitudes, so they are
+    standardized across the opponent rows before they are stored under the
+    ``z_`` keys. Otherwise the keys would claim to be z-scores while holding raw
+    values, and ``fit_ngs_elasticity`` would standardize them a second time
+    anyway (double-standardizing the player features but not the defense ones).
+    """
+
     lookup: dict[str, dict[str, float]] = {}
+    stats: dict[str, tuple[float, float]] = {}
+    for column in DEFENSE_FEATURES:
+        if column in defenses.columns:
+            values = pd.to_numeric(defenses[column], errors="coerce")
+        else:
+            values = pd.Series(dtype=float)
+        if values.notna().any():
+            stats[column] = (float(values.mean()), float(values.std(ddof=0)) or 1.0)
+        else:
+            stats[column] = (0.0, 1.0)
+
     for row in defenses.to_dict("records"):
         opponent = str(row.get("opponent") or row.get("team") or "").upper()
         if not opponent:
             continue
-        lookup[opponent] = {
-            f"z_{DEFENSE_FEATURES[0]}": float(row.get(DEFENSE_FEATURES[0], 0.0) or 0.0),
-            f"z_{DEFENSE_FEATURES[1]}": float(row.get(DEFENSE_FEATURES[1], 0.0) or 0.0),
-        }
+        entry: dict[str, float] = {}
+        for column in DEFENSE_FEATURES:
+            value = pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").iloc[0]
+            numeric = 0.0 if pd.isna(value) else float(value)
+            mean, scale = stats[column]
+            entry[f"z_{column}"] = (numeric - mean) / scale
+        lookup[opponent] = entry
     return lookup
 
 
@@ -129,7 +161,7 @@ class NgsElasticityModel:
     feature_scales: list[float]
     target_mean: float
     target_scale: float
-    features: tuple[str, ...] = ALL_FEATURES
+    features: tuple[str, ...] = ZSCORE_FEATURES
     alpha: float = RIDGE_ALPHA
     bound: float = DELTA_BOUND
     sample_size: int = 0
@@ -162,7 +194,7 @@ def fit_ngs_elasticity(
     *,
     alpha: float = RIDGE_ALPHA,
     bound: float = DELTA_BOUND,
-    feature_names: Sequence[str] = ALL_FEATURES,
+    feature_names: Sequence[str] = ZSCORE_FEATURES,
 ) -> NgsElasticityModel:
     """Fit a shrinkage-regularized Ridge multiplier on receiving YPRR.
 
@@ -209,7 +241,7 @@ def fit_ngs_elasticity(
     )
 
 
-def neutral_ngs_model(feature_names: Sequence[str] = ALL_FEATURES) -> NgsElasticityModel:
+def neutral_ngs_model(feature_names: Sequence[str] = ZSCORE_FEATURES) -> NgsElasticityModel:
     return NgsElasticityModel(
         coefficients=[0.0] * len(feature_names),
         feature_means=[0.0] * len(feature_names),
@@ -291,10 +323,236 @@ def alignment_interaction(routing: AlignmentRouting | Mapping[str, float]) -> fl
 def load_ngs_frames(season: int, cache_dir: str | Path | None = None) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
     """Load NGS receiving and passing frames from the cache, or return ``(None, None)``."""
 
-    root = Path(cache_dir) if cache_dir is not None else _CACHE_DIR
+    root = _cache_root(cache_dir)
     receiving = _read_parquet(root / f"ngs_receiving_{season}.parquet")
     passing = _read_parquet(root / f"ngs_passing_{season}.parquet")
     return receiving, passing
+
+
+def _cache_root(cache_dir: str | Path | None = None) -> Path:
+    """Resolve the NGS cache directory, defaulting to the configured cache dir."""
+
+    if cache_dir is not None:
+        return Path(cache_dir)
+    try:
+        from ceminidfs.data.fetch import _cache_dir
+
+        return _cache_dir()
+    except Exception:  # pragma: no cover - partial install fallback.
+        return _CACHE_DIR
+
+
+def _fetch_ngs_frames(
+    season: int,
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    """Fetch missing NGS frames from nflverse, or return ``(None, None)``.
+
+    Only the two blockers the spec names are tolerated: a missing ``nflreadpy``
+    (``ImportError``) and an unreachable nflverse release (``OSError``, including
+    connection failures). Anything else propagates so a real defect is not hidden
+    behind a silent neutral fallback.
+    """
+
+    try:
+        from ceminidfs.data.fetch import fetch_ngs_passing, fetch_ngs_receiving
+    except ImportError:  # pragma: no cover - fetch module is always importable here.
+        return None, None
+    try:
+        receiving = fetch_ngs_receiving(season)
+        passing = fetch_ngs_passing(season)
+    except (ImportError, OSError) as exc:
+        print(f"WARNING: {NGS_SKIP_MARKER} ({exc})", file=sys.stderr)
+        return None, None
+    return receiving, passing
+
+
+RECEIVING_TARGET_COLUMN = "yprr"
+_RECEIVING_STAT_COLUMNS = ("rec_yds", "rec")
+
+
+def ngs_marker(season: int, *, cache_dir: str | Path | None = None) -> str:
+    """Return the explicit NGS status marker for ``season``.
+
+    ``NGS_SKIP_MARKER`` when the receiving cache is absent or empty, otherwise
+    ``NGS_APPLIED_MARKER``. The calibration report records this so a missing NGS
+    cache can never look like a successful no-op.
+    """
+
+    receiving, _passing = load_ngs_frames(season, cache_dir=cache_dir)
+    if receiving is None or receiving.empty:
+        return NGS_SKIP_MARKER
+    return NGS_APPLIED_MARKER
+
+
+def apply_receiving_elasticity(
+    stats: pd.DataFrame,
+    *,
+    season: int,
+    receiving: pd.DataFrame | None = None,
+    defenses: pd.DataFrame | None = None,
+    client: TieredJevClient | None = None,
+    cache_dir: str | Path | None = None,
+    window: int = ROLLING_WINDOW,
+) -> tuple[pd.DataFrame, str]:
+    """Apply ``mu_adj = mu_base * (1 + delta_ngs * interaction)`` to receiving stats.
+
+    Returns ``(stats, marker)``. The frames are read from the cache; when they are
+    absent and no explicit ``cache_dir`` pins a caller-managed cache they are
+    fetched from nflverse first. Only a fetch that cannot run (``nflreadpy``
+    missing, or no data for the season) leaves ``marker`` at ``NGS_SKIP_MARKER``:
+    the skip is visible to the run output and the calibration report, never
+    silent. When a frame is present the Ridge multiplier is fit on the frame's own
+    YPRR target and combined with the Jev alignment routing for each WR/TE/RB row.
+    """
+
+    if receiving is None:
+        receiving, defenses = load_ngs_frames(season, cache_dir=cache_dir)
+    if (receiving is None or receiving.empty) and cache_dir is None:
+        receiving, defenses = _fetch_ngs_frames(season)
+    if receiving is None or receiving.empty:
+        return stats, NGS_SKIP_MARKER
+    if stats.empty or not set(_RECEIVING_STAT_COLUMNS).intersection(stats.columns):
+        return stats, NGS_SKIP_MARKER
+
+    features = build_ngs_features(receiving, defenses=defenses, window=window)
+    target = _receiving_target(receiving)
+    if target is None or len(target) != len(features):
+        model = neutral_ngs_model()
+    else:
+        model = fit_ngs_elasticity(features, target.to_numpy(dtype=float))
+    deltas = _delta_by_player(features, np.asarray(model.predict(features), dtype=float))
+
+    profiles = [
+        _alignment_profile(row)
+        for _, row in stats.iterrows()
+        if str(row.get("position") or "").upper() in DEFAULT_STRICT_POSITIONS
+    ]
+    routings = route_alignment(client, profiles) if profiles else {}
+
+    output = stats.copy()
+    for index, row in output.iterrows():
+        if str(row.get("position") or "").upper() not in DEFAULT_STRICT_POSITIONS:
+            continue
+        player_id = str(row.get("player_id") or "")
+        delta_ngs = deltas.get(player_id, 0.0)
+        routing = routings.get(player_id)
+        interaction = 0.0 if routing is None else alignment_interaction(routing)
+        if delta_ngs == 0.0 or interaction == 0.0:
+            continue
+        for column in _RECEIVING_STAT_COLUMNS:
+            if column not in output.columns:
+                continue
+            base = pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").iloc[0]
+            if pd.notna(base):
+                output.at[index, column] = combine_receiving_adjustment(
+                    float(base), delta_ngs, routing
+                )
+    return output, NGS_APPLIED_MARKER
+
+
+def ngs_elasticity_diagnostics(
+    season: int,
+    *,
+    cache_dir: str | Path | None = None,
+    window: int = ROLLING_WINDOW,
+) -> dict[str, Any]:
+    """Summarize the fitted NGS multiplier and routing for the calibration report.
+
+    Reports the clipped ``delta_ngs`` distribution and the alignment interaction so
+    a run records whether the elasticity actually moved receiving stats (a
+    saturated or all-zero ``delta_ngs`` is a real, reportable result).
+    """
+
+    receiving, defenses = load_ngs_frames(season, cache_dir=cache_dir)
+    if receiving is None or receiving.empty:
+        return {"available": False}
+    features = build_ngs_features(receiving, defenses=defenses, window=window)
+    target = _receiving_target(receiving)
+    if target is None or len(target) != len(features):
+        model = neutral_ngs_model()
+    else:
+        model = fit_ngs_elasticity(features, target.to_numpy(dtype=float))
+    deltas = np.asarray(model.predict(features), dtype=float)
+    finite = deltas[np.isfinite(deltas)]
+    bound = float(model.bound)
+    interaction = alignment_interaction(dict(ALIGNMENT_PRIOR))
+    return {
+        "available": True,
+        "n_receiving_rows": int(len(receiving)),
+        "sample_size": int(model.sample_size),
+        "neutral": bool(model.neutral),
+        "delta_mean": float(np.mean(finite)) if finite.size else 0.0,
+        "delta_sd": float(np.std(finite)) if finite.size else 0.0,
+        "delta_abs_mean": float(np.mean(np.abs(finite))) if finite.size else 0.0,
+        "delta_min": float(np.min(finite)) if finite.size else 0.0,
+        "delta_max": float(np.max(finite)) if finite.size else 0.0,
+        "delta_nonzero_rows": int(np.count_nonzero(deltas)),
+        "share_at_bound": {
+            "lower": float(np.mean(np.isclose(finite, -bound))) if finite.size else 0.0,
+            "upper": float(np.mean(np.isclose(finite, bound))) if finite.size else 0.0,
+        },
+        "interaction": float(interaction),
+        "interaction_weights": dict(ALIGNMENT_INTERACTION),
+        "coefficients": [float(value) for value in model.coefficients],
+    }
+
+
+def _receiving_target(receiving: pd.DataFrame) -> pd.Series | None:
+    """Return the per-row fractional YPRR deviation for the Ridge fit, or ``None``.
+
+    This implements the target contract ``fit_ngs_elasticity`` documents: the
+    target is the fractional deviation of YPRR from its sample mean,
+    ``(yprr - mean(yprr)) / mean(yprr)``. Centering the target is what makes the
+    fitted multiplier a centered, per-player elasticity instead of a flat offset
+    saturated at the bound: a receiver at the sample mean maps to ``0.0``.
+
+    Prefers an explicit ``yprr`` column, then ``yards / routes`` and
+    ``yards / targets``. Without any of these the fit is skipped (neutral model).
+    A zero divisor yields ``NaN`` (dropped by the fit) and a degenerate sample
+    mean (zero or non-finite) returns ``None``, so the divide can never produce
+    ``inf``/``NaN`` multipliers.
+    """
+
+    if RECEIVING_TARGET_COLUMN in receiving.columns:
+        yprr = pd.to_numeric(receiving[RECEIVING_TARGET_COLUMN], errors="coerce")
+    elif "yards" in receiving.columns:
+        yards = pd.to_numeric(receiving["yards"], errors="coerce")
+        yprr = None
+        for column in ("routes", "targets"):
+            if column in receiving.columns:
+                divisor = pd.to_numeric(receiving[column], errors="coerce")
+                yprr = yards / divisor.replace(0.0, np.nan)
+                break
+        if yprr is None:
+            return None
+    else:
+        return None
+
+    mean = yprr.mean()
+    if not np.isfinite(mean) or mean == 0.0:
+        return None
+    return (yprr - mean) / mean
+
+
+def _delta_by_player(features: pd.DataFrame, deltas: np.ndarray) -> dict[str, float]:
+    """Map ``player_id`` to the last predicted ``delta_ngs`` for that player."""
+
+    out: dict[str, float] = {}
+    if "player_id" not in features.columns:
+        return out
+    for player_id, delta in zip(features["player_id"].astype(str), deltas, strict=True):
+        if player_id:
+            out[player_id] = float(delta)
+    return out
+
+
+def _alignment_profile(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a Jev alignment profile from a projection stat row."""
+
+    profile = dict(row)
+    if profile.get("aDOT") in (None, "") and row.get("adot") is not None:
+        profile["aDOT"] = row.get("adot")
+    return profile
 
 
 def _read_parquet(path: Path) -> pd.DataFrame | None:

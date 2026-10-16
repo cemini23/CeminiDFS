@@ -23,8 +23,10 @@ import pytest
 from ceminidfs.export.handoff import (
     HANDOFF_BASE_COLUMNS,
     HANDOFF_COLUMNS,
+    HandoffInputError,
     _gmm_bands,
     build_handoff_context,
+    read_canonical,
 )
 from ceminidfs.export.review_reports import (
     LEVERAGE_FADE_HEADER,
@@ -731,6 +733,32 @@ def test_leverage_fade_header_extends_with_jev_columns() -> None:
         "jev_regime_top_state",
         "jev_provider",
     ]
+
+
+def test_handoff_raises_on_existing_but_unreadable_base(tmp_path: Path) -> None:
+    """A present-but-corrupt projection base must raise, not degrade to None."""
+
+    (tmp_path / "player_projection_base.parquet").write_bytes(b"not a parquet file")
+
+    with pytest.raises(HandoffInputError) as excinfo:
+        build_handoff_context(tmp_path)
+    assert "player_projection_base.parquet" in str(excinfo.value)
+
+
+def test_read_canonical_raises_on_existing_but_unreadable_csv(tmp_path: Path) -> None:
+    """A corrupt canonical CSV must raise; only an absent one degrades to empty."""
+
+    (tmp_path / "canonical_projections_2025_w5.csv").write_bytes(b"\xff\xfe,,garbage\x00\x01")
+
+    with pytest.raises(HandoffInputError) as excinfo:
+        read_canonical(tmp_path)
+    assert "canonical_projections_2025_w5.csv" in str(excinfo.value)
+
+
+def test_read_canonical_stays_lenient_when_absent(tmp_path: Path) -> None:
+    """A genuinely absent optional file stays an empty frame, not an error."""
+
+    assert read_canonical(tmp_path).empty
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[list[str]]]:

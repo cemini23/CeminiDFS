@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from ceminidfs.data.fetch import fetch_pbp, week_cache_dir
+from ceminidfs.data.fetch import fetch_force_enabled, fetch_pbp, warm_ngs_caches, week_cache_dir
 from ceminidfs.data.rosters import load_season_rosters
 from ceminidfs.pipeline.fetch import fetch_week
 
@@ -19,6 +19,8 @@ class PrepareSeasonResult:
     weather_weeks: list[int] = field(default_factory=list)
     pbp_rows: int = 0
     roster_rows: int = 0
+    ngs_receiving_rows: int = 0
+    ngs_passing_rows: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +31,8 @@ class PrepareSeasonResult:
             "weather_weeks": self.weather_weeks,
             "pbp_rows": self.pbp_rows,
             "roster_rows": self.roster_rows,
+            "ngs_receiving_rows": self.ngs_receiving_rows,
+            "ngs_passing_rows": self.ngs_passing_rows,
         }
 
 
@@ -59,6 +63,13 @@ def prepare_season_cache(
     except (ImportError, OSError, AttributeError):
         result.roster_rows = 0
 
+    # NGS is season-scoped; warm both caches for the receiving elasticity layer.
+    ngs = warm_ngs_caches(season, force=fetch_force_enabled(config))
+    receiving_ngs = ngs.get("receiving")
+    passing_ngs = ngs.get("passing")
+    result.ngs_receiving_rows = int(len(receiving_ngs)) if receiving_ngs is not None else 0
+    result.ngs_passing_rows = int(len(passing_ngs)) if passing_ngs is not None else 0
+
     return result
 
 
@@ -70,7 +81,8 @@ def format_prepare_summary(result: PrepareSeasonResult) -> str:
         f"Fetched weeks: {weeks}\n"
         f"Weather cached weeks: {weather}\n"
         f"Season PBP rows: {result.pbp_rows}\n"
-        f"Season roster rows: {result.roster_rows}"
+        f"Season roster rows: {result.roster_rows}\n"
+        f"Season NGS rows: receiving {result.ngs_receiving_rows}, passing {result.ngs_passing_rows}"
     )
 
 
