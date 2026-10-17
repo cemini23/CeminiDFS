@@ -99,7 +99,11 @@ def simulate_fd_points_copula(
     cv = df.apply(lambda row: position_cv_for_row(row, config=config), axis=1).to_numpy(dtype=float)
     sigma = np.sqrt(np.log1p(cv * cv))
 
-    correlation = build_correlation_matrix(df, site=site)
+    correlation = build_correlation_matrix(
+        df,
+        site=site,
+        corr_boost=_corr_boost_from_config(config),
+    )
     cholesky = _cholesky_with_jitter(correlation)
     independent_normals = rng.standard_normal((len(df), n_iterations))
     correlated_normals = np.dot(cholesky, independent_normals)
@@ -516,6 +520,22 @@ def _method_from_config(config: Mapping[str, Any] | None, fallback: str) -> str:
     if isinstance(simulate_cfg, Mapping):
         return str(simulate_cfg.get("method", fallback))
     return fallback
+
+
+def _corr_boost_from_config(config: Mapping[str, Any] | None) -> pd.DataFrame | None:
+    if not config:
+        return None
+    value = config.get("corr_boost")
+    if value is None:
+        return None
+    if isinstance(value, pd.DataFrame):
+        return value
+    if isinstance(value, str):
+        path = value.strip()
+        if not path:
+            return None
+        return pd.read_csv(path)
+    return None
 
 
 def _seed_from_config(config: Mapping[str, Any] | None, seed: int | None) -> int | None:

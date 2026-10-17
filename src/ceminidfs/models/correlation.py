@@ -49,7 +49,11 @@ def assign_player_roles(df: pd.DataFrame) -> pd.DataFrame:
     return output
 
 
-def build_correlation_matrix(df: pd.DataFrame, site: str = "fanduel") -> np.ndarray:
+def build_correlation_matrix(
+    df: pd.DataFrame,
+    site: str = "fanduel",
+    corr_boost: pd.DataFrame | None = None,
+) -> np.ndarray:
     """Build a game-aware player correlation matrix from role priors."""
 
     del site  # FanDuel is the only calibrated projection scale today.
@@ -81,6 +85,15 @@ def build_correlation_matrix(df: pd.DataFrame, site: str = "fanduel") -> np.ndar
             )
             matrix[i, j] = value
             matrix[j, i] = value
+
+    if corr_boost is not None:
+        from ceminidfs.situational.stack_corr import apply_corr_boost
+
+        if "player_id" in assigned.columns:
+            keys = assigned["player_id"].astype(str).tolist()
+        else:
+            keys = [str(index) for index in range(n_players)]
+        matrix = apply_corr_boost(matrix, keys, corr_boost)
 
     return _correlation_psd(matrix)
 

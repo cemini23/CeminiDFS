@@ -140,6 +140,14 @@ def test_fetch_week_datasets_mocked(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(fetch_module, "fetch_pbp", lambda season: pbp)
     monkeypatch.setattr(fetch_module, "fetch_injuries", lambda season: injuries)
     monkeypatch.setattr(fetch_module, "fetch_rosters", lambda season: rosters)
+    monkeypatch.setattr(
+        fetch_module,
+        "warm_telemetry_caches",
+        lambda season, force=False: {
+            "rushing": pd.DataFrame(),
+            "ftn_charting": pd.DataFrame(),
+        },
+    )
 
     datasets = _call_fetch_week_datasets(2024, 1)
 
@@ -199,6 +207,14 @@ def test_fetch_week_datasets_warms_rosters(tmp_path: Path, monkeypatch):
             f"fetch_{name}",
             lambda season, frame=frame, **kwargs: frame,
         )
+    monkeypatch.setattr(
+        fetch_module,
+        "warm_telemetry_caches",
+        lambda season, force=False: {
+            "rushing": pd.DataFrame(),
+            "ftn_charting": pd.DataFrame(),
+        },
+    )
 
     datasets = _call_fetch_week_datasets(2024, 1)
 
@@ -402,6 +418,14 @@ def test_fetch_week_datasets_warms_ngs_caches(tmp_path: Path, monkeypatch):
         fetch_module,
         "warm_ngs_caches",
         lambda season, force=False: calls.append(season) or {"receiving": pd.DataFrame()},
+    )
+    monkeypatch.setattr(
+        fetch_module,
+        "warm_telemetry_caches",
+        lambda season, force=False: {
+            "rushing": pd.DataFrame(),
+            "ftn_charting": pd.DataFrame(),
+        },
     )
 
     fetch_module.fetch_week_datasets(2024, 1)

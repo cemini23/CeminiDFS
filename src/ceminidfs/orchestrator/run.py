@@ -413,6 +413,9 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
     gates = config.get("gates")
     if gates:
         kwargs["gates"] = dict(gates)
+    overrides = config.get("fppg_overrides")
+    if overrides:
+        kwargs["fppg_overrides"] = dict(overrides)
     return kwargs
 
 

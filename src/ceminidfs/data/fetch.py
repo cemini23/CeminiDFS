@@ -56,6 +56,46 @@ def fetch_ngs_passing(season: int, *, force: bool = False) -> pd.DataFrame:
     return _fetch_ngs("passing", season, force=force)
 
 
+def fetch_ngs_rushing(season: int, *, force: bool = False) -> pd.DataFrame:
+    """Fetch nflverse Next Gen Stats rushing, caching ``ngs_rushing_<season>.parquet``."""
+
+    return _fetch_ngs("rushing", season, force=force)
+
+
+def fetch_ftn_charting(season: int, *, force: bool = False) -> pd.DataFrame:
+    """Fetch nflverse FTN charting, caching ``ftn_charting_<season>.parquet``.
+
+    Telemetry is auxiliary to the projection engine, so a missing ``nflreadpy``,
+    a missing ``load_ftn_charting``, or an unreachable release degrades to an
+    empty frame instead of failing the whole fetch.
+    """
+
+    cache_path = _cache_dir() / f"ftn_charting_{season}.parquet"
+    if cache_path.exists() and not force and _cache_is_fresh(cache_path):
+        mtime = datetime.fromtimestamp(cache_path.stat().st_mtime, tz=timezone.utc)
+        print(f"WARNING: reusing cache {cache_path} (mtime {mtime.isoformat()})", file=sys.stderr)
+        return pd.read_parquet(cache_path)
+
+    try:
+        nflreadpy = _require_nflreadpy()
+        loader = getattr(nflreadpy, "load_ftn_charting", None)
+        if loader is None:
+            return pd.DataFrame()
+        try:
+            data = _call_with_season(loader, season)
+        except ValueError as exc:
+            if "Season must be between" not in str(exc):
+                raise
+            return pd.DataFrame()
+        frame = _to_pandas(data)
+    except (ImportError, OSError):
+        return pd.DataFrame()
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(cache_path, index=False)
+    return frame
+
+
 def warm_ngs_caches(season: int, *, force: bool = False) -> dict[str, pd.DataFrame]:
     """Warm both season NGS caches for the receiving-elasticity layer.
 
@@ -71,6 +111,24 @@ def warm_ngs_caches(season: int, *, force: bool = False) -> dict[str, pd.DataFra
         except (ImportError, OSError) as exc:
             print(f"WARNING: ngs {stat_type} fetch unavailable: {exc}", file=sys.stderr)
             warmed[stat_type] = pd.DataFrame()
+    return warmed
+
+
+def warm_telemetry_caches(season: int, *, force: bool = False) -> dict[str, pd.DataFrame]:
+    """Warm the NGS rushing and FTN charting caches for the rushing-telemetry layer.
+
+    Like ``warm_ngs_caches`` this is auxiliary to the projection engine, so a
+    missing ``nflreadpy`` or an unreachable release degrades to empty frames
+    (and a warning) instead of failing the whole fetch.
+    """
+
+    warmed: dict[str, pd.DataFrame] = {}
+    for key, fetcher in (("rushing", fetch_ngs_rushing), ("ftn_charting", fetch_ftn_charting)):
+        try:
+            warmed[key] = fetcher(season, force=force)
+        except (ImportError, OSError) as exc:
+            print(f"WARNING: telemetry {key} fetch unavailable: {exc}", file=sys.stderr)
+            warmed[key] = pd.DataFrame()
     return warmed
 
 
@@ -300,6 +358,9 @@ def fetch_week_datasets(
     # NGS is season-scoped and consumed by the receiving elasticity. Warm it
     # without recording a week-scoped artifact (it lives at the cache root).
     warm_ngs_caches(season, force=force)
+    # Rushing NGS + FTN charting are telemetry caches: season-scoped at the
+    # cache root, warmed alongside NGS and never recorded per week.
+    warm_telemetry_caches(season, force=force)
     return datasets
 
 

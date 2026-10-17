@@ -991,6 +991,23 @@ def apply_friday_trend_exposure(
     return forced
 
 
+def _apply_fppg_overrides(optimizer: Any, overrides: Mapping[str, float] | None) -> None:
+    """Replace loaded FPPG values. Keys are player id or full name."""
+
+    if not overrides:
+        return
+    normalized = {str(key): float(value) for key, value in overrides.items()}
+    for player in optimizer.players:
+        keys = (
+            str(getattr(player, "id", "") or ""),
+            str(getattr(player, "full_name", "") or ""),
+        )
+        for key in keys:
+            if key and key in normalized:
+                player.fppg = normalized[key]
+                break
+
+
 def generate_lineups(
     csv_path: str | Path,
     site: str = "fanduel",
@@ -1015,6 +1032,7 @@ def generate_lineups(
     require_count: bool = True,
     friday_trend_keys: Iterable[str] | None = None,
     gates: Mapping[str, Any] | None = None,
+    fppg_overrides: Mapping[str, float] | None = None,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -1038,6 +1056,7 @@ def generate_lineups(
         optimizer.settings.budget = 60000
         optimizer.settings.max_from_one_team = 5
     optimizer.load_players_from_csv(str(csv_file))
+    _apply_fppg_overrides(optimizer, fppg_overrides)
     attach_csv_original_positions(optimizer, csv_file)
     _relax_tiny_slate_limits(optimizer, site_key)
     keep_injury_tagged_players(optimizer, csv_file)
@@ -1211,6 +1230,7 @@ def optimize_lineups(
     season: int | None = None,
     week: int | None = None,
     gates: Mapping[str, Any] | None = None,
+    fppg_overrides: Mapping[str, float] | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -1237,6 +1257,7 @@ def optimize_lineups(
         open_qb_teams=open_qb_teams,
         friday_trend_keys=friday_trend_keys,
         gates=gates,
+        fppg_overrides=fppg_overrides,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
     from ceminidfs.export.review_reports import maybe_write_review_reports

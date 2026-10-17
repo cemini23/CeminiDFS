@@ -290,6 +290,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_review_report_arguments(optimize, default_on=True)
     _add_environment_argument(optimize)
     _add_profile_argument(optimize)
+    optimize.add_argument(
+        "--telemetry",
+        type=Path,
+        default=None,
+        help="Ceiling CSV. Uses ceiling_fppg as the optimizer FPPG.",
+    )
+    optimize.add_argument(
+        "--corr-boost",
+        type=Path,
+        default=None,
+        help="Pair boost CSV. Turns on copula simulation rerank.",
+    )
     optimize.set_defaults(handler=_cmd_optimize)
 
     ownership = subparsers.add_parser("ownership", help="Ownership projection tools")
@@ -813,6 +825,23 @@ def build_parser() -> argparse.ArgumentParser:
         build_redraft_parser(redraft_sub)
     redraft_parser.set_defaults(handler=_cmd_redraft)
 
+    matchup = subparsers.add_parser(
+        "matchup",
+        help="Print the situational GPP matchup report for one slate",
+    )
+    matchup.add_argument("--season", type=int, required=True)
+    matchup.add_argument("--week", type=int, required=True)
+    matchup.add_argument("--salary", type=Path, default=None)
+    matchup.add_argument("--out-dir", type=Path, default=None)
+    matchup.add_argument("--seed", type=int, default=20261017)
+    matchup.add_argument(
+        "--n-boot",
+        type=int,
+        default=400,
+        help="Bootstrap draws for the holdout Brier interval",
+    )
+    matchup.set_defaults(handler=_cmd_matchup)
+
     return parser
 
 
@@ -897,11 +926,60 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
         **_optimizer_build_overrides(args),
         **_review_report_overrides(args),
     )
+    _apply_telemetry_cli(config, args)
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
     output = _run_optimize(args.csv_path, args.output_path, count, config)
     print(output)
     return 0
+
+
+def _cmd_matchup(args: argparse.Namespace) -> int:
+    from ceminidfs.situational.engine import run_slate
+    from ceminidfs.situational.report import format_matchup_report
+
+    result = run_slate(
+        args.season,
+        args.week,
+        salary_path=args.salary,
+        out_dir=args.out_dir,
+        seed=args.seed,
+        n_boot=args.n_boot,
+    )
+    report = format_matchup_report(result)
+    out_dir = Path(result["out_dir"])
+    (out_dir / "matchup_report.txt").write_text(report + "\n", encoding="utf-8")
+    print(report)
+    print(f"wrote {out_dir}")
+    return 0
+
+
+def _apply_telemetry_cli(config: dict[str, Any], args: argparse.Namespace) -> None:
+    telemetry = getattr(args, "telemetry", None)
+    if telemetry is not None:
+        import pandas as pd
+
+        frame = pd.read_csv(telemetry)
+        if "ceiling_fppg" not in frame.columns or "player_id" not in frame.columns:
+            raise ValueError("telemetry CSV needs player_id and ceiling_fppg")
+        overrides = {}
+        for row in frame.itertuples(index=False):
+            value = getattr(row, "ceiling_fppg")
+            if value is None or (isinstance(value, float) and value != value):
+                continue
+            overrides[str(row.player_id)] = float(value)
+        if overrides:
+            config["fppg_overrides"] = overrides
+    boost_path = getattr(args, "corr_boost", None)
+    if boost_path is not None:
+        import pandas as pd
+
+        config["corr_boost"] = pd.read_csv(boost_path)
+        config["simulation_method"] = "copula"
+        rerank = dict(config.get("sim_rerank") or {})
+        rerank["enabled"] = True
+        rerank.setdefault("seed", 20261017)
+        config["sim_rerank"] = rerank
 
 
 def _cmd_ownership_calibrate(args: argparse.Namespace) -> int:
