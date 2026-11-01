@@ -27,11 +27,13 @@ from .pool_guards import (
     TREND_MIN_EXPOSURE,
     TREND_MIN_SALARY,
     apply_open_qb_gate,
+    apply_qb_starter_gate,
     apply_skill_pool_floor,
     apply_soft_fade,
     apply_team_dart_guard,
     open_qb_teams_from_csv,
     participation_name_key,
+    qb_starters_for_csv,
 )
 from .stack_rules import (
     apply_locks_and_excludes,
@@ -1033,6 +1035,7 @@ def generate_lineups(
     friday_trend_keys: Iterable[str] | None = None,
     gates: Mapping[str, Any] | None = None,
     fppg_overrides: Mapping[str, float] | None = None,
+    qb_starters: Mapping[str, str] | str | Path | None = None,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -1064,6 +1067,9 @@ def generate_lineups(
         optimizer,
         set(open_qb_teams or ()) | open_qb_teams_from_csv(csv_file),
     )
+    starter_map = qb_starters_for_csv(csv_file, qb_starters)
+    if starter_map:
+        apply_qb_starter_gate(optimizer, starter_map)
     resolved_locks, resolved_excludes = apply_locks_and_excludes(
         optimizer,
         locks=locks,
@@ -1231,6 +1237,7 @@ def optimize_lineups(
     week: int | None = None,
     gates: Mapping[str, Any] | None = None,
     fppg_overrides: Mapping[str, float] | None = None,
+    qb_starters: Mapping[str, str] | str | Path | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -1258,6 +1265,7 @@ def optimize_lineups(
         friday_trend_keys=friday_trend_keys,
         gates=gates,
         fppg_overrides=fppg_overrides,
+        qb_starters=qb_starters,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
     from ceminidfs.export.review_reports import maybe_write_review_reports

@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -16,6 +17,7 @@ from ceminidfs.pipeline.late_swap_oracle import (
     DEFAULT_SCRATCH,
     OraclePlayer,
     Seat,
+    _points_lookup,
     apply_hindsight_oracle,
     player_is_locked,
 )
@@ -91,6 +93,32 @@ def test_swappable_players_never_have_live_data():
 
     # Both sets are non-empty at the first wave, so the zero is not vacuous.
     assert any(not player_is_locked(player.kickoff, EARLY) for player in pool)
+
+
+def test_points_lookup_keeps_the_slate_week_team(tmp_path: Path):
+    """A later trade row must not hide the team on that week's salary file."""
+
+    roster = pd.DataFrame(
+        [
+            {"week": 6, "team": "HOU", "full_name": "Marvin Harrison Jr.", "gsis_id": "00-0039849"},
+            {"week": 3, "team": "ARI", "full_name": "Marvin Harrison Jr.", "gsis_id": "00-0039849"},
+            {"week": 4, "team": "NYG", "full_name": "J.J. McCarthy", "gsis_id": "00-0039923"},
+            {"week": 3, "team": "MIN", "full_name": "J.J. McCarthy", "gsis_id": "00-0039923"},
+        ]
+    )
+    path = tmp_path / "rosters.parquet"
+    roster.to_parquet(path)
+    actuals = pd.DataFrame(
+        [
+            {"player_id": "00-0039849", "position": "WR", "team": "ARI", "fd_actual": 12.5},
+            {"player_id": "00-0039923", "position": "QB", "team": "MIN", "fd_actual": 8.1},
+        ]
+    )
+    points = _points_lookup(actuals, path, {"ARI", "MIN", "HOU", "NYG"}, week=3)
+    assert points[("marvin harrison", "ARI")] == 12.5
+    assert points[("jj mccarthy", "MIN")] == 8.1
+    assert ("marvin harrison", "HOU") not in points
+    assert ("jj mccarthy", "NYG") not in points
 
 
 @pytest.mark.skipif(

@@ -25,6 +25,7 @@ class CountingStats(TypedDict, total=False):
     dst_td: float
     dst_safety: float
     dst_blocked_kick: float
+    dst_defensive_pat: float
     dst_points_allowed: float
 
 
@@ -46,6 +47,7 @@ COUNTING_STAT_KEYS = (
     "dst_td",
     "dst_safety",
     "dst_blocked_kick",
+    "dst_defensive_pat",
 )
 
 # Points allowed is not a counting stat. A missing value means "unknown", and
@@ -84,6 +86,7 @@ def _dst_stub_points(stats: StatsMapping) -> float:
         + _stat(stats, "dst_td") * 6.0
         + _stat(stats, "dst_safety") * 2.0
         + _stat(stats, "dst_blocked_kick") * 2.0
+        + _stat(stats, "dst_defensive_pat") * 2.0
     )
     if "dst_points_allowed" in stats:
         points += fd_dst_points_allowed(_stat(stats, "dst_points_allowed"))

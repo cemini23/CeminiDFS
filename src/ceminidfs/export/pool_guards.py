@@ -26,7 +26,8 @@ from pydfs_lineup_optimizer.fantasy_points_strategy import BaseFantasyPointsStra
 
 from ceminidfs.data.research_locks import QB_CELL_OPEN_TOKENS
 from ceminidfs.data.stadiums import normalize_team_abbr
-from ceminidfs.export.lineup_report import player_team
+from ceminidfs.export.lineup_report import player_name, player_team
+from ceminidfs.export.recap_guards import is_backup_quarterback, load_qb_starters_csv
 from ceminidfs.export.stack_rules import nfl_positions
 
 # A skill player with no rush, target, or pass attempt stays out of the pool.
@@ -251,6 +252,60 @@ def apply_open_qb_gate(optimizer: Any, open_teams: Iterable[str]) -> list[str]:
             print(f"QB cell open for {team}; no quarterback rostered", file=sys.stderr)
             removed_teams.append(team)
     return removed_teams
+
+
+def apply_qb_starter_gate(optimizer: Any, starters: Mapping[str, str]) -> list[str]:
+    """Remove every quarterback who is not the one starter for his team.
+
+    The removed player also gets ``0`` fantasy points. Return the removed names.
+    """
+
+    if not starters:
+        return []
+    pool = getattr(optimizer, "player_pool", None)
+    if pool is None:
+        return []
+    removed_names: list[str] = []
+    for player in list(getattr(pool, "all_players", []) or []):
+        if not _is_qb_player(player):
+            continue
+        if not is_backup_quarterback(player_team(player), player_name(player), "QB", starters):
+            continue
+        try:
+            pool.remove_player(player)
+        except LineupOptimizerException:
+            pass
+        try:
+            player.fppg = 0.0
+        except (AttributeError, TypeError):
+            pass
+        removed_names.append(player_name(player))
+    if removed_names:
+        print(
+            f"QB starter gate removed {len(removed_names)} backup quarterbacks",
+            file=sys.stderr,
+        )
+    return removed_names
+
+
+def qb_starters_for_csv(
+    csv_path: str | Path,
+    starters: Mapping[str, str] | str | Path | None = None,
+) -> dict[str, str]:
+    """Load an explicit starter map, or the ``qb_starters_*.csv`` beside the salary file."""
+
+    if isinstance(starters, Mapping):
+        return {normalize_team_abbr(str(team)): str(name) for team, name in starters.items() if str(name).strip()}
+    if isinstance(starters, (str, Path)):
+        path = Path(starters)
+        if path.is_file():
+            return load_qb_starters_csv(path)
+        return {}
+    folder = Path(csv_path).parent
+    found = sorted(folder.glob("qb_starters_*.csv"))
+    if not found:
+        return {}
+    return load_qb_starters_csv(found[-1])
 
 
 def count_eligible_skill_players(optimizer: Any) -> int:

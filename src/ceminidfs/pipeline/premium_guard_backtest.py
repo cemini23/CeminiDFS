@@ -708,7 +708,7 @@ def _week_points(season: int, week: int) -> dict[tuple[str, str], float]:
     roster = PROJECT_ROOT / "artifacts" / "cache" / f"rosters_{season}.parquet"
     oracle = _oracle()
     games = oracle._teams_with_games(pbp, season, week)
-    points = oracle._points_lookup(actuals, roster, games)
+    points = oracle._points_lookup(actuals, roster, games, week=week)
     _POINTS[key] = points
     return points
 

@@ -289,7 +289,7 @@ def measure_slate(
         absent = sorted(set(kickoffs) - games)
         return _no_evidence("Sunday games are missing from the play cache: " + ", ".join(absent))
 
-    points = _points_lookup(actuals, roster_path, games)
+    points = _points_lookup(actuals, roster_path, games, week=week)
     scratch = load_scratch_names(scratch_path)
     pool, unresolved = build_pool(salary_path, season, week, kickoffs, points, scratch)
     if unresolved:

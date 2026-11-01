@@ -17,6 +17,9 @@ OUT_TOKENS = {"O", "OUT", "IR"}
 DOUBT_TOKENS = {"D", "DOUBTFUL"}
 REPORT_OUT = {"OUT", "IR"}
 REPORT_DOUBT = {"DOUBTFUL"}
+# A non-rotation mate does not inherit vacated targets or carries.
+TARGET_SHARE_FLOOR = 0.08
+RUSH_SHARE_FLOOR = 0.15
 
 
 def load_week_injuries(season: int, week: int) -> pd.DataFrame:
@@ -123,6 +126,7 @@ def _redistribute(frame: pd.DataFrame, donors: pd.Series) -> pd.DataFrame:
             for item in idx
             if bool(active.loc[item]) and position.loc[item] in {"WR", "RB", "TE"}
         ]
+        receiver_idx = [item for item in receiver_idx if _is_rotation(out, item, idx)]
         rb_idx = [item for item in receiver_idx if position.loc[item] == "RB"]
         vacated_targets = float(targets.loc[donor_idx].clip(lower=0).sum())
         vacated_rz = float(rz_touches.loc[donor_idx].clip(lower=0).sum())
@@ -134,6 +138,30 @@ def _redistribute(frame: pd.DataFrame, donors: pd.Series) -> pd.DataFrame:
         _add_carry_points(out, rb_idx)
         _ = label
     return out
+
+
+def _is_rotation(frame: pd.DataFrame, item, team_idx: list) -> bool:
+    """True when the player already owns a rotation share of targets or rushes."""
+
+    target_share = _team_share(frame, team_idx, "targets_per_game", ("trailing_target_share", "target_share"))
+    rush_share = _team_share(frame, team_idx, "carries_per_game", ("trailing_rush_share", "rush_share"))
+    return float(target_share.loc[item]) >= TARGET_SHARE_FLOOR or float(rush_share.loc[item]) >= RUSH_SHARE_FLOOR
+
+
+def _team_share(
+    frame: pd.DataFrame,
+    team_idx: list,
+    volume_column: str,
+    explicit_columns: tuple[str, ...],
+) -> pd.Series:
+    for column in explicit_columns:
+        if column in frame.columns:
+            return _num(frame, column)
+    volume = _num(frame, volume_column).clip(lower=0)
+    total = float(volume.loc[team_idx].sum()) if team_idx else 0.0
+    if total <= 0:
+        return pd.Series(0.0, index=frame.index)
+    return volume / total
 
 
 def _spread(frame: pd.DataFrame, receivers: list, column: str, weights: pd.Series, mass: float) -> None:

@@ -182,7 +182,7 @@ def _score_week3_join(week_label: str) -> PermutationResult:
     if not kickoffs or not set(kickoffs).issubset(games):
         return _no_evidence(week_label, "NO_EVIDENCE")
 
-    points = _points_lookup(actuals, DEFAULT_ROSTER, games)
+    points = _points_lookup(actuals, DEFAULT_ROSTER, games, week=WEEK)
     frame = _pairs_from_projections(DEFAULT_PROJECTIONS, points, kickoffs)
     if frame is None:
         return _no_evidence(week_label, "NO_EVIDENCE")

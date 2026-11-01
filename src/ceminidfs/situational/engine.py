@@ -35,6 +35,8 @@ DEFAULT_SEASONS = (2023, 2024, 2025, 2026)
 HOLD_TIME_SECONDS = 2.85
 SALARY_BY_SLATE = {
     (2026, 6): Path("data/slates/2026-10-18_fd_sun.csv"),
+    (2026, 7): Path("data/slates/2026-10-25_fd_sun.csv"),
+    (2026, 8): Path("data/slates/2026-11-01_fd_sun.csv"),
 }
 
 _PBP_COLUMNS = (
@@ -171,11 +173,35 @@ def build_cached_grains(
 _BOOST_COLUMNS = ("vacated_target_boost", "vacated_rz_boost")
 
 
+def q4_rb_checkdown_score(frame: pd.DataFrame) -> pd.Series:
+    """RB check-down volume. Other positions stay at 0.
+
+    The score is targets per game times ``0.35 + 0.65 * q4_trail_target_share``.
+    A back with more trailing-quarter targets scores higher. A missing input is 0.
+    """
+
+    if "position" in frame.columns:
+        position = frame["position"].astype(str).str.upper()
+    else:
+        position = pd.Series("", index=frame.index)
+    if "targets_per_game" in frame.columns:
+        targets = pd.to_numeric(frame["targets_per_game"], errors="coerce").fillna(0.0)
+    else:
+        targets = pd.Series(0.0, index=frame.index)
+    if "q4_trail_target_share" in frame.columns:
+        share = pd.to_numeric(frame["q4_trail_target_share"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    else:
+        share = pd.Series(0.0, index=frame.index)
+    score = targets * (0.35 + 0.65 * share)
+    return score.where(position.eq("RB"), 0.0)
+
+
 def _cache_players(players: pd.DataFrame, scored: pd.DataFrame) -> pd.DataFrame:
     """Copy injury-vacuum boosts onto the point-in-time player frame.
 
     The feature table is keyed by gsis ``player_id``. The boosts live on the
     scored salary frame under ``gsis_id``. A player who is not on the slate gets 0.
+    ``q4_rb_checkdown_score`` is added for the shared cache. Non-RBs stay at 0.
     """
 
     frame = players.copy()
@@ -183,12 +209,14 @@ def _cache_players(players: pd.DataFrame, scored: pd.DataFrame) -> pd.DataFrame:
     if "player_id" not in frame.columns:
         for column in _BOOST_COLUMNS:
             frame[column] = 0.0
+        frame["q4_rb_checkdown_score"] = q4_rb_checkdown_score(frame)
         return frame
     frame["player_id"] = frame["player_id"].astype(str)
     frame = frame.merge(_slate_boosts(scored), left_on="player_id", right_on="gsis_id", how="left")
     frame = frame.drop(columns=["gsis_id"], errors="ignore")
     for column in _BOOST_COLUMNS:
         frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+    frame["q4_rb_checkdown_score"] = q4_rb_checkdown_score(frame)
     return frame.sort_values(["player_id"], kind="mergesort").reset_index(drop=True)
 
 

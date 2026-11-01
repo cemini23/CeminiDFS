@@ -181,7 +181,7 @@ def _build_paired_frame() -> pd.DataFrame | None:
     if not kickoffs or not set(kickoffs).issubset(games):
         return None
 
-    points = _points_lookup(actuals, DEFAULT_ROSTER, games)
+    points = _points_lookup(actuals, DEFAULT_ROSTER, games, week=WEEK)
     path = PROJECT_ROOT / "runs" / "2026_week_3" / "canonical_projections_2026_w3.csv"
     frame = _pairs_with_salary(path, points, kickoffs)
     return frame

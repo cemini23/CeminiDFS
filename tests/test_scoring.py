@@ -86,6 +86,7 @@ def test_dst_stub_event_points():
 
     assert fd_points(stats) == 17.0
     assert dk_points(stats) == 17.0
+    assert fd_points({"dst_defensive_pat": 1}) == 2.0
 
 
 def test_dst_fumble_recovery_from_opp_fumbles_lost_only():

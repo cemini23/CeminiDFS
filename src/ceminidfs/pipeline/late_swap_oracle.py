@@ -286,7 +286,7 @@ def measure_slate(
             "Sunday games are missing from the play cache: " + ", ".join(absent)
         )
 
-    points = _points_lookup(actuals, roster_path, games)
+    points = _points_lookup(actuals, roster_path, games, week=week)
     scratch = load_scratch_names(scratch_path)
     pool, unresolved = build_pool(salary_path, season, week, kickoffs, points, scratch)
     if unresolved:
@@ -660,13 +660,23 @@ def _points_lookup(
     actuals: pd.DataFrame,
     roster_path: Path,
     games: set[str],
+    week: int | None = None,
 ) -> dict[tuple[str, str], float]:
-    """Map (normalized name, team) and ('__dst__', team) to final FanDuel points."""
+    """Map (normalized name, team) and ('__dst__', team) to final FanDuel points.
+
+    A season roster file has one row per player-week. Keep the row for ``week``
+    so a later trade does not hide the team on the salary file.
+    """
 
     roster = pd.read_parquet(roster_path)
     if "gsis_id" not in roster.columns or "full_name" not in roster.columns:
         roster_index: dict[tuple[str, str], str] = {}
     else:
+        if week is not None and "week" in roster.columns:
+            week_num = pd.to_numeric(roster["week"], errors="coerce")
+            matched = roster.loc[week_num == int(week)]
+            if not matched.empty:
+                roster = matched
         roster = roster.dropna(subset=["gsis_id"]).drop_duplicates("gsis_id")
         roster_index = {}
         for row in roster.itertuples(index=False):
