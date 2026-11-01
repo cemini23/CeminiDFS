@@ -831,6 +831,10 @@ def _copy_opposing_qb(frame: pd.DataFrame) -> pd.DataFrame:
     active = ~status.isin(["OUT", "IR"])
     qbs = out.loc[out["position"].astype(str).eq("QB") & active].copy()
     dst = out["position"].astype(str).eq("DST")
+    # An empty defense mask is an object array on pandas 2. Assigning it
+    # into the float column raises TypeError. A slate with no defense is done.
+    if not bool(dst.any()):
+        return out
     if not qbs.empty:
         qbs["_team"] = qbs["team"].astype(str)
         qbs["_attempts"] = _series(qbs, "pass_att_per_game")
