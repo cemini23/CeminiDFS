@@ -61,6 +61,20 @@ def run_pipeline(
     if participation_pbp is not None:
         stage_config["participation_pbp"] = participation_pbp
 
+    # Copy the salary file before normalize or the solve. A failed copy stops the run.
+    if "optimize" in selected_stages:
+        from ceminidfs.export.recap_guards import prelock_salary_archive
+
+        prelock_salary_archive(
+            salary_path,
+            season=int(season),
+            week=int(week),
+            work_dir=work_dir,
+            slate_date=cfg.get("slate_date"),
+            fixture_id=cfg.get("fixture_id"),
+            recap_root=cfg.get("recap_root", "/workspace/dfs-recap"),
+        )
+
     try:
         if "fetch" in selected_stages:
             artifact = _run_fetch(season, week, stage_config)

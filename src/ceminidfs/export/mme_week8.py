@@ -46,9 +46,11 @@ from ceminidfs.export.recap_guards import (
     RB_PAIR_CAP,
     RB_TE_CAP,
     OpportunityIndex,
+    MME_PLAYER_CAP,
     archive_loaded_salary,
     assert_one_qb_per_team,
     build_opportunity_index,
+    prelock_salary_archive,
     environment_scale,
     is_backup_quarterback,
     lookup_opportunity,
@@ -62,7 +64,7 @@ CONTEST_PREFIX = "135859-"
 SEASON = 2026
 WEEK = 8
 MAX_SOURCE_WEEK = 7
-BOOK_CAP = {"QB": 36, "RB": 45, "WR": 42, "TE": 42, "DST": 33}
+BOOK_CAP = {"QB": 36, "RB": MME_PLAYER_CAP, "WR": MME_PLAYER_CAP, "TE": MME_PLAYER_CAP, "DST": 33}
 
 MAIN_GAMES = frozenset(
     {
@@ -203,8 +205,6 @@ DESKTOP_SALARY = Path(
 )
 SALARY_PATH = Path("data/slates/2026-11-01_fd_sun.csv")
 RUN_DIR = Path("runs/2026_week_8")
-SRC_COPY = RUN_DIR / "_src_fd_sun.csv"
-RECAP_COPY = Path("/workspace/dfs-recap/2026-11-01/_src_fd_sun.csv")
 STARTER_PATH = RUN_DIR / "qb_starters_2026-11-01.csv"
 ENV_PATH = RUN_DIR / "environment.csv"
 CEILING_PATH = RUN_DIR / "situational" / "ceiling.csv"
@@ -268,6 +268,14 @@ def week8_blocked(
     targets = None if found is None else found.targets
     carries = None if found is None else found.carries
     snaps = None if found is None else found.snaps
+    team_share = None
+    route_share = None
+    snap_share = None
+    if found is not None and found.team_targets > 0:
+        team_share = found.targets / found.team_targets
+    if found is not None:
+        route_share = found.route_share
+        snap_share = found.snap_share
     return skill_excluded(
         position=position,
         name=display,
@@ -281,6 +289,9 @@ def week8_blocked(
         roster_fresh=roster_fresh,
         starter_note=False,
         whitelist=frozenset(),
+        team_target_share=team_share,
+        route_share=route_share,
+        snap_share=snap_share,
     )
 
 
@@ -419,7 +430,15 @@ def refresh_shared_cache(salary_path: Path) -> dict:
 def load_opportunity_index() -> OpportunityIndex:
     pbp = pd.read_parquet(PBP_PATH)
     rosters = pd.read_parquet(ROSTER_PATH) if ROSTER_PATH.is_file() else pd.DataFrame()
-    return build_opportunity_index(pbp, rosters, season=SEASON, before_week=WEEK)
+    snap_path = Path("artifacts/cache/snap_counts_2026.parquet")
+    participation = pd.read_parquet(snap_path) if snap_path.is_file() else None
+    return build_opportunity_index(
+        pbp,
+        rosters,
+        season=SEASON,
+        before_week=WEEK,
+        participation=participation,
+    )
 
 
 def roster_status_index(path: Path = ROSTER_PATH) -> tuple[dict[tuple[str, str], str], bool]:
@@ -536,10 +555,19 @@ def _default_source() -> Path:
 def run_week8(*, source: Path | None = None) -> list[Candidate]:
     """Archive the salary file, write the cache, and solve the 150-lineup book."""
 
-    written = archive_loaded_salary(source or _default_source(), [SALARY_PATH, SRC_COPY, RECAP_COPY])
-    for path in written:
+    salary_source = source or _default_source()
+    written = archive_loaded_salary(salary_source, [SALARY_PATH])
+    archived = prelock_salary_archive(
+        salary_source,
+        season=SEASON,
+        week=WEEK,
+        work_dir=RUN_DIR,
+        slate_date="2026-11-01",
+        fixture_id=CONTEST_PREFIX.rstrip("-"),
+    )
+    for path in [*written, *archived]:
         print(f"salary copy -> {path}")
-    if not any(path == RECAP_COPY for path in written):
+    if not any("fd_players_" in path.name for path in archived):
         print("recap copy skipped: /workspace/dfs-recap is not on this machine")
     salary_path = SALARY_PATH
     write_qb_starters_csv(STARTER_PATH, QB_STARTERS)

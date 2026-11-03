@@ -249,7 +249,14 @@ def run_slate(
 ) -> dict[str, Any]:
     """Calibrate history, score one pre-game slate, and write the files."""
 
-    grains, cache_audit = build_cached_grains(seasons, cache_dir=cache_dir)
+    frames, cache_audit = load_history_frames(seasons, cache_dir=cache_dir)
+    grains = build_history_grains(
+        frames["pbp"],
+        ngs_passing=frames["ngs_passing"],
+        ngs_rushing=frames["ngs_rushing"],
+        ngs_receiving=frames["ngs_receiving"],
+        ftn=frames["ftn"],
+    )
     calibration = calibrate_history(grains, seed=seed, n_boot=n_boot)
     tables = tables_from_grains(grains, season=int(season), week=int(week))
     salary = _read_salary(_salary_path(season, week, salary_path))
@@ -272,6 +279,7 @@ def run_slate(
         season=int(season),
         week=int(week),
         max_source_week=max_source_week,
+        pbp=frames["pbp"],
     )
     boosts = slate_corr_boosts(scored, calibration)
     payload = {

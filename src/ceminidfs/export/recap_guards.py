@@ -25,10 +25,18 @@ CHEAP_SALARY = 4800
 CHEAP_PLAYED = 3
 CHEAP_FPPG = 4.5
 RB_TOUCH_FLOOR = 4
-RECEIVER_TARGET_FLOOR = 3
+RECEIVER_TARGET_FLOOR = 4
+TARGET_SHARE_FLOOR = 0.15
+ROUTE_SHARE_FLOOR = 0.55
+# A priced starter stays in the pool when the usage floor would drop him.
+RECEIVER_EXEMPT_SALARY = 6000
+RECEIVER_EXEMPT_FPPG = 10.0
 SKILL_POSITIONS = frozenset({"RB", "WR", "TE"})
-WR_TE_CAP = 42
-RB_CAP = 45
+# 25% of a 150-lineup book. round(0.25 * 150) is 38. One player stays at or under 38.
+MME_EXPOSURE = 0.25
+MME_PLAYER_CAP = 38
+WR_TE_CAP = MME_PLAYER_CAP
+RB_CAP = MME_PLAYER_CAP
 RB_PAIR_CAP = 24
 RB_TE_CAP = 9
 BOOK_SIZE = 150
@@ -105,15 +113,73 @@ def _last_token(name: str) -> str:
     return token
 
 
-def opportunity_blocked(position: object, targets: int, carries: int) -> bool:
-    """True when the last two active games miss the touch floor."""
+def _as_share(value: object) -> float | None:
+    """Return a 0..1 share. A value above 1.5 is a percent."""
+
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    if number > 1.5:
+        number = number / 100.0
+    if number > 1:
+        number = 1.0
+    return number
+
+
+def receiver_exempt(position: object, salary: int | None, fppg: float | None) -> bool:
+    """True when salary and FPPG waive the WR/TE usage floor."""
+
+    if canon_position(position) not in {"WR", "TE"}:
+        return False
+    if salary is None or fppg is None:
+        return False
+    try:
+        price = int(salary)
+        points = float(fppg)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(points):
+        return False
+    return price >= RECEIVER_EXEMPT_SALARY and points >= RECEIVER_EXEMPT_FPPG
+
+
+def opportunity_blocked(
+    position: object,
+    targets: int,
+    carries: int,
+    *,
+    salary: int | None = None,
+    fppg: float | None = None,
+    team_target_share: float | None = None,
+    route_share: float | None = None,
+    snap_share: float | None = None,
+) -> bool:
+    """True when the last two active games miss the touch floor.
+
+    A WR or TE needs 4 targets. When a share is present, he also needs a 15%
+    team target share, or a 55% route share, or a 55% snap share. A salary at
+    or above $6,000 with FPPG at or above 10.0 stays eligible.
+    """
 
     pos = canon_position(position)
     if pos == "RB":
         return int(targets) + int(carries) < RB_TOUCH_FLOOR
-    if pos in {"WR", "TE"}:
-        return int(targets) < RECEIVER_TARGET_FLOOR
-    return False
+    if pos not in {"WR", "TE"}:
+        return False
+    if receiver_exempt(pos, salary, fppg):
+        return False
+    if int(targets) < RECEIVER_TARGET_FLOOR:
+        return True
+    known = [team_target_share, route_share, snap_share]
+    if all(value is None for value in known):
+        return False
+    team_ok = team_target_share is not None and float(team_target_share) >= TARGET_SHARE_FLOOR
+    route_ok = route_share is not None and float(route_share) >= ROUTE_SHARE_FLOOR
+    snap_ok = snap_share is not None and float(snap_share) >= ROUTE_SHARE_FLOOR
+    return not (team_ok or route_ok or snap_ok)
 
 
 def cheap_season_blocked(position: object, salary: int, played: int, fppg: float) -> bool:
@@ -165,6 +231,9 @@ def skill_excluded(
     roster_fresh: bool = False,
     starter_note: bool = False,
     whitelist: frozenset[str] | set[str] | None = None,
+    team_target_share: float | None = None,
+    route_share: float | None = None,
+    snap_share: float | None = None,
 ) -> bool:
     """True when G1 or G3 removes this skill player. A whitelist name stays."""
 
@@ -184,7 +253,16 @@ def skill_excluded(
             return True
         if snaps is not None and snaps <= 0 and not starter_note:
             return True
-    if targets is not None and carries is not None and opportunity_blocked(pos, targets, carries):
+    if targets is not None and carries is not None and opportunity_blocked(
+        pos,
+        targets,
+        carries,
+        salary=salary,
+        fppg=fppg,
+        team_target_share=team_target_share,
+        route_share=route_share,
+        snap_share=snap_share,
+    ):
         return True
     return cheap_season_blocked(pos, salary, played, fppg)
 
@@ -323,9 +401,123 @@ def archive_loaded_salary(
             under_workspace = False
         if under_workspace and not root.is_dir():
             continue
+        if dest.resolve() == src.resolve():
+            written.append(dest)
+            continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
+        if not dest.is_file() or dest.stat().st_size != src.stat().st_size:
+            raise OSError(f"salary copy failed: {dest}")
         written.append(dest)
+    return written
+
+
+def _slate_date_from_name(path: Path) -> str:
+    text = path.name
+    for index in range(0, max(len(text) - 9, 0)):
+        token = text[index : index + 10]
+        if (
+            len(token) == 10
+            and token[4] == "-"
+            and token[7] == "-"
+            and token[:4].isdigit()
+            and token[5:7].isdigit()
+            and token[8:10].isdigit()
+        ):
+            return token
+    return ""
+
+
+def _fixture_id_from_salary(path: Path) -> str:
+    """Return the shared FanDuel contest id, or ``slate`` when the file has none."""
+
+    try:
+        frame = pd.read_csv(path, nrows=40)
+    except (OSError, ValueError, pd.errors.ParserError):
+        return "slate"
+    id_column = next((column for column in frame.columns if str(column).strip().lower() == "id"), None)
+    if id_column is None:
+        return "slate"
+    prefixes: list[str] = []
+    for value in frame[id_column].astype(str):
+        text = value.strip()
+        if "-" not in text:
+            continue
+        prefix = text.split("-", 1)[0].strip()
+        if prefix.isdigit():
+            prefixes.append(prefix)
+    if prefixes and len(set(prefixes)) == 1:
+        return prefixes[0]
+    return "slate"
+
+
+def prelock_salary_archive(
+    source: str | Path,
+    *,
+    season: int,
+    week: int,
+    work_dir: str | Path,
+    slate_date: str | None = None,
+    fixture_id: str | None = None,
+    recap_root: str | Path = "/workspace/dfs-recap",
+) -> list[Path]:
+    """Copy the salary file before a solve. Fail when the run copy fails.
+
+    Writes ``runs/.../_src_fd_sun.csv`` and ``fade-coverage-w{week}.md``.
+    When ``recap_root`` exists, also writes
+    ``{slate_date}/in/fd_players_{fixture_id}.csv``.
+    """
+
+    src = Path(source)
+    if not src.is_file():
+        raise FileNotFoundError(src)
+    run_dir = Path(work_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_copy = run_dir / "_src_fd_sun.csv"
+    written = archive_loaded_salary(src, [run_copy], workspace_root=run_dir)
+    if run_copy not in written or not run_copy.is_file():
+        raise OSError(f"salary copy failed: {run_copy}")
+
+    date = (slate_date or _slate_date_from_name(src) or "").strip()
+    contest = (fixture_id or _fixture_id_from_salary(src) or "slate").strip() or "slate"
+    root = Path(recap_root)
+    recap_copy: Path | None = None
+    recap_note = "skipped: dfs-recap root is absent"
+    if root.is_dir():
+        if not date:
+            recap_note = "skipped: slate date is absent"
+        else:
+            recap_copy = root / date / "in" / f"fd_players_{contest}.csv"
+            recap_copy.parent.mkdir(parents=True, exist_ok=True)
+            if recap_copy.resolve() != src.resolve():
+                shutil.copyfile(src, recap_copy)
+            if not recap_copy.is_file() or recap_copy.stat().st_size != src.stat().st_size:
+                raise OSError(f"salary copy failed: {recap_copy}")
+            written.append(recap_copy)
+            recap_note = str(recap_copy)
+
+    try:
+        rows = sum(1 for _ in src.open(encoding="utf-8-sig")) - 1
+    except OSError:
+        rows = 0
+    if rows < 0:
+        rows = 0
+    audit = run_dir / f"fade-coverage-w{int(week)}.md"
+    lines = [
+        f"# Fade coverage audit — {int(season)} week {int(week)}",
+        "",
+        "Pre-lock salary copy is on disk.",
+        "",
+        f"- source: {src}",
+        f"- run copy: {run_copy}",
+        f"- recap copy: {recap_note}",
+        f"- rows: {rows}",
+        "",
+    ]
+    audit.write_text("\n".join(lines), encoding="utf-8")
+    if not audit.is_file():
+        raise OSError(f"fade audit failed: {audit}")
+    written.append(audit)
     return written
 
 
@@ -334,6 +526,9 @@ class Opportunity:
     targets: int
     carries: int
     snaps: int
+    team_targets: int = 0
+    route_share: float | None = None
+    snap_share: float | None = None
 
 
 @dataclass(frozen=True)
@@ -359,6 +554,7 @@ def build_opportunity_index(
     before_week: int = 8,
     active_games: int = 2,
     snap_games: int = 3,
+    participation: pd.DataFrame | None = None,
 ) -> OpportunityIndex:
     """Sum targets, carries, and snaps before the slate week.
 
@@ -395,6 +591,7 @@ def build_opportunity_index(
     # (team, gsis, week) -> [targets, carries, snaps]
     cells: dict[tuple[str, str, int], list[int]] = defaultdict(lambda: [0, 0, 0])
     team_weeks: dict[str, set[int]] = defaultdict(set)
+    team_week_targets: dict[tuple[str, int], int] = defaultdict(int)
 
     def add(mask: pd.Series, id_column: str, name_column: str, slot: int) -> None:
         if id_column not in frame.columns:
@@ -412,6 +609,8 @@ def build_opportunity_index(
             week_no = int(week)
             cells[(team, gsis, week_no)][slot] += 1
             team_weeks[team].add(week_no)
+            if slot == 0:
+                team_week_targets[(team, week_no)] += 1
             if name_column in record:
                 names[gsis] |= name_keys(record.get(name_column))
 
@@ -431,25 +630,114 @@ def build_opportunity_index(
     snap_window = {
         team: set(sorted(weeks)[-int(snap_games) :]) for team, weeks in team_weeks.items()
     }
-    by_name: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
+    shares = _participation_index(participation)
+
+    class _Bucket:
+        def __init__(self) -> None:
+            self.targets = 0
+            self.carries = 0
+            self.snaps = 0
+            self.team_targets = 0
+            self.route_share: float | None = None
+            self.snap_share: float | None = None
+
+    by_name: dict[tuple[str, str], _Bucket] = defaultdict(_Bucket)
     for (team, gsis), rows in by_player.items():
         rows.sort()
         active_rows = [row for row in rows if row[1] + row[2] > 0]
         chosen = active_rows[-int(active_games) :]
         targets = sum(row[1] for row in chosen)
         carries = sum(row[2] for row in chosen)
+        chosen_weeks = [row[0] for row in chosen]
+        team_targets = sum(team_week_targets.get((team, week_no), 0) for week_no in chosen_weeks)
         window = snap_window.get(team, set())
         snaps = sum(row[3] for row in rows if row[0] in window)
+        route_share = _mean_share(shares, team, gsis, chosen_weeks, 0)
+        snap_share = _mean_share(shares, team, gsis, chosen_weeks, 1)
         for key in names.get(gsis, set()):
             bucket = by_name[(team, key)]
-            bucket[0] += int(targets)
-            bucket[1] += int(carries)
-            bucket[2] += int(snaps)
+            bucket.targets += int(targets)
+            bucket.carries += int(carries)
+            bucket.snaps += int(snaps)
+            bucket.team_targets = max(bucket.team_targets, int(team_targets))
+            bucket.route_share = _max_share(bucket.route_share, route_share)
+            bucket.snap_share = _max_share(bucket.snap_share, snap_share)
     packed = {
-        key: Opportunity(targets=values[0], carries=values[1], snaps=values[2])
-        for key, values in by_name.items()
+        key: Opportunity(
+            targets=bucket.targets,
+            carries=bucket.carries,
+            snaps=bucket.snaps,
+            team_targets=bucket.team_targets,
+            route_share=bucket.route_share,
+            snap_share=bucket.snap_share,
+        )
+        for key, bucket in by_name.items()
     }
     return OpportunityIndex(by_name=packed, active_teams=active)
+
+
+def _max_share(left: float | None, right: float | None) -> float | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return max(left, right)
+
+
+def _mean_share(
+    shares: Mapping[tuple[str, str, int], tuple[float | None, float | None]],
+    team: str,
+    gsis: str,
+    weeks: Sequence[int],
+    slot: int,
+) -> float | None:
+    values = []
+    for week_no in weeks:
+        pair = shares.get((team, gsis, int(week_no)))
+        if pair is None or pair[slot] is None:
+            continue
+        values.append(float(pair[slot]))
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _participation_index(
+    frame: pd.DataFrame | None,
+) -> dict[tuple[str, str, int], tuple[float | None, float | None]]:
+    """Map ``(team, gsis, week)`` to ``(route share, snap share)``."""
+
+    if frame is None or frame.empty:
+        return {}
+    id_column = next((name for name in ("gsis_id", "player_id") if name in frame.columns), None)
+    if id_column is None or "week" not in frame.columns:
+        return {}
+    team_column = next((name for name in ("team", "posteam", "recent_team") if name in frame.columns), None)
+    route_column = next(
+        (
+            name
+            for name in ("route_participation", "route_pct", "route_share")
+            if name in frame.columns
+        ),
+        None,
+    )
+    snap_column = next(
+        (name for name in ("offense_pct", "snap_share", "snap_pct") if name in frame.columns),
+        None,
+    )
+    if route_column is None and snap_column is None:
+        return {}
+    found: dict[tuple[str, str, int], tuple[float | None, float | None]] = {}
+    for record in frame.to_dict(orient="records"):
+        gsis = str(record.get(id_column) or "")
+        week = record.get("week")
+        if not gsis or pd.isna(week):
+            continue
+        team = _club(record.get(team_column)) if team_column else ""
+        route = _as_share(record.get(route_column)) if route_column else None
+        snap = _as_share(record.get(snap_column)) if snap_column else None
+        found[(team, gsis, int(week))] = (route, snap)
+    return found
 
 
 def lookup_opportunity(

@@ -42,7 +42,8 @@ SEED = 20261017
 CONTEST_PREFIX = "135326-"
 CHEAP_LIMIT = 15
 
-EXPOSURE_CAPS = {"QB": 42, "RB": 63, "WR": 57, "TE": 57, "DST": 38}
+# One player stays at or under 38 of 150 lineups (25%).
+EXPOSURE_CAPS = {"QB": 38, "RB": 38, "WR": 38, "TE": 38, "DST": 38}
 HARD_STATUS = frozenset({"O", "IR", "D", "SUSP", "NA", "PUP", "NFI"})
 BANNED_TEAMS = frozenset({"HOU", "JAX"})
 CATCHER_POSITIONS = frozenset({"WR", "TE"})

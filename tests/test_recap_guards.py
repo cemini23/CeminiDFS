@@ -37,7 +37,8 @@ def test_defensive_pat_scores_two_points():
 
 def test_min_salary_touch_floor_blocks_a_punt():
     assert opportunity_blocked("WR", targets=2, carries=4)
-    assert not opportunity_blocked("WR", targets=3, carries=0)
+    assert opportunity_blocked("WR", targets=3, carries=0)
+    assert not opportunity_blocked("WR", targets=4, carries=0)
     assert opportunity_blocked("TE", targets=1, carries=0)
     assert opportunity_blocked("RB", targets=1, carries=2)
     assert not opportunity_blocked("RB", targets=1, carries=3)
@@ -91,7 +92,7 @@ def test_opportunity_index_uses_the_last_two_active_games():
     assert jones is not None and jones.targets == 1
     assert irving is not None and irving.carries == 1
     assert opportunity_blocked("WR", jones.targets, jones.carries)
-    assert not opportunity_blocked("WR", evans.targets, evans.carries)
+    assert opportunity_blocked("WR", evans.targets, evans.carries)
 
 
 def test_backup_quarterback_gate_keeps_one_starter():
@@ -160,8 +161,8 @@ def test_free_agent_and_zero_snap_players_are_excluded():
 
 
 def test_same_team_rb_te_needs_the_quarterback_and_stays_under_the_cap():
-    assert WR_TE_CAP == 42
-    assert RB_CAP == 45
+    assert WR_TE_CAP == 38
+    assert RB_CAP == 38
     assert RB_PAIR_CAP == 24
     assert RB_TE_CAP == 9
 
