@@ -280,6 +280,68 @@ def write_status_csvs(
     return dfs_path, parlay_path
 
 
+def _salary_pairs(
+    salary_path: str | Path | None,
+    season: int,
+    week: int,
+) -> tuple[dict[str, dict[str, Any]] | None, set[frozenset[str]] | None]:
+    if salary_path is None:
+        return None, None
+    salary_teams = slate_teams_from_salary(salary_path, season, week)
+    pairs: set[frozenset[str]] = set()
+    for info in salary_teams.values():
+        pair = _game_pair(str(info["game_id"]))
+        if pair:
+            pairs.add(pair)
+    return salary_teams, pairs
+
+
+def _team_errors(team: str, raw_team: Any, seen_teams: set[str]) -> list[str]:
+    if team:
+        seen_teams.add(team)
+    if team not in STADIUMS:
+        return [f"unknown team code: {team or raw_team}"]
+    return []
+
+
+def _game_errors(
+    team: str,
+    opp: str,
+    game_id: str,
+    salary_pairs: set[frozenset[str]] | None,
+    seen_games: set[frozenset[str]],
+) -> list[str]:
+    pair = _game_pair(game_id)
+    row_pair = frozenset(code for code in (team, opp) if code)
+    if not pair or pair != row_pair:
+        return [f"game_id {game_id or '(blank)'} is not {team} and {opp}"]
+    if pair in seen_games:
+        return []
+    seen_games.add(pair)
+    if salary_pairs is not None and pair not in salary_pairs:
+        return [f"game {game_id} is not on the salary file"]
+    return []
+
+
+def _row_environment_errors(
+    row: Mapping[str, Any],
+    salary_pairs: set[frozenset[str]] | None,
+    seen_games: set[frozenset[str]],
+    seen_teams: set[str],
+) -> list[str]:
+    team = normalize_team_abbr(str(row.get("team") or ""))
+    opp = normalize_team_abbr(str(row.get("opp") or ""))
+    game_id = str(row.get("game_id") or "").strip()
+    errors = _team_errors(team, row.get("team"), seen_teams)
+    errors.extend(_game_errors(team, opp, game_id, salary_pairs, seen_games))
+    errors.extend(_citation_errors(row, "wind_mph", "wind_source_url", "wind_retrieved_at"))
+    errors.extend(
+        _citation_errors(row, "precip_pop", "precip_source_url", "precip_retrieved_at")
+    )
+    errors.extend(_exposed_weather_errors(row))
+    return errors
+
+
 def validate_environment(
     slate_path: str | Path,
     *,
@@ -292,40 +354,13 @@ def validate_environment(
     path = Path(slate_path)
     if not path.is_file():
         return [f"environment CSV not found: {path}"]
+    salary_teams, salary_pairs = _salary_pairs(salary_path, season, week)
     errors: list[str] = []
-    salary_teams: dict[str, dict[str, Any]] | None = None
-    salary_pairs: set[frozenset[str]] | None = None
-    if salary_path is not None:
-        salary_teams = slate_teams_from_salary(salary_path, season, week)
-        salary_pairs = set()
-        for info in salary_teams.values():
-            pair = _game_pair(str(info["game_id"]))
-            if pair:
-                salary_pairs.add(pair)
     seen_games: set[frozenset[str]] = set()
     seen_teams: set[str] = set()
     with path.open(newline="", encoding="utf-8-sig") as handle:
         for row in csv.DictReader(handle):
-            team = normalize_team_abbr(str(row.get("team") or ""))
-            opp = normalize_team_abbr(str(row.get("opp") or ""))
-            game_id = str(row.get("game_id") or "").strip()
-            if team:
-                seen_teams.add(team)
-            if team not in STADIUMS:
-                errors.append(f"unknown team code: {team or row.get('team')}")
-            pair = _game_pair(game_id)
-            row_pair = frozenset(code for code in (team, opp) if code)
-            if not pair or pair != row_pair:
-                errors.append(f"game_id {game_id or '(blank)'} is not {team} and {opp}")
-            elif pair not in seen_games:
-                seen_games.add(pair)
-                if salary_pairs is not None and pair not in salary_pairs:
-                    errors.append(f"game {game_id} is not on the salary file")
-            errors.extend(_citation_errors(row, "wind_mph", "wind_source_url", "wind_retrieved_at"))
-            errors.extend(
-                _citation_errors(row, "precip_pop", "precip_source_url", "precip_retrieved_at")
-            )
-            errors.extend(_exposed_weather_errors(row))
+            errors.extend(_row_environment_errors(row, salary_pairs, seen_games, seen_teams))
     if salary_teams is not None:
         for code in salary_teams:
             if code not in seen_teams:

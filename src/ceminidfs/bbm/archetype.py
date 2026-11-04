@@ -241,40 +241,55 @@ def get_archetype_progress(ledger_counts: LedgerCounts) -> Dict[str, Dict[str, a
     return progress
 
 
+def _force_a(roster: Roster, band: str) -> Optional[str]:
+    if band == "r1_2" and roster.rb_count < 2:
+        return "RB"
+    if band == "r11_13" and roster.te_count < 2:
+        return "TE"
+    return None
+
+
+def _force_b(roster: Roster, band: str) -> Optional[str]:
+    if band == "r1_2":
+        if roster.rb_count == 0:
+            return "RB"
+        if roster.wr_count == 0:
+            return "WR"
+    if band == "r11_13" and roster.te_count < 2:
+        return "TE"
+    return None
+
+
+def _force_c(roster: Roster, band: str) -> Optional[str]:
+    if band in ("r1_2", "r3_5") and roster.wr_count < 2:
+        return "WR"
+    if band == "r6_10" and roster.qb_count < 2:
+        return "QB"
+    return None
+
+
+def _force_d(roster: Roster, band: str) -> Optional[str]:
+    if band in ("r1_2", "r3_5") and roster.wr_count < 3:
+        return "WR"
+    if band == "r7_9" and roster.rb_count < 2:
+        return "RB"
+    if band == "r11_13" and roster.te_count < 2:
+        return "TE"
+    return None
+
+
+_FORCE_RULES = {
+    Archetype.A: _force_a,
+    Archetype.B: _force_b,
+    Archetype.C: _force_c,
+    Archetype.D: _force_d,
+}
+
+
 def should_force_archetype_pick(archetype: Archetype, roster: Roster, round_num: int) -> Optional[str]:
     """Check if we need to force a specific position pick for archetype structure.
 
     Returns position code if forced, None otherwise.
     """
-    band = get_round_band(round_num)
-
-    if archetype == Archetype.A:  # RB-forward
-        if band == "r1_2" and roster.rb_count < 2:
-            return "RB"
-        if band == "r11_13" and roster.te_count < 2:
-            return "TE"
-
-    elif archetype == Archetype.B:  # Hero RB
-        if band == "r1_2":
-            if roster.rb_count == 0:
-                return "RB"  # Need hero RB
-            if roster.wr_count == 0:
-                return "WR"
-        if band == "r11_13" and roster.te_count < 2:
-            return "TE"
-
-    elif archetype == Archetype.C:  # Stack-heavy
-        if band in ("r1_2", "r3_5") and roster.wr_count < 2:
-            return "WR"  # Stack anchor
-        if band == "r6_10" and roster.qb_count < 2:
-            return "QB"
-
-    elif archetype == Archetype.D:  # Zero RB
-        if band in ("r1_2", "r3_5") and roster.wr_count < 3:
-            return "WR"
-        if band == "r7_9" and roster.rb_count < 2:
-            return "RB"  # Late RBs
-        if band == "r11_13" and roster.te_count < 2:
-            return "TE"
-
-    return None
+    rule = _FORCE_RULES.get(archetype)
+    return rule(roster, get_round_band(round_num)) if rule else None

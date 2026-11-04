@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from typing import Mapping
 from pathlib import Path
 
 from ceminidfs.data.availability import is_unavailable_status
@@ -356,6 +357,152 @@ def _with_pass_through(row: dict[str, str], out_row: dict[str, str]) -> dict[str
     return out_row
 
 
+def _fanduel_mapping(
+    row: Mapping[str, str],
+    *,
+    name: str,
+    pos: str,
+    team: str,
+    salary: str,
+    projection: str,
+    game: str,
+    player_id: str,
+) -> dict[str, str]:
+    first, last = split_name(name)
+    return _with_pass_through(
+        row,
+        {
+            "Id": player_id,
+            "First Name": first,
+            "Last Name": last,
+            "Position": pos,
+            "Team": team,
+            "Salary": salary,
+            "FPPG": projection,
+            "Game": game,
+            "Injury Indicator": pick(row, INJURY_KEYS),
+        },
+    )
+
+
+def _draftkings_mapping(
+    row: Mapping[str, str],
+    keys: Mapping[str, tuple[str, ...]],
+    *,
+    name: str,
+    pos: str,
+    team: str,
+    salary: str,
+    projection: str,
+    game: str,
+    player_id: str,
+) -> dict[str, str]:
+    roster_position = pick(row, keys["roster_position"]).upper() or pos
+    return _with_pass_through(
+        row,
+        {
+            "Position": pos,
+            "Name": name,
+            "ID": player_id,
+            "Roster Position": roster_position,
+            "Salary": salary,
+            "Game Info": game,
+            "TeamAbbrev": team,
+            "AvgPointsPerGame": projection,
+        },
+    )
+
+
+def _showdown_mappings(
+    row: Mapping[str, str],
+    site_key: str,
+    keys: Mapping[str, tuple[str, ...]],
+    *,
+    name: str,
+    pos: str,
+    team: str,
+    salary: str,
+    projection: str,
+    game: str,
+    player_id: str,
+) -> list[dict[str, str]]:
+    return [
+        _with_pass_through(row, mapped)
+        for mapped in _emit_captain_rows(
+            row,
+            site_key=site_key,
+            keys=keys,
+            name=name,
+            player_id=player_id,
+            team=team,
+            game=game,
+            pos=pos,
+            salary=salary,
+            projection=projection,
+        )
+    ]
+
+
+def _row_is_usable(
+    row: Mapping[str, str],
+    name: str,
+    pos: str,
+    salary: str,
+) -> bool:
+    if not name or not pos or not salary:
+        return False
+    return not is_unavailable_status(pick(row, INJURY_KEYS))
+
+
+def _map_site_row(
+    row: Mapping[str, str],
+    site_key: str,
+    keys: Mapping[str, tuple[str, ...]],
+    auto_id: int,
+) -> tuple[list[dict[str, str]], bool]:
+    name = _full_name(row)
+    pos = _site_position(pick(row, keys["position"]), site_key)
+    salary = _clean_money(pick(row, keys["salary"]))
+    projection = pick(row, keys["projection"]) or "0"
+    team = pick(row, TEAM_KEYS) or "UNK"
+    game = _game(row)
+    player_id = pick(row, keys["id"]) or str(auto_id)
+
+    if not _row_is_usable(row, name, pos, salary):
+        return [], False
+
+    positive = _projection_is_positive(projection)
+    fields = {
+        "name": name,
+        "pos": pos,
+        "team": team,
+        "salary": salary,
+        "projection": projection,
+        "game": game,
+        "player_id": player_id,
+    }
+
+    if site_key == "fanduel":
+        return [_fanduel_mapping(row, **fields)], positive
+    if site_key == "draftkings":
+        return [_draftkings_mapping(row, keys, **fields)], positive
+    # Showdown: DK captain-mode CSV (two rows per player, shared ID).
+    return _showdown_mappings(row, site_key, keys, **fields), positive
+
+
+def _write_normalized_csv(out: Path, site_key: str, rows_out: list[dict[str, str]]) -> None:
+    fieldnames = list(SITE_FIELDS[site_key])
+    for field in PASS_THROUGH_FIELDS:
+        if any(field in row for row in rows_out):
+            fieldnames.append(field)
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows_out)
+
+
 def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fanduel") -> int:
     """Normalize a projection CSV to a pydfs importer CSV and return row count."""
 
@@ -375,66 +522,11 @@ def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fandu
             raise ValueError("empty CSV")
 
         for row in reader:
-            name = _full_name(row)
-            pos = _site_position(pick(row, keys["position"]), site_key)
-            salary = _clean_money(pick(row, keys["salary"]))
-            projection = pick(row, keys["projection"]) or "0"
-            team = pick(row, TEAM_KEYS) or "UNK"
-            game = _game(row)
-            player_id = pick(row, keys["id"]) or str(auto_id)
-
-            if not name or not pos or not salary:
-                continue
-            if is_unavailable_status(pick(row, INJURY_KEYS)):
-                continue
-
-            if _projection_is_positive(projection):
-                positive_projection = True
-
-            if site_key == "fanduel":
-                first, last = split_name(name)
-                mapped = {
-                    "Id": player_id,
-                    "First Name": first,
-                    "Last Name": last,
-                    "Position": pos,
-                    "Team": team,
-                    "Salary": salary,
-                    "FPPG": projection,
-                    "Game": game,
-                    "Injury Indicator": pick(row, INJURY_KEYS),
-                }
-                rows_out.append(_with_pass_through(row, mapped))
-            elif site_key == "draftkings":
-                roster_position = pick(row, keys["roster_position"]).upper() or pos
-                mapped = {
-                    "Position": pos,
-                    "Name": name,
-                    "ID": player_id,
-                    "Roster Position": roster_position,
-                    "Salary": salary,
-                    "Game Info": game,
-                    "TeamAbbrev": team,
-                    "AvgPointsPerGame": projection,
-                }
-                rows_out.append(_with_pass_through(row, mapped))
-            else:
-                # Showdown: DK captain-mode CSV (two rows per player, shared ID).
-                for mapped in _emit_captain_rows(
-                    row,
-                    site_key=site_key,
-                    keys=keys,
-                    name=name,
-                    player_id=player_id,
-                    team=team,
-                    game=game,
-                    pos=pos,
-                    salary=salary,
-                    projection=projection,
-                ):
-                    rows_out.append(_with_pass_through(row, mapped))
-
-            auto_id += 1
+            mapped, positive = _map_site_row(row, site_key, keys, auto_id)
+            if mapped:
+                auto_id += 1
+            rows_out.extend(mapped)
+            positive_projection = positive_projection or positive
 
     if not rows_out:
         raise ValueError("no rows mapped; check column headers")
@@ -444,17 +536,7 @@ def normalize_csv(inp_path: str | Path, out_path: str | Path, site: str = "fandu
             "canonical file that was never projected"
         )
 
-    fieldnames = list(SITE_FIELDS[site_key])
-    for field in PASS_THROUGH_FIELDS:
-        if any(field in row for row in rows_out):
-            fieldnames.append(field)
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows_out)
-
+    _write_normalized_csv(out, site_key, rows_out)
     return len(rows_out)
 
 
