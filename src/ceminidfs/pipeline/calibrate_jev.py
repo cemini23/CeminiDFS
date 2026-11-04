@@ -350,37 +350,6 @@ def frame_season(frame: pd.DataFrame) -> int:
     return 0
 
 
-def _calibrate_week(
-    season: int,
-    week: int,
-    pbp: pd.DataFrame,
-    config: Mapping[str, Any],
-    client: TieredJevClient,
-    *,
-    n_iterations: int,
-    seed: int | None,
-    dispersion_scale: float = 1.0,
-) -> tuple[pd.DataFrame | None, dict[str, RegimeRouting], WeekBand]:
-    prepared = build_week_rows(season, week, pbp, config, client)
-    if prepared is None:
-        return None, {}, _empty_band(season, week)
-    merged, rows, routings, weights = prepared
-    return (
-        *_sample_week(
-            merged,
-            rows,
-            routings,
-            weights,
-            config,
-            season=season,
-            week=week,
-            n_iterations=n_iterations,
-            seed=seed,
-            dispersion_scale=dispersion_scale,
-        ),
-    )
-
-
 def build_week_rows(
     season: int,
     week: int,
@@ -506,20 +475,6 @@ def _week_band(merged: pd.DataFrame, routings: dict[str, RegimeRouting]) -> Week
         brier_vs_own_median=own_median["score"],
         brier_consensus=consensus["score"],
         provider_counts=provider_counts,
-    )
-
-
-def _empty_band(season: int, week: int) -> WeekBand:
-    return WeekBand(
-        season=season,
-        week=week,
-        n_players=0,
-        n_designated=0,
-        coverage=float("nan"),
-        baseline_coverage=float("nan"),
-        brier_vs_own_median=None,
-        brier_consensus=None,
-        provider_counts={},
     )
 
 

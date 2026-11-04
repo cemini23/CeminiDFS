@@ -355,6 +355,7 @@ def check_dead_code(defs: list[Def], refs: Counter, hooks: set[str]) -> list[dic
 
 
 def check_unused_imports(tree: ast.AST, path: str) -> list[dict]:
+    lines = (ROOT / path).read_text(encoding="utf-8").splitlines()
     used = Counter()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
@@ -370,6 +371,8 @@ def check_unused_imports(tree: ast.AST, path: str) -> list[dict]:
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
         if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            continue
+        if "noqa" in lines[node.lineno - 1].lower():
             continue
         for alias in node.names:
             if alias.name == "*":

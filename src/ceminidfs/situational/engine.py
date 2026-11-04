@@ -459,17 +459,6 @@ def _bonus(row, model, mean_col, threshold, position) -> float:
     )
 
 
-def _multi_td(row, model) -> float:
-    rate = _num(row.get("lagged_td"))
-    if not math.isfinite(rate):
-        return float("nan")
-    baseline = poisson_at_least(2, rate)
-    if not model or not model.get("export"):
-        return baseline
-    features = {key: _num(row.get(key)) for key in (model.get("kept") or [])}
-    return predict_bonus(rate, 1.0, 2.0, weight=1.0, model=model, features=features)
-
-
 def _pair(row, model, mean_col, threshold, position) -> tuple[float, float]:
     mean = _num(row.get(mean_col))
     sigma = _sigma_for(model or {}, position)

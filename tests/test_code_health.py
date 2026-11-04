@@ -39,6 +39,21 @@ def test_scoring_path_is_guarded_not_excluded():
     assert not ch.is_guarded("src/ceminidfs/data/salary.py")
 
 
+def test_unused_import_respects_noqa_reexport(tmp_path, monkeypatch):
+    monkeypatch.setattr(ch, "ROOT", tmp_path)
+    src = tmp_path / "m.py"
+    src.write_text("from os import path  # noqa: F401\n", encoding="utf-8")
+    assert ch.check_unused_imports(ast.parse(src.read_text()), "m.py") == []
+
+
+def test_unused_import_flags_real_dead_import(tmp_path, monkeypatch):
+    monkeypatch.setattr(ch, "ROOT", tmp_path)
+    src = tmp_path / "m.py"
+    src.write_text("from os import path\n", encoding="utf-8")
+    found = ch.check_unused_imports(ast.parse(src.read_text()), "m.py")
+    assert [f["symbol"] for f in found] == ["path"]
+
+
 def test_composite_weights_review_heavier_than_mechanics():
     assert ch.composite(100.0, 0.0) == 25.0
     assert ch.composite(0.0, 100.0) == 75.0
