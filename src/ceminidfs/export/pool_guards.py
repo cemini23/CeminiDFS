@@ -379,6 +379,53 @@ def _player_salary(player: Any) -> float:
         return float("inf")
 
 
+def _slate_teams(
+    all_players: list[Any],
+    slate_teams: set[str] | None,
+) -> set[str]:
+    teams = set(slate_teams or ())
+    if teams:
+        return teams
+    return {player_team(player) for player in all_players if player_team(player)}
+
+
+def _dart_candidates(all_players: list[Any], team: str, cap: float) -> list[Any]:
+    return [
+        player
+        for player in all_players
+        if player_team(player) == team
+        and _is_injury_eligible(player)
+        and _player_salary(player) <= cap
+    ]
+
+
+def _restore_dart_player(
+    pool: Any,
+    eligible_now: set[Any],
+    team: str,
+    affordable: list[Any],
+) -> dict[str, Any] | None:
+    cheapest = min(affordable, key=_player_salary)
+    try:
+        pool.restore_player(cheapest)
+    except LineupOptimizerException:
+        # The player is already eligible by another route; nothing to do.
+        return None
+    eligible_now.add(_player_identity(cheapest))
+    record = {
+        "team": team,
+        "player": str(getattr(cheapest, "full_name", "") or ""),
+        "salary": int(_player_salary(cheapest)),
+        "note": "kept by --keep-team-dart; the normal path had removed the team",
+    }
+    print(
+        f"team dart: kept {record['player']} ({team}, ${record['salary']}) "
+        "-- the normal path removed the whole team",
+        file=sys.stderr,
+    )
+    return record
+
+
 def apply_team_dart_guard(
     optimizer: Any,
     dart_salary: float,
@@ -405,43 +452,19 @@ def apply_team_dart_guard(
     cap = float(dart_salary)
     all_players = list(pool.all_players)
     eligible_now = {_player_identity(player) for player in pool.filtered_players}
-
-    teams = set(slate_teams or ())
-    if not teams:
-        teams = {player_team(player) for player in all_players if player_team(player)}
+    teams = _slate_teams(all_players, slate_teams)
 
     kept: list[dict[str, Any]] = []
     for team in sorted(teams):
-        candidates = [player for player in all_players if player_team(player) == team]
-        affordable = [
-            player
-            for player in candidates
-            if _is_injury_eligible(player) and _player_salary(player) <= cap
-        ]
+        affordable = _dart_candidates(all_players, team, cap)
         if not affordable:
             continue
         # At risk when no eligible player at or below the dart salary remains.
         if any(_player_identity(player) in eligible_now for player in affordable):
             continue
-        cheapest = min(affordable, key=_player_salary)
-        try:
-            pool.restore_player(cheapest)
-        except LineupOptimizerException:
-            # The player is already eligible by another route; nothing to do.
-            continue
-        eligible_now.add(_player_identity(cheapest))
-        record = {
-            "team": team,
-            "player": str(getattr(cheapest, "full_name", "") or ""),
-            "salary": int(_player_salary(cheapest)),
-            "note": "kept by --keep-team-dart; the normal path had removed the team",
-        }
-        kept.append(record)
-        print(
-            f"team dart: kept {record['player']} ({team}, ${record['salary']}) "
-            "-- the normal path removed the whole team",
-            file=sys.stderr,
-        )
+        record = _restore_dart_player(pool, eligible_now, team, affordable)
+        if record is not None:
+            kept.append(record)
     return kept
 
 

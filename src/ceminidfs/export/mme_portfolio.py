@@ -692,6 +692,48 @@ def same_team_rb_te(
     return found
 
 
+def _positions_within_limits(
+    item: Candidate,
+    counts: Mapping[str, int],
+    player_limit: Callable[[str, str], int],
+) -> bool:
+    return all(
+        counts.get(pid, 0) + 1 <= player_limit(pid, pos) for pid, pos in item.positions
+    )
+
+
+def _pairs_within_limit(
+    item: Candidate,
+    pair_counts: Counter[tuple[str, str]],
+    pair_cap: int | None,
+) -> bool:
+    if pair_cap is None:
+        return True
+    return all(pair_counts[pair] + 1 <= pair_cap for pair in rb_pairs(item))
+
+
+def _rb_te_within_limit(
+    item: Candidate,
+    rb_te_counts: Counter[tuple[str, str]],
+    rb_te_cap: int | None,
+    team_of: Mapping[str, str],
+) -> bool:
+    if rb_te_cap is None or not team_of:
+        return True
+    for pair, stacked in same_team_rb_te(item, team_of):
+        if not stacked or rb_te_counts[pair] + 1 > rb_te_cap:
+            return False
+    return True
+
+
+def _shares_within_limit(
+    item: Candidate,
+    keys: list[frozenset[str]],
+    max_shared: int,
+) -> bool:
+    return all(shares_ok(item.key, prev, max_shared) for prev in keys)
+
+
 def select_book(
     candidates: Sequence[Candidate],
     *,
@@ -742,21 +784,13 @@ def select_book(
             return False
         if item.salary < min_salary and cheap >= allow_cheap:
             return False
-        for pid, pos in item.positions:
-            if counts.get(pid, 0) + 1 > player_limit(pid, pos):
-                return False
-        if pair_cap is not None:
-            for pair in rb_pairs(item):
-                if pair_counts[pair] + 1 > pair_cap:
-                    return False
-        if rb_te_cap is not None and team_of:
-            for pair, stacked in same_team_rb_te(item, team_of):
-                if not stacked or rb_te_counts[pair] + 1 > rb_te_cap:
-                    return False
-        for prev in keys:
-            if not shares_ok(item.key, prev, max_shared):
-                return False
-        return True
+        if not _positions_within_limits(item, counts, player_limit):
+            return False
+        if not _pairs_within_limit(item, pair_counts, pair_cap):
+            return False
+        if not _rb_te_within_limit(item, rb_te_counts, rb_te_cap, team_of):
+            return False
+        return _shares_within_limit(item, keys, max_shared)
 
     def add(item: Candidate) -> None:
         nonlocal cheap

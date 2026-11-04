@@ -171,7 +171,7 @@ class Def:
 def collect_defs(tree: ast.AST, path: str) -> list[Def]:
     out: list[Def] = []
 
-    def visit(node: ast.AST, stack: list[str]) -> None:
+    def visit(node: ast.AST, stack: list[str], in_class: bool, in_function: bool) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.ClassDef):
                 out.append(
@@ -179,19 +179,24 @@ def collect_defs(tree: ast.AST, path: str) -> list[Def]:
                         child.lineno, child.end_lineno or child.lineno,
                         _decorators(child), child)
                 )
-                visit(child, stack + [child.name])
+                visit(child, stack + [child.name], True, in_function)
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                kind = "method" if stack else "function"
+                if in_function:
+                    kind = "nested"
+                elif in_class:
+                    kind = "method"
+                else:
+                    kind = "function"
                 out.append(
                     Def(kind, child.name, ".".join(stack + [child.name]), path,
                         child.lineno, child.end_lineno or child.lineno,
                         _decorators(child), child)
                 )
-                visit(child, stack + [child.name])
+                visit(child, stack + [child.name], in_class, True)
             else:
-                visit(child, stack)
+                visit(child, stack, in_class, in_function)
 
-    visit(tree, [])
+    visit(tree, [], False, False)
     return out
 
 
@@ -527,7 +532,7 @@ def check_test_gaps(defs: list[Def], test_names: Counter, tested_modules: set[st
     module_seen: set[str] = set()
     for d in defs:
         module = module_of(d.file)
-        if d.kind == "class" or d.name.startswith("_"):
+        if d.kind in ("class", "nested") or d.name.startswith("_"):
             continue
         if module not in tested_modules:
             if module not in module_seen:

@@ -81,6 +81,17 @@ def test_complexity_counts_branch_nodes():
     assert ch.complexity(fn) == 5
 
 
+def test_collect_defs_marks_nested_functions():
+    tree = ast.parse(
+        "def outer():\n"
+        "    def inner():\n"
+        "        return 1\n"
+        "    return inner()\n"
+    )
+    defs = ch.collect_defs(tree, "m.py")
+    assert [(d.name, d.kind) for d in defs] == [("outer", "function"), ("inner", "nested")]
+
+
 def test_complexity_ignores_nested_function_bodies():
     tree = ast.parse(
         "def outer(x):\n"
