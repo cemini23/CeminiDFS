@@ -495,10 +495,7 @@ def _default_source() -> Path:
     raise FileNotFoundError("Week 8 FanDuel salary CSV")
 
 
-def run_week8(*, source: Path | None = None) -> list[Candidate]:
-    """Archive the salary file, write the cache, and solve the 150-lineup book."""
-
-    salary_source = source or _default_source()
+def _archive_salary(salary_source: Path) -> None:
     written = archive_loaded_salary(salary_source, [SALARY_PATH])
     archived = prelock_salary_archive(
         salary_source,
@@ -512,15 +509,18 @@ def run_week8(*, source: Path | None = None) -> list[Candidate]:
         print(f"salary copy -> {path}")
     if not any("fd_players_" in path.name for path in archived):
         print("recap copy skipped: /workspace/dfs-recap is not on this machine")
-    salary_path = SALARY_PATH
-    write_qb_starters_csv(STARTER_PATH, QB_STARTERS)
-    _write_environment()
-    salary = pd.read_csv(salary_path)
+
+
+def _validate_games(salary: pd.DataFrame) -> None:
     games = sorted({canon_game(value) for value in salary["Game"].dropna().tolist()})
     if set(games) != MAIN_GAMES:
         raise AssertionError(f"salary games {games}")
-    refresh_shared_cache(salary_path)
-    ceiling = pd.read_csv(CEILING_PATH)
+
+
+def _build_pool(
+    salary: pd.DataFrame,
+    ceiling: pd.DataFrame,
+) -> tuple[list[PoolPlayer], list[PoolPlayer]]:
     index = load_opportunity_index()
     roster_map, roster_fresh = roster_status_index()
     portfolio = score_week8_frame(
@@ -543,10 +543,55 @@ def run_week8(*, source: Path | None = None) -> list[Candidate]:
     ]
     teams = sorted({normalize_team_abbr(str(team)) for team in salary["Team"].dropna().tolist()})
     _assert_pool_starters(pool, teams)
+    return all_players, pool
+
+
+def _report_pool(all_players: list[PoolPlayer], pool: list[PoolPlayer]) -> None:
     blocked = [player for player in all_players if player.never_enter and player.salary >= 5500]
     print(f"eligible pool {len(pool)} of {len(all_players)}; high-salary blocks {len(blocked)}")
     for player in sorted(blocked, key=lambda item: -item.salary)[:25]:
         print(f"blocked {player.position} {player.nickname} {player.team} ${player.salary}")
+
+
+def _select_with_relaxation(
+    candidates: list[Candidate],
+    pool: list[PoolPlayer],
+) -> list[Candidate]:
+    book = select_book(
+        candidates,
+        caps=BOOK_CAP,
+        pair_cap=RB_PAIR_CAP,
+        rb_te_cap=RB_TE_CAP,
+        player_teams={player.player_id: player.team for player in pool},
+        allow_cheap=0,
+    )
+    if len(book) >= BOOK_SIZE:
+        return book
+    relaxed = select_book(
+        candidates,
+        caps=BOOK_CAP,
+        pair_cap=RB_PAIR_CAP,
+        rb_te_cap=RB_TE_CAP,
+        player_teams={player.player_id: player.team for player in pool},
+        allow_cheap=CHEAP_LIMIT,
+    )
+    return relaxed if len(relaxed) > len(book) else book
+
+
+def run_week8(*, source: Path | None = None) -> list[Candidate]:
+    """Archive the salary file, write the cache, and solve the 150-lineup book."""
+
+    salary_source = source or _default_source()
+    _archive_salary(salary_source)
+    salary_path = SALARY_PATH
+    write_qb_starters_csv(STARTER_PATH, QB_STARTERS)
+    _write_environment()
+    salary = pd.read_csv(salary_path)
+    _validate_games(salary)
+    refresh_shared_cache(salary_path)
+    ceiling = pd.read_csv(CEILING_PATH)
+    all_players, pool = _build_pool(salary, ceiling)
+    _report_pool(all_players, pool)
     write_optimizer_csv(OPTIMIZER_PATH, pool)
     candidates = build_candidate_pool(
         OPTIMIZER_PATH,
@@ -559,25 +604,7 @@ def run_week8(*, source: Path | None = None) -> list[Candidate]:
         wave_size=40,
         seed=20261101,
     )
-    book = select_book(
-        candidates,
-        caps=BOOK_CAP,
-        pair_cap=RB_PAIR_CAP,
-        rb_te_cap=RB_TE_CAP,
-        player_teams={player.player_id: player.team for player in pool},
-        allow_cheap=0,
-    )
-    if len(book) < BOOK_SIZE:
-        relaxed = select_book(
-            candidates,
-            caps=BOOK_CAP,
-            pair_cap=RB_PAIR_CAP,
-            rb_te_cap=RB_TE_CAP,
-            player_teams={player.player_id: player.team for player in pool},
-            allow_cheap=CHEAP_LIMIT,
-        )
-        if len(relaxed) > len(book):
-            book = relaxed
+    book = _select_with_relaxation(candidates, pool)
     audit = verify_book(
         book,
         all_players,
