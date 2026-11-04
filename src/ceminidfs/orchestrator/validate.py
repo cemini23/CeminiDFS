@@ -45,6 +45,56 @@ def _check_lineup_count(lineup_count: int, expected_count: int) -> None:
         )
 
 
+def _duplicate_count(names: list[str]) -> int:
+    normalized = {_normalize_name(name) for name in names}
+    return int(len(names) != len(normalized))
+
+
+def _projection_totals(names: list[str], lookup: dict[str, float]) -> tuple[int, float]:
+    matched = 0
+    points = 0.0
+    for name in names:
+        value = lookup.get(_normalize_name(name))
+        if value is not None:
+            matched += 1
+            points += value
+    return matched, points
+
+
+def _lineup_salary(
+    salary_lookup: dict[str, Any],
+    header: list[str],
+    names: list[str],
+    site_key: str,
+) -> float:
+    if site_key in SHOWDOWN_SITES:
+        return sum(
+            _showdown_slot_cost(salary_lookup, slot, name)
+            for slot, name in zip(header, names)
+        )
+    return sum(salary_lookup.get(_normalize_name(name), 0) for name in names)
+
+
+def _raise_on_problems(
+    empty_slots: int,
+    duplicate_players: int,
+    salary_violations: int,
+    projection_lookup: dict[str, float],
+    matched_projection_players: int,
+    total_projected_points: float,
+) -> None:
+    if empty_slots:
+        raise ValueError(f"Lineups CSV contains {empty_slots} empty required slot(s)")
+    if duplicate_players:
+        raise ValueError(f"Lineups CSV contains {duplicate_players} lineup(s) with duplicate players")
+    if salary_violations:
+        raise ValueError(f"Lineups CSV contains {salary_violations} lineup(s) over the salary cap")
+    if projection_lookup and matched_projection_players and total_projected_points <= 0:
+        raise ValueError(
+            "Lineups CSV carries no projected points; every projection is blank or zero"
+        )
+
+
 def _row_totals(
     row: list[str],
     header: list[str],
@@ -55,26 +105,11 @@ def _row_totals(
 ) -> tuple[int, int, int, int, float]:
     empty = sum(1 for cell in row if not cell.strip())
     names = [cell.strip() for cell in row if cell.strip()]
-    duplicates = int(len(names) != len(set(_normalize_name(name) for name in names)))
-
-    matched = 0
-    points = 0.0
-    for name in names:
-        value = projection_lookup.get(_normalize_name(name))
-        if value is not None:
-            matched += 1
-            points += value
-
+    duplicates = _duplicate_count(names)
+    matched, points = _projection_totals(names, projection_lookup)
     violations = 0
     if salary_lookup and salary_cap is not None:
-        if site_key in SHOWDOWN_SITES:
-            total = sum(
-                _showdown_slot_cost(salary_lookup, slot, name)
-                for slot, name in zip(header, names)
-            )
-        else:
-            total = sum(salary_lookup.get(_normalize_name(name), 0) for name in names)
-        violations = int(total > salary_cap)
+        violations = int(_lineup_salary(salary_lookup, header, names, site_key) > salary_cap)
     return empty, duplicates, violations, matched, points
 
 
@@ -126,16 +161,14 @@ def validate_lineups_csv(
         matched_projection_players += matched
         total_projected_points += points
 
-    if empty_slots:
-        raise ValueError(f"Lineups CSV contains {empty_slots} empty required slot(s)")
-    if duplicate_players:
-        raise ValueError(f"Lineups CSV contains {duplicate_players} lineup(s) with duplicate players")
-    if salary_violations:
-        raise ValueError(f"Lineups CSV contains {salary_violations} lineup(s) over the salary cap")
-    if projection_lookup and matched_projection_players and total_projected_points <= 0:
-        raise ValueError(
-            "Lineups CSV carries no projected points; every projection is blank or zero"
-        )
+    _raise_on_problems(
+        empty_slots,
+        duplicate_players,
+        salary_violations,
+        projection_lookup,
+        matched_projection_players,
+        total_projected_points,
+    )
 
     return {
         "lineup_count": lineup_count,
