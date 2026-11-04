@@ -47,18 +47,43 @@ EXCLUDED = (
 
 # Scanned and queued, but a fix must re-run the baseline first.
 GUARDED = (
+    # Projection and evaluation path. A fix here needs a baseline re-run
+    # before the next comparison, so the loop leaves it alone.
     "src/ceminidfs/pipeline/backtest.py",
     "src/ceminidfs/pipeline/backtest_prepare.py",
     "src/ceminidfs/pipeline/project.py",
+    "src/ceminidfs/pipeline/engine.py",
     "src/ceminidfs/pipeline/calibration.py",
     "src/ceminidfs/pipeline/regression.py",
     "src/ceminidfs/pipeline/regression_gates.py",
     "src/ceminidfs/pipeline/distributions.py",
+    "src/ceminidfs/pipeline/lineup_backtest.py",
+    "src/ceminidfs/pipeline/late_swap_oracle.py",
+    "src/ceminidfs/pipeline/late_swap_replay.py",
+    "src/ceminidfs/pipeline/permutation_test.py",
+    "src/ceminidfs/pipeline/permutation_gate.py",
+    "src/ceminidfs/pipeline/benchmark_replay.py",
+    "src/ceminidfs/pipeline/market_benchmark.py",
+    "src/ceminidfs/pipeline/sdv_benchmark.py",
+    "src/ceminidfs/pipeline/luck_metrics.py",
+    "src/ceminidfs/pipeline/coherence_eval.py",
+    "src/ceminidfs/pipeline/premium_guard_backtest.py",
     "src/ceminidfs/models/scoring.py",
     "src/ceminidfs/models/ownership.py",
     "src/ceminidfs/models/stats.py",
+    "src/ceminidfs/models/usage.py",
+    "src/ceminidfs/models/ngs_elasticity.py",
     "src/ceminidfs/situational/quantiles.py",
     "src/ceminidfs/situational/eb.py",
+    "src/ceminidfs/situational/engine.py",
+    "src/ceminidfs/situational/features.py",
+    "src/ceminidfs/situational/backtest.py",
+    "src/ceminidfs/situational/fdr.py",
+    "src/ceminidfs/situational/lag.py",
+    "src/ceminidfs/situational/tail.py",
+    "src/ceminidfs/situational/stack_corr.py",
+    "src/ceminidfs/situational/injuries.py",
+    "src/ceminidfs/situational/game_context.py",
 )
 
 SKIP_NAMES = {"main", "__init__", "__main__", "setUp", "tearDown"}
