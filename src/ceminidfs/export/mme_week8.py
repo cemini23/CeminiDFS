@@ -23,21 +23,16 @@ from ceminidfs.export.mme_portfolio import (
     CHEAP_LIMIT,
     Candidate,
     PoolPlayer,
-    _cap_tail,
-    _finite,
-    blend_points,
     build_candidate_pool,
     canon_game,
-    canon_position,
     exposure_table,
     fold_name,
     is_hard_exclude,
     load_quantiles,
-    noise_sigma,
     players_from_frame,
+    score_pool_row,
     select_book,
     set_nicknames,
-    status_token,
     verify_book,
     write_book_files,
     write_optimizer_csv,
@@ -58,7 +53,6 @@ from ceminidfs.export.recap_guards import (
     write_qb_starters_csv,
 )
 from ceminidfs.situational.engine import run_slate
-from ceminidfs.situational.quantiles import apply_ceiling
 
 CONTEST_PREFIX = "135859-"
 SEASON = 2026
@@ -341,68 +335,17 @@ def _score_week8_row(
     roster_status: str,
     roster_fresh: bool,
 ) -> dict[str, object]:
-    nickname = str(record.get("Nickname") or "").strip()
-    first = str(record.get("First Name") or "").strip()
-    last = str(record.get("Last Name") or "").strip()
-    team = normalize_team_abbr(str(record.get("Team") or ""))
-    opp = normalize_team_abbr(str(record.get("Opponent") or ""))
-    fd_position = str(record.get("Position") or "").strip().upper()
-    position = canon_position(fd_position)
-    game = canon_game(record.get("Game"))
-    display = nickname or f"{first} {last}".strip()
-    hard = week8_blocked(record, index, roster_fresh=roster_fresh, roster_status=roster_status)
-    lagged = _finite(record.get("lagged_fd"))
-    fppg = _finite(record.get("FPPG"))
-    if (not math.isfinite(lagged) or lagged <= 0) and math.isfinite(fppg) and fppg > 0:
-        lagged = fppg
-    table = dst_table if position == "DST" else skill
-    p90 = _finite(record.get("p90"))
-    p99 = _finite(record.get("p99"))
-    if not math.isfinite(p90) or not math.isfinite(p99):
-        p90, p99 = apply_ceiling(lagged, position, table, 0.0)
-    if math.isfinite(p90) and math.isfinite(p99):
-        p90, p99 = adjust_tails_week8(game, position, p90, p99)
-        p90, p99 = _cap_tail(position, p90, p99)
-    playable = (
-        not hard
-        and math.isfinite(lagged)
-        and lagged > 0
-        and math.isfinite(p90)
-        and math.isfinite(p99)
+    return score_pool_row(
+        record,
+        skill,
+        dst_table,
+        blocked=lambda rec: week8_blocked(
+            rec, index, roster_fresh=roster_fresh, roster_status=roster_status
+        ),
+        tails=lambda game, team, position, display, p90, p99: adjust_tails_week8(
+            game, position, p90, p99
+        ),
     )
-    if playable:
-        fpts = blend_points(lagged, p90, p99)
-        sigma = noise_sigma(p90, lagged)
-    else:
-        lagged = 0.0 if hard or not math.isfinite(lagged) else lagged
-        p90 = 0.0
-        p99 = 0.0
-        fpts = 0.0
-        sigma = 0.0
-    try:
-        salary = int(float(record.get("Salary") or 0))
-    except (TypeError, ValueError):
-        salary = 0
-    indicator = status_token(record.get("Injury Indicator"))
-    return {
-        "player_id": str(record.get("player_id") or ""),
-        "first_name": first,
-        "last_name": last,
-        "nickname": display,
-        "fd_position": fd_position,
-        "position": position,
-        "team": team,
-        "opp": opp,
-        "game": game,
-        "salary": salary,
-        "injury_indicator": "Q" if (not hard and indicator == "Q") else "",
-        "portfolio_lagged": float(lagged) if playable else 0.0,
-        "portfolio_p90": float(p90) if playable else 0.0,
-        "portfolio_p99": float(p99) if playable else 0.0,
-        "portfolio_fpts": float(fpts) if playable else 0.0,
-        "sigma": float(sigma) if playable else 0.0,
-        "never_enter": 1 if hard else 0,
-    }
 
 
 def _cache_ready(path: Path) -> bool:

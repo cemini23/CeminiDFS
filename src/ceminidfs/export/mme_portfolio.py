@@ -10,6 +10,7 @@ import csv
 import json
 import math
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -350,6 +351,156 @@ def _finite(value: object) -> float:
     if not math.isfinite(number):
         return float("nan")
     return number
+
+
+def _identity_fields(record: Mapping[str, object]) -> dict[str, str]:
+    nickname = str(record.get("Nickname") or "").strip()
+    first = str(record.get("First Name") or "").strip()
+    last = str(record.get("Last Name") or "").strip()
+    fd_position = str(record.get("Position") or "").strip().upper()
+    return {
+        "first": first,
+        "last": last,
+        "display": nickname or f"{first} {last}".strip(),
+        "team": normalize_team_abbr(str(record.get("Team") or "")),
+        "opp": normalize_team_abbr(str(record.get("Opponent") or "")),
+        "fd_position": fd_position,
+        "position": canon_position(fd_position),
+        "game": canon_game(record.get("Game")),
+    }
+
+
+def _resolve_lagged(record: Mapping[str, object], floor: float | None) -> tuple[float, bool]:
+    lagged = _finite(record.get("lagged_fd"))
+    fppg = _finite(record.get("FPPG"))
+    if (not math.isfinite(lagged) or lagged <= 0) and math.isfinite(fppg) and fppg > 0:
+        lagged = fppg
+    if floor is None:
+        return lagged, False
+    if math.isfinite(lagged) and lagged >= float(floor):
+        return lagged, False
+    return float(floor), True
+
+
+def _resolve_tails(
+    record: Mapping[str, object],
+    lagged: float,
+    position: str,
+    table: list[dict],
+    binds: bool,
+    tails: Callable[[str, str, str, str, float, float], tuple[float, float]],
+    fields: Mapping[str, str],
+) -> tuple[float, float]:
+    p90 = _finite(record.get("p90"))
+    p99 = _finite(record.get("p99"))
+    if binds or not (math.isfinite(p90) and math.isfinite(p99)):
+        p90, p99 = apply_ceiling(lagged, position, table, 0.0)
+    if math.isfinite(p90) and math.isfinite(p99):
+        p90, p99 = tails(fields["game"], fields["team"], position, fields["display"], p90, p99)
+        p90, p99 = _cap_tail(position, p90, p99)
+    return p90, p99
+
+
+def _resolve_playable(
+    hard: bool,
+    lagged: float,
+    p90: float,
+    p99: float,
+) -> tuple[bool, float, float, float, float, float]:
+    playable = all(
+        (
+            not hard,
+            math.isfinite(lagged),
+            lagged > 0,
+            math.isfinite(p90),
+            math.isfinite(p99),
+        )
+    )
+    if playable:
+        return True, blend_points(lagged, p90, p99), noise_sigma(p90, lagged), lagged, p90, p99
+    zero = 0.0
+    kept = lagged if math.isfinite(lagged) and not hard else zero
+    return False, zero, zero, kept, zero, zero
+
+
+def _salary_value(record: Mapping[str, object]) -> int:
+    try:
+        return int(float(record.get("Salary") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _value_or_zero(playable: bool, value: float) -> float:
+    return float(value) if playable else 0.0
+
+
+def _injury_indicator(hard: bool, indicator: str) -> str:
+    return "Q" if (not hard and indicator == "Q") else ""
+
+
+def _output_row(
+    record: Mapping[str, object],
+    fields: Mapping[str, str],
+    *,
+    hard: bool,
+    indicator: str,
+    playable: bool,
+    lagged: float,
+    p90: float,
+    p99: float,
+    fpts: float,
+    sigma: float,
+) -> dict[str, object]:
+    return {
+        "player_id": str(record.get("player_id") or ""),
+        "first_name": fields["first"],
+        "last_name": fields["last"],
+        "nickname": fields["display"],
+        "fd_position": fields["fd_position"],
+        "position": fields["position"],
+        "team": fields["team"],
+        "opp": fields["opp"],
+        "game": fields["game"],
+        "salary": _salary_value(record),
+        "injury_indicator": _injury_indicator(hard, indicator),
+        "portfolio_lagged": _value_or_zero(playable, lagged),
+        "portfolio_p90": _value_or_zero(playable, p90),
+        "portfolio_p99": _value_or_zero(playable, p99),
+        "portfolio_fpts": _value_or_zero(playable, fpts),
+        "sigma": _value_or_zero(playable, sigma),
+        "never_enter": int(hard),
+    }
+
+
+def score_pool_row(
+    record: Mapping[str, object],
+    skill: list[dict],
+    dst_table: list[dict],
+    *,
+    blocked: Callable[[Mapping[str, object]], bool],
+    tails: Callable[[str, str, str, str, float, float], tuple[float, float]],
+    floor_lookup: Callable[[str], float | None] | None = None,
+) -> dict[str, object]:
+    """Score one salary row for a weekly 150-lineup book."""
+    fields = _identity_fields(record)
+    hard = blocked(record)
+    floor = floor_lookup(fields["display"]) if floor_lookup else None
+    lagged, binds = _resolve_lagged(record, floor)
+    table = dst_table if fields["position"] == "DST" else skill
+    p90, p99 = _resolve_tails(record, lagged, fields["position"], table, binds, tails, fields)
+    playable, fpts, sigma, lagged, p90, p99 = _resolve_playable(hard, lagged, p90, p99)
+    return _output_row(
+        record,
+        fields,
+        hard=hard,
+        indicator=status_token(record.get("Injury Indicator")),
+        playable=playable,
+        lagged=lagged,
+        p90=p90,
+        p99=p99,
+        fpts=fpts,
+        sigma=sigma,
+    )
 
 
 def build_portfolio_frame(
