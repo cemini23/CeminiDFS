@@ -524,6 +524,70 @@ def _fixture_id_from_salary(path: Path) -> str:
     return "slate"
 
 
+def _archive_labels(
+    src: Path,
+    slate_date: str | None,
+    fixture_id: str | None,
+) -> tuple[str, str]:
+    date = (slate_date or _slate_date_from_name(src) or "").strip()
+    contest = (fixture_id or _fixture_id_from_salary(src) or "slate").strip() or "slate"
+    return date, contest
+
+
+def _recap_copy(
+    src: Path,
+    date: str,
+    contest: str,
+    root: Path,
+) -> tuple[Path | None, str]:
+    if not root.is_dir():
+        return None, "skipped: dfs-recap root is absent"
+    if not date:
+        return None, "skipped: slate date is absent"
+    target = root / date / "in" / f"fd_players_{contest}.csv"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.resolve() != src.resolve():
+        shutil.copyfile(src, target)
+    if not target.is_file() or target.stat().st_size != src.stat().st_size:
+        raise OSError(f"salary copy failed: {target}")
+    return target, str(target)
+
+
+def _count_rows(src: Path) -> int:
+    try:
+        rows = sum(1 for _ in src.open(encoding="utf-8-sig")) - 1
+    except OSError:
+        return 0
+    return max(rows, 0)
+
+
+def _write_fade_audit(
+    run_dir: Path,
+    season: int,
+    week: int,
+    src: Path,
+    run_copy: Path,
+    recap_note: str,
+    rows: int,
+) -> Path:
+    audit = run_dir / f"fade-coverage-w{int(week)}.md"
+    lines = [
+        f"# Fade coverage audit — {int(season)} week {int(week)}",
+        "",
+        "Pre-lock salary copy is on disk.",
+        "",
+        f"- source: {src}",
+        f"- run copy: {run_copy}",
+        f"- recap copy: {recap_note}",
+        f"- rows: {rows}",
+        "",
+    ]
+    audit.write_text("\n".join(lines), encoding="utf-8")
+    if not audit.is_file():
+        raise OSError(f"fade audit failed: {audit}")
+    return audit
+
+
 def prelock_salary_archive(
     source: str | Path,
     *,
@@ -551,45 +615,13 @@ def prelock_salary_archive(
     if run_copy not in written or not run_copy.is_file():
         raise OSError(f"salary copy failed: {run_copy}")
 
-    date = (slate_date or _slate_date_from_name(src) or "").strip()
-    contest = (fixture_id or _fixture_id_from_salary(src) or "slate").strip() or "slate"
-    root = Path(recap_root)
-    recap_copy: Path | None = None
-    recap_note = "skipped: dfs-recap root is absent"
-    if root.is_dir():
-        if not date:
-            recap_note = "skipped: slate date is absent"
-        else:
-            recap_copy = root / date / "in" / f"fd_players_{contest}.csv"
-            recap_copy.parent.mkdir(parents=True, exist_ok=True)
-            if recap_copy.resolve() != src.resolve():
-                shutil.copyfile(src, recap_copy)
-            if not recap_copy.is_file() or recap_copy.stat().st_size != src.stat().st_size:
-                raise OSError(f"salary copy failed: {recap_copy}")
-            written.append(recap_copy)
-            recap_note = str(recap_copy)
+    date, contest = _archive_labels(src, slate_date, fixture_id)
+    recap_copy, recap_note = _recap_copy(src, date, contest, Path(recap_root))
+    if recap_copy is not None:
+        written.append(recap_copy)
 
-    try:
-        rows = sum(1 for _ in src.open(encoding="utf-8-sig")) - 1
-    except OSError:
-        rows = 0
-    if rows < 0:
-        rows = 0
-    audit = run_dir / f"fade-coverage-w{int(week)}.md"
-    lines = [
-        f"# Fade coverage audit — {int(season)} week {int(week)}",
-        "",
-        "Pre-lock salary copy is on disk.",
-        "",
-        f"- source: {src}",
-        f"- run copy: {run_copy}",
-        f"- recap copy: {recap_note}",
-        f"- rows: {rows}",
-        "",
-    ]
-    audit.write_text("\n".join(lines), encoding="utf-8")
-    if not audit.is_file():
-        raise OSError(f"fade audit failed: {audit}")
+    rows = _count_rows(src)
+    audit = _write_fade_audit(run_dir, season, week, src, run_copy, recap_note, rows)
     written.append(audit)
     return written
 
