@@ -366,31 +366,50 @@ def adjust_tails_week7(
     club = normalize_team_abbr(str(team or ""))
     pos = canon_position(position)
     folded = fold_name(name)
-    scale = 1.0
-    if game_key in STRONG_PASS_FADE and club in {"SF", "ATL"}:
-        if pos in {"QB", "WR"}:
-            scale = 0.90
-        elif pos == "RB" and folded in RUSH_BOOST_NAMES:
-            scale = 1.08
-        elif pos == "TE":
-            scale = 1.04
-    elif game_key in MILD_PASS_FADE:
-        if pos == "WR":
-            scale = 0.97
-        elif pos in {"RB", "TE"}:
-            scale = 1.05
-        elif pos == "QB":
-            scale = 0.99
-    elif game_key in DOME_GAMES:
-        if game_key == "GB@DET" and pos in {"QB", "WR", "TE"}:
-            scale = 1.06
-        elif game_key == "GB@DET" and pos == "RB":
-            scale = 1.03
-        elif pos in {"QB", "RB", "WR", "TE"}:
-            scale = 1.04
+    scale = _week7_scale(game_key, club, pos, folded)
     if folded in LAR_VOLUME_NAMES:
         scale *= 1.08
     return p90 * scale, p99 * scale
+
+
+def _strong_fade_scale(pos: str, folded: str) -> float:
+    if pos in {"QB", "WR"}:
+        return 0.90
+    if pos == "RB" and folded in RUSH_BOOST_NAMES:
+        return 1.08
+    if pos == "TE":
+        return 1.04
+    return 1.0
+
+
+def _mild_fade_scale(pos: str) -> float:
+    if pos == "WR":
+        return 0.97
+    if pos in {"RB", "TE"}:
+        return 1.05
+    if pos == "QB":
+        return 0.99
+    return 1.0
+
+
+def _dome_scale(game_key: str, pos: str) -> float:
+    if game_key == "GB@DET" and pos in {"QB", "WR", "TE"}:
+        return 1.06
+    if game_key == "GB@DET" and pos == "RB":
+        return 1.03
+    if pos in {"QB", "RB", "WR", "TE"}:
+        return 1.04
+    return 1.0
+
+
+def _week7_scale(game_key: str, club: str, pos: str, folded: str) -> float:
+    if game_key in STRONG_PASS_FADE and club in {"SF", "ATL"}:
+        return _strong_fade_scale(pos, folded)
+    if game_key in MILD_PASS_FADE:
+        return _mild_fade_scale(pos)
+    if game_key in DOME_GAMES:
+        return _dome_scale(game_key, pos)
+    return 1.0
 
 
 def week7_blocked(

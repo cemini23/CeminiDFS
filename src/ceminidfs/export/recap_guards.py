@@ -342,6 +342,19 @@ def assert_one_qb_per_team(rostered: Mapping[str, set[str]]) -> None:
         raise AssertionError(f"backup quarterbacks {extra}")
 
 
+def _lowered_cells(row: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        str(key or "").strip().lower(): str(value or "").strip()
+        for key, value in row.items()
+    }
+
+
+def _starter_pair(lowered: Mapping[str, str]) -> tuple[str, str]:
+    team = normalize_team_abbr(lowered.get("team") or lowered.get("club") or "")
+    name = lowered.get("starter") or lowered.get("name") or ""
+    return team, name
+
+
 def load_qb_starters_csv(path: str | Path) -> dict[str, str]:
     """Return team -> starter from a ``Team,Starter`` file."""
 
@@ -350,9 +363,7 @@ def load_qb_starters_csv(path: str | Path) -> dict[str, str]:
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle, skipinitialspace=True)
         for row in reader:
-            lowered = {str(key or "").strip().lower(): str(value or "").strip() for key, value in row.items()}
-            team = normalize_team_abbr(lowered.get("team") or lowered.get("club") or "")
-            name = lowered.get("starter") or lowered.get("name") or ""
+            team, name = _starter_pair(_lowered_cells(row))
             if team and name:
                 starters[team] = name
     return starters
