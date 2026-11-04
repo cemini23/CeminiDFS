@@ -361,6 +361,7 @@ def _identity_fields(record: Mapping[str, object]) -> dict[str, str]:
     return {
         "first": first,
         "last": last,
+        "nickname": nickname,
         "display": nickname or f"{first} {last}".strip(),
         "team": normalize_team_abbr(str(record.get("Team") or "")),
         "opp": normalize_team_abbr(str(record.get("Opponent") or "")),
@@ -524,25 +525,15 @@ def build_portfolio_frame(
     return pd.DataFrame(rows)
 
 
-def _score_salary_row(
+def _salary_tails(
     record: Mapping[str, Any],
+    fields: Mapping[str, str],
+    floor: float | None,
     skill: list[dict],
     dst_table: list[dict],
-) -> dict[str, Any]:
-    nickname = str(record.get("Nickname") or "").strip()
-    first = str(record.get("First Name") or "").strip()
-    last = str(record.get("Last Name") or "").strip()
-    team = normalize_team_abbr(str(record.get("Team") or ""))
-    opp = normalize_team_abbr(str(record.get("Opponent") or ""))
-    fd_position = str(record.get("Position") or "").strip().upper()
-    position = canon_position(fd_position)
-    game = canon_game(record.get("Game"))
-    status = record.get("Injury Indicator")
-    details = record.get("Injury Details")
-    display = nickname or f"{first} {last}".strip()
-    hard = is_hard_exclude(status, display, team, details)
-    floor = STARTER_FLOORS.get(fold_name(display))
+) -> tuple[float, float, float]:
     lagged = _finite(record.get("lagged_fd"))
+    position = fields["position"]
     table = dst_table if position == "DST" else skill
     if floor is not None:
         lagged = float(floor)
@@ -556,47 +547,38 @@ def _score_salary_row(
         if not math.isfinite(p90) or not math.isfinite(p99):
             p90, p99 = apply_ceiling(lagged, position, table, 0.0)
     if math.isfinite(p90) and math.isfinite(p99):
-        p90, p99 = adjust_tails(game, team, position, nickname, p90, p99)
+        p90, p99 = adjust_tails(
+            fields["game"], fields["team"], position, fields["nickname"], p90, p99
+        )
         p90, p99 = _cap_tail(position, p90, p99)
-    playable = (
-        not hard
-        and math.isfinite(lagged)
-        and lagged > 0
-        and math.isfinite(p90)
-        and math.isfinite(p99)
+    return lagged, p90, p99
+
+
+def _score_salary_row(
+    record: Mapping[str, Any],
+    skill: list[dict],
+    dst_table: list[dict],
+) -> dict[str, Any]:
+    fields = _identity_fields(record)
+    status = record.get("Injury Indicator")
+    hard = is_hard_exclude(
+        status, fields["display"], fields["team"], record.get("Injury Details")
     )
-    if playable:
-        fpts = blend_points(lagged, p90, p99)
-        sigma = noise_sigma(p90, lagged)
-    else:
-        lagged = 0.0 if hard or not math.isfinite(lagged) else lagged
-        p90 = 0.0
-        p99 = 0.0
-        fpts = 0.0
-        sigma = 0.0
-    try:
-        salary = int(float(record.get("Salary") or 0))
-    except (TypeError, ValueError):
-        salary = 0
-    return {
-        "player_id": str(record.get("player_id") or ""),
-        "first_name": first,
-        "last_name": last,
-        "nickname": display,
-        "fd_position": fd_position,
-        "position": position,
-        "team": team,
-        "opp": opp,
-        "game": game,
-        "salary": salary,
-        "injury_indicator": "Q" if (not hard and status_token(status) == "Q") else "",
-        "portfolio_lagged": float(lagged) if playable else 0.0,
-        "portfolio_p90": float(p90) if playable else 0.0,
-        "portfolio_p99": float(p99) if playable else 0.0,
-        "portfolio_fpts": float(fpts) if playable else 0.0,
-        "sigma": float(sigma) if playable else 0.0,
-        "never_enter": 1 if hard else 0,
-    }
+    floor = STARTER_FLOORS.get(fold_name(fields["display"]))
+    lagged, p90, p99 = _salary_tails(record, fields, floor, skill, dst_table)
+    playable, fpts, sigma, lagged, p90, p99 = _resolve_playable(hard, lagged, p90, p99)
+    return _output_row(
+        record,
+        fields,
+        hard=hard,
+        indicator=status_token(status),
+        playable=playable,
+        lagged=lagged,
+        p90=p90,
+        p99=p99,
+        fpts=fpts,
+        sigma=sigma,
+    )
 
 
 def attach_portfolio_columns(ceiling: pd.DataFrame, portfolio: pd.DataFrame) -> pd.DataFrame:
