@@ -377,6 +377,27 @@ def _try_swap(
     return False
 
 
+def _place_one(
+    key: str,
+    book: list[Any],
+    book_sigs: list[tuple[str, ...]],
+    in_book: set[tuple[str, ...]],
+    pool: list[tuple[Any, tuple[str, ...]]],
+    counts: Any,
+    cap: Any,
+    *,
+    final_count: int,
+) -> bool:
+    for lineup, sig in pool:
+        if sig in in_book or key not in sig:
+            continue
+        if _try_append(
+            lineup, sig, book, book_sigs, in_book, counts, cap, final_count=final_count
+        ) or _try_swap(lineup, sig, key, book, book_sigs, in_book, counts, cap):
+            return True
+    return False
+
+
 def _place_named(
     key: str,
     need: int,
@@ -390,14 +411,17 @@ def _place_named(
     final_count: int,
 ) -> bool:
     while sum(1 for sig in book_sigs if key in sig) < need:
-        for lineup, sig in pool:
-            if sig in in_book or key not in sig:
-                continue
-            if _try_append(
-                lineup, sig, book, book_sigs, in_book, counts, cap, final_count=final_count
-            ) or _try_swap(lineup, sig, key, book, book_sigs, in_book, counts, cap):
-                return True
-        return False
+        if not _place_one(
+            key,
+            book,
+            book_sigs,
+            in_book,
+            pool,
+            counts,
+            cap,
+            final_count=final_count,
+        ):
+            return False
     return True
 
 
