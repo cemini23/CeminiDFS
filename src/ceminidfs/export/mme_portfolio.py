@@ -932,6 +932,97 @@ def _noise_map(
     return overrides
 
 
+def _portfolio_buckets(
+    variables: Any, meta: Mapping[str, PoolPlayer]
+) -> tuple[list[Any], list[Any], dict[str, Any], dict[str, list[Any]]]:
+    qbs: list[Any] = []
+    rbs: list[Any] = []
+    dst_by_team: dict[str, Any] = {}
+    skill_by_team: dict[str, list[Any]] = defaultdict(list)
+    for player in variables:
+        info = meta.get(str(player.id))
+        if info is None:
+            continue
+        if info.position == "QB":
+            qbs.append(player)
+        elif info.position == "RB":
+            rbs.append(player)
+        elif info.position == "DST":
+            dst_by_team[info.team] = player
+        if info.position in BRINGBACK_POSITIONS:
+            skill_by_team[info.team].append(player)
+    return qbs, rbs, dst_by_team, skill_by_team
+
+
+def _add_bringback_constraint(
+    solver: Any,
+    sign: Any,
+    variables: Any,
+    qb: Any,
+    opp: str,
+    skill_by_team: dict[str, list[Any]],
+) -> None:
+    mates = [mate for mate in skill_by_team.get(opp, []) if mate in variables]
+    if not mates or qb not in variables:
+        return
+    solver.add_constraint(
+        [variables[mate] for mate in mates] + [variables[qb]],
+        [1.0] * len(mates) + [-1.0],
+        sign.GTE,
+        0,
+    )
+
+
+def _add_qb_constraints(
+    solver: Any,
+    sign: Any,
+    variables: Any,
+    meta: Mapping[str, PoolPlayer],
+    qbs: list[Any],
+    dst_by_team: dict[str, Any],
+    skill_by_team: dict[str, list[Any]],
+    bringback: bool,
+) -> None:
+    for qb in qbs:
+        info = meta[str(qb.id)]
+        dst = dst_by_team.get(info.opp)
+        if dst is not None and dst in variables and qb in variables:
+            solver.add_constraint(
+                [variables[qb], variables[dst]],
+                None,
+                sign.LTE,
+                1,
+            )
+        if bringback:
+            _add_bringback_constraint(solver, sign, variables, qb, info.opp, skill_by_team)
+
+
+def _add_rb_constraints(
+    solver: Any,
+    sign: Any,
+    variables: Any,
+    meta: Mapping[str, PoolPlayer],
+    rbs: list[Any],
+    dst_by_team: dict[str, Any],
+) -> None:
+    for rb in rbs:
+        info = meta[str(rb.id)]
+        dst = dst_by_team.get(info.opp)
+        if dst is None or rb not in variables or dst not in variables:
+            continue
+        higher = [
+            other
+            for other in rbs
+            if other in variables and float(other.salary) > float(rb.salary)
+        ]
+        solver.add_constraint(
+            [variables[dst], variables[rb]] + [variables[other] for other in higher],
+            [1.0, 1.0] + [-1.0] * len(higher),
+            sign.LTE,
+            1,
+        )
+
+
 def _install_portfolio_rules(optimizer: Any, meta: Mapping[str, PoolPlayer], *, bringback: bool) -> None:
     from pydfs_lineup_optimizer.rules import OptimizerRule
     from pydfs_lineup_optimizer.solvers import SolverSign
@@ -939,57 +1030,11 @@ def _install_portfolio_rules(optimizer: Any, meta: Mapping[str, PoolPlayer], *, 
     class PortfolioRule(OptimizerRule):
         def apply(self, solver):
             variables = self.players_dict
-            qbs = []
-            rbs = []
-            dst_by_team: dict[str, Any] = {}
-            skill_by_team: dict[str, list[Any]] = defaultdict(list)
-            for player in variables:
-                info = meta.get(str(player.id))
-                if info is None:
-                    continue
-                if info.position == "QB":
-                    qbs.append(player)
-                elif info.position == "RB":
-                    rbs.append(player)
-                elif info.position == "DST":
-                    dst_by_team[info.team] = player
-                if info.position in BRINGBACK_POSITIONS:
-                    skill_by_team[info.team].append(player)
-            for qb in qbs:
-                info = meta[str(qb.id)]
-                dst = dst_by_team.get(info.opp)
-                if dst is not None and dst in variables and qb in variables:
-                    solver.add_constraint(
-                        [variables[qb], variables[dst]],
-                        None,
-                        SolverSign.LTE,
-                        1,
-                    )
-                if bringback:
-                    mates = [mate for mate in skill_by_team.get(info.opp, []) if mate in variables]
-                    if mates and qb in variables:
-                        solver.add_constraint(
-                            [variables[mate] for mate in mates] + [variables[qb]],
-                            [1.0] * len(mates) + [-1.0],
-                            SolverSign.GTE,
-                            0,
-                        )
-            for rb in rbs:
-                info = meta[str(rb.id)]
-                dst = dst_by_team.get(info.opp)
-                if dst is None or rb not in variables or dst not in variables:
-                    continue
-                higher = [
-                    other
-                    for other in rbs
-                    if other in variables and float(other.salary) > float(rb.salary)
-                ]
-                solver.add_constraint(
-                    [variables[dst], variables[rb]] + [variables[other] for other in higher],
-                    [1.0, 1.0] + [-1.0] * len(higher),
-                    SolverSign.LTE,
-                    1,
-                )
+            qbs, rbs, dst_by_team, skill_by_team = _portfolio_buckets(variables, meta)
+            _add_qb_constraints(
+                solver, SolverSign, variables, meta, qbs, dst_by_team, skill_by_team, bringback
+            )
+            _add_rb_constraints(solver, SolverSign, variables, meta, rbs, dst_by_team)
 
     # The book filter owns exposure. This rule blocks a DST against the
     # quarterback or the primary running back, and it requires a bring-back.

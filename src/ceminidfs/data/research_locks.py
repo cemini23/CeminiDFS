@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import sys
 from pathlib import Path
+from typing import Mapping
 
 from ceminidfs.data.stadiums import normalize_team_abbr
 
@@ -48,36 +49,20 @@ def parse_research_locks(path: str | Path) -> tuple[list[str], list[str], list[s
 
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle, skipinitialspace=True)
-        headers = [str(name).strip() for name in (reader.fieldnames or []) if name]
+        headers = _read_headers(reader)
         if not headers:
             print("WARNING: research CSV has no headers; skip locks/excludes", file=sys.stderr)
             return [], [], []
         fields = {name.lower(): name for name in headers}
-        name_key = _first_header(fields, NAME_HEADERS)
-        lock_key = _first_header(fields, LOCK_HEADERS)
-        exclude_keys = [fields[token] for token in EXCLUDE_HEADERS if token in fields]
-        fade_keys = [fields[token] for token in FADE_HEADERS if token in fields]
-        if name_key is None or (lock_key is None and not exclude_keys and not fade_keys):
+        name_key, lock_key, exclude_keys, fade_keys = _schema_keys(fields)
+        if name_key is None or not any((lock_key, exclude_keys, fade_keys)):
             print(
                 f"WARNING: research CSV headers unknown {headers}; skip locks/excludes",
                 file=sys.stderr,
             )
             return [], [], []
 
-        locks: list[str] = []
-        excludes: list[str] = []
-        fades: list[str] = []
-        for row in reader:
-            name = str(row.get(name_key) or "").strip()
-            if not name:
-                continue
-            if lock_key is not None and _is_flag(row.get(lock_key)):
-                locks.append(name)
-            if any(_is_flag(row.get(key)) for key in exclude_keys):
-                excludes.append(name)
-            elif any(_is_flag(row.get(key)) for key in fade_keys):
-                fades.append(name)
-        return locks, excludes, fades
+        return _collect_flags(reader, name_key, lock_key, exclude_keys, fade_keys)
 
 
 def _first_header(fields: dict[str, str], candidates: tuple[str, ...]) -> str | None:
@@ -85,6 +70,62 @@ def _first_header(fields: dict[str, str], candidates: tuple[str, ...]) -> str | 
         if token in fields:
             return fields[token]
     return None
+
+
+def _schema_keys(
+    fields: dict[str, str],
+) -> tuple[str | None, str | None, list[str], list[str]]:
+    return (
+        _first_header(fields, NAME_HEADERS),
+        _first_header(fields, LOCK_HEADERS),
+        [fields[token] for token in EXCLUDE_HEADERS if token in fields],
+        [fields[token] for token in FADE_HEADERS if token in fields],
+    )
+
+
+def _read_headers(reader: csv.DictReader) -> list[str]:
+    return [str(name).strip() for name in (reader.fieldnames or []) if name]
+
+
+def _collect_flags(
+    reader: csv.DictReader,
+    name_key: str,
+    lock_key: str | None,
+    exclude_keys: list[str],
+    fade_keys: list[str],
+) -> tuple[list[str], list[str], list[str]]:
+    locks: list[str] = []
+    excludes: list[str] = []
+    fades: list[str] = []
+    for row in reader:
+        name, is_lock, is_exclude, is_fade = _classify_row(
+            row, name_key, lock_key, exclude_keys, fade_keys
+        )
+        if not name:
+            continue
+        if is_lock:
+            locks.append(name)
+        if is_exclude:
+            excludes.append(name)
+        elif is_fade:
+            fades.append(name)
+    return locks, excludes, fades
+
+
+def _classify_row(
+    row: Mapping[str, object],
+    name_key: str,
+    lock_key: str | None,
+    exclude_keys: list[str],
+    fade_keys: list[str],
+) -> tuple[str, bool, bool, bool]:
+    name = str(row.get(name_key) or "").strip()
+    if not name:
+        return "", False, False, False
+    is_lock = lock_key is not None and _is_flag(row.get(lock_key))
+    is_exclude = any(_is_flag(row.get(key)) for key in exclude_keys)
+    is_fade = not is_exclude and any(_is_flag(row.get(key)) for key in fade_keys)
+    return name, is_lock, is_exclude, is_fade
 
 
 def parse_research_qb_cells(path: str | Path) -> set[str]:
@@ -102,7 +143,7 @@ def parse_research_qb_cells(path: str | Path) -> set[str]:
     teams: set[str] = set()
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle, skipinitialspace=True)
-        headers = [str(name).strip() for name in (reader.fieldnames or []) if name]
+        headers = _read_headers(reader)
         fields = {name.lower(): name for name in headers}
         cell_key = _first_header(fields, QB_CELL_HEADERS)
         team_key = _first_header(fields, TEAM_HEADERS)
