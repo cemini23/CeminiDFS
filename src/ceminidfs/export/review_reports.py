@@ -588,27 +588,21 @@ def write_leverage_fade_matrix(
     return _write_report(path, LEVERAGE_FADE_HEADER, rows)
 
 
-def write_duplicate_core_report(
-    path: str | Path,
-    lineups: Sequence[Sequence[tuple[str, str]]],
-    *,
-    core_size: int = 5,
-    core_cap: int | None = None,
-) -> Path:
-    """Report a repeated core, or lineups that share four names.
+def _names_for_slot(seats: Sequence[tuple[str, str]], slot: str) -> list[str]:
+    return [name for seat_slot, name in seats if seat_slot == slot and str(name).strip()]
 
-    A 5-player core row lists the full combination in the ``players`` column.
-    ``core_cap`` marks a row over the limit. FLEX is ignored for the QB-plus-two-RB
-    key. The shared-name rule skips a lineup that a core row already lists.
-    Does not change lineups.
-    """
 
-    seat_lists = [list(seats) for seats in lineups]
+def _core_groups(
+    seat_lists: list[list[tuple[str, str]]],
+) -> tuple[
+    dict[tuple[str, str, str], list[int]],
+    dict[tuple[str, str, str], tuple[str, str, str]],
+]:
     groups: dict[tuple[str, str, str], list[int]] = {}
     labels: dict[tuple[str, str, str], tuple[str, str, str]] = {}
     for index, seats in enumerate(seat_lists, start=1):
-        qb_names = [name for slot, name in seats if slot == "QB" and str(name).strip()]
-        rb_names = [name for slot, name in seats if slot == "RB" and str(name).strip()]
+        qb_names = _names_for_slot(seats, "QB")
+        rb_names = _names_for_slot(seats, "RB")
         if not qb_names or len(rb_names) < 2:
             continue
         ordered = sorted(rb_names[:2], key=_normalize_name)
@@ -619,7 +613,13 @@ def write_duplicate_core_report(
         )
         groups.setdefault(key, []).append(index)
         labels.setdefault(key, (qb_names[0], ordered[0], ordered[1]))
+    return groups, labels
 
+
+def _core_group_rows(
+    groups: dict[tuple[str, str, str], list[int]],
+    labels: dict[tuple[str, str, str], tuple[str, str, str]],
+) -> tuple[list[list[str]], set[int]]:
     rows: list[list[str]] = []
     covered: set[int] = set()
     for key, indexes in groups.items():
@@ -638,28 +638,59 @@ def write_duplicate_core_report(
                 "",
             ]
         )
+    return rows, covered
 
+
+def _name_set(seats: Sequence[tuple[str, str]]) -> set[str]:
+    return {_normalize_name(str(name)) for _slot, name in seats if str(name).strip()}
+
+
+def _shared_row(component: Sequence[int], first: Sequence[tuple[str, str]]) -> list[str]:
+    qb_names = _names_for_slot(first, "QB")
+    rb_names = _names_for_slot(first, "RB")
+    return [
+        qb_names[0] if qb_names else "",
+        rb_names[0] if rb_names else "",
+        rb_names[1] if len(rb_names) > 1 else "",
+        str(len(component)),
+        ",".join(str(item) for item in component),
+        SHARED_NAMES_NOTE,
+        "",
+    ]
+
+
+def _shared_name_rows(
+    seat_lists: list[list[tuple[str, str]]],
+    covered: set[int],
+) -> list[list[str]]:
+    name_sets = [_name_set(seats) for seats in seat_lists]
+    rows: list[list[str]] = []
+    for component in _shared_name_components(name_sets, covered):
+        rows.append(_shared_row(component, seat_lists[component[0] - 1]))
+    return rows
+
+
+def write_duplicate_core_report(
+    path: str | Path,
+    lineups: Sequence[Sequence[tuple[str, str]]],
+    *,
+    core_size: int = 5,
+    core_cap: int | None = None,
+) -> Path:
+    """Report a repeated core, or lineups that share four names.
+
+    A 5-player core row lists the full combination in the ``players`` column.
+    ``core_cap`` marks a row over the limit. FLEX is ignored for the QB-plus-two-RB
+    key. The shared-name rule skips a lineup that a core row already lists.
+    Does not change lineups.
+    """
+
+    seat_lists = [list(seats) for seats in lineups]
+    groups, labels = _core_groups(seat_lists)
+    rows, covered = _core_group_rows(groups, labels)
     rows.extend(_five_core_rows(seat_lists, core_size=core_size, core_cap=core_cap))
 
-    name_sets = [
-        {_normalize_name(str(name)) for _slot, name in seats if str(name).strip()}
-        for seats in seat_lists
-    ]
-    for component in _shared_name_components(name_sets, covered):
-        first = seat_lists[component[0] - 1]
-        qb_names = [name for slot, name in first if slot == "QB" and str(name).strip()]
-        rb_names = [name for slot, name in first if slot == "RB" and str(name).strip()]
-        rows.append(
-            [
-                qb_names[0] if qb_names else "",
-                rb_names[0] if rb_names else "",
-                rb_names[1] if len(rb_names) > 1 else "",
-                str(len(component)),
-                ",".join(str(item) for item in component),
-                SHARED_NAMES_NOTE,
-                "",
-            ]
-        )
+    rows.extend(_shared_name_rows(seat_lists, covered))
 
     rows.sort(
         key=lambda row: (
@@ -830,26 +861,28 @@ def _parse_number(value: Any) -> float | None:
     return parsed
 
 
-def _fragility_rows_for_lineup(
-    lineup_index: int,
+def _quarterback_team(lineup_obj: Any) -> str:
+    for player in getattr(lineup_obj, "players", []):
+        positions = {str(item).upper() for item in (getattr(player, "positions", None) or ())}
+        if "QB" in positions:
+            return str(getattr(player, "team", "") or "").strip().upper()
+    return ""
+
+
+def _same_team_wr_names(lineup_obj: Any, qb_team: str) -> list[str]:
+    names: list[str] = []
+    for player in getattr(lineup_obj, "players", []):
+        team = str(getattr(player, "team", "") or "").strip().upper()
+        positions = {str(item).upper() for item in (getattr(player, "positions", None) or ())}
+        if qb_team and team == qb_team and "WR" in positions:
+            names.append(str(getattr(player, "full_name", "") or "").strip())
+    return names
+
+
+def _wr_groups(
     seats: Sequence[tuple[str, str]],
     players: Mapping[str, PlayerMeta],
-) -> list[list[str]]:
-    lineup_obj = _lineup_namespace(seats, players)
-    chalk = CHALK_BADGE in lineup_stack_badges(lineup_obj)
-    qb_team = ""
-    for player in getattr(lineup_obj, "players", []):
-        if "QB" in {str(item).upper() for item in (getattr(player, "positions", None) or ())}:
-            qb_team = str(getattr(player, "team", "") or "").strip().upper()
-            break
-    same_team_wrs = [
-        str(getattr(player, "full_name", "") or "").strip()
-        for player in getattr(lineup_obj, "players", [])
-        if str(getattr(player, "team", "") or "").strip().upper() == qb_team
-        and "WR" in {str(item).upper() for item in (getattr(player, "positions", None) or ())}
-        and qb_team
-    ]
-
+) -> dict[frozenset[str], list[PlayerMeta]]:
     groups: dict[frozenset[str], list[PlayerMeta]] = defaultdict(list)
     for _slot, name in seats:
         meta = _lookup(players, name)
@@ -857,42 +890,72 @@ def _fragility_rows_for_lineup(
             continue
         key = meta.game_teams if meta.game_teams else frozenset({meta.team} if meta.team else {name})
         groups[key].append(meta)
+    return groups
+
+
+def _wr_group_row(
+    lineup_index: int,
+    wrs: list[PlayerMeta],
+    game_teams: frozenset[str],
+    chalk: bool,
+    qb_team: str,
+) -> tuple[list[str], bool]:
+    wr_names = sorted({player.name for player in wrs})
+    group_chalk = bool(
+        chalk and qb_team and sum(1 for player in wrs if player.team == qb_team) >= 2
+    )
+    row = [
+        str(lineup_index),
+        _game_label(wrs, game_teams),
+        ", ".join(wr_names),
+        str(len(wrs)),
+        "Y" if group_chalk else "N",
+        DO_NOT_AUTO_APPLY,
+    ]
+    return row, group_chalk
+
+
+def _uncovered_chalk_row(
+    lineup_index: int,
+    same_team_wrs: list[str],
+    players: Mapping[str, PlayerMeta],
+) -> list[str]:
+    wr_names = sorted({name for name in same_team_wrs if name})
+    metas = [_lookup(players, name) for name in wr_names]
+    known = [meta for meta in metas if meta is not None]
+    game_teams = known[0].game_teams if known else frozenset()
+    return [
+        str(lineup_index),
+        _game_label(known, game_teams),
+        ", ".join(wr_names),
+        str(len(wr_names)),
+        "Y",
+        DO_NOT_AUTO_APPLY,
+    ]
+
+
+def _fragility_rows_for_lineup(
+    lineup_index: int,
+    seats: Sequence[tuple[str, str]],
+    players: Mapping[str, PlayerMeta],
+) -> list[list[str]]:
+    lineup_obj = _lineup_namespace(seats, players)
+    chalk = CHALK_BADGE in lineup_stack_badges(lineup_obj)
+    qb_team = _quarterback_team(lineup_obj)
+    same_team_wrs = _same_team_wr_names(lineup_obj, qb_team)
+    groups = _wr_groups(seats, players)
 
     rows: list[list[str]] = []
     covered_chalk = False
     for game_teams, wrs in groups.items():
         if len(wrs) < 3:
             continue
-        wr_names = sorted({player.name for player in wrs})
-        group_chalk = chalk and qb_team and sum(1 for player in wrs if player.team == qb_team) >= 2
-        if group_chalk:
-            covered_chalk = True
-        rows.append(
-            [
-                str(lineup_index),
-                _game_label(wrs, game_teams),
-                ", ".join(wr_names),
-                str(len(wrs)),
-                "Y" if group_chalk else "N",
-                DO_NOT_AUTO_APPLY,
-            ]
-        )
+        row, group_chalk = _wr_group_row(lineup_index, wrs, game_teams, chalk, qb_team)
+        covered_chalk = covered_chalk or group_chalk
+        rows.append(row)
 
     if chalk and not covered_chalk:
-        wr_names = sorted({name for name in same_team_wrs if name})
-        metas = [_lookup(players, name) for name in wr_names]
-        known = [meta for meta in metas if meta is not None]
-        game_teams = known[0].game_teams if known else frozenset()
-        rows.append(
-            [
-                str(lineup_index),
-                _game_label(known, game_teams),
-                ", ".join(wr_names),
-                str(len(wr_names)),
-                "Y",
-                DO_NOT_AUTO_APPLY,
-            ]
-        )
+        rows.append(_uncovered_chalk_row(lineup_index, same_team_wrs, players))
 
     _append_same_game_groups(rows, lineup_index, seats, players)
     return rows
