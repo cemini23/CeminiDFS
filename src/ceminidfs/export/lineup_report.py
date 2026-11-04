@@ -188,6 +188,114 @@ def questionable_exposure_rows(lineups: Iterable[Any]) -> list[tuple[str, int]]:
     return rows
 
 
+def _build_flags(
+    *,
+    no_offense_vs_dst: bool,
+    one_rb_per_team: bool,
+    projection_floor: float | None,
+    uniques: int | None,
+    max_team_exposure: float | None,
+    keep_team_dart: float | None,
+    soft_fade: dict[str, float] | None,
+) -> list[str]:
+    flags: list[str] = []
+    if no_offense_vs_dst:
+        flags.append("no-offense-vs-dst")
+    if one_rb_per_team:
+        flags.append("one-rb-per-team")
+    if projection_floor is not None:
+        flags.append(f"projection-floor={projection_floor}")
+    if uniques is not None:
+        flags.append(f"uniques={uniques}")
+    if max_team_exposure is not None:
+        flags.append(f"max-team-exposure={max_team_exposure}")
+    if keep_team_dart:
+        flags.append(f"keep-team-dart={keep_team_dart:g}")
+    if soft_fade:
+        applied = ", ".join(f"{team}={weight:g}" for team, weight in sorted(soft_fade.items()))
+        flags.append(f"soft-fade={applied}")
+    return flags
+
+
+def _team_dart_section(
+    keep_team_dart: float | None,
+    team_dart_log: list[dict[str, Any]] | None,
+) -> list[str]:
+    if not keep_team_dart:
+        return []
+    lines = ["", "Team dart rule (candidate pool only; the optimizer still chooses)"]
+    if team_dart_log:
+        for record in team_dart_log:
+            lines.append(
+                f"  {record['team']}: kept {record['player']} (${record['salary']})"
+                " — the normal path removed the whole team"
+            )
+    else:
+        lines.append("  (no team needed the rule; the normal path kept every slate team)")
+    return lines
+
+
+def _format_lineup_entry(index: int, lineup: Any) -> list[str]:
+    badges = lineup_stack_badges(lineup)
+    names = ", ".join(
+        player_label(player) for player in lineup_players(lineup) if player_name(player)
+    )
+    extra = []
+    salary = getattr(lineup, "salary_costs", None)
+    proj = getattr(lineup, "fantasy_points_projection", None)
+    if salary is not None:
+        extra.append(f"${int(salary)}")
+    if proj is not None:
+        extra.append(f"{float(proj):.1f} proj")
+        if float(proj) >= 120.0:
+            extra.append("Sunday Million min-cash was 113.78 in Week 2 and 130.3 in Week 3")
+    meta = f" ({', '.join(extra)})" if extra else ""
+    badge_text = " | ".join(badges) if badges else "no stack"
+    return [f"{index}. {badge_text}{meta}", f"   {names}"]
+
+
+def _team_exposure_section(pool: list[Any], max_team_exposure: float | None) -> list[str]:
+    lines = ["", "Team exposure (lineups that used the team)"]
+    threshold = DEFAULT_TEAM_EXPOSURE_WARN if max_team_exposure is None else max_team_exposure
+    for team, count, share in team_exposure_rows(pool):
+        lines.append(f"  {share:5.0%}  {count:3d}  {team}")
+        if share > threshold:
+            lines.append(
+                f"WARNING: {team} in {share:.0%} of lineups (above {threshold:.0%})"
+            )
+    return lines
+
+
+def _overlap_section(shown_lineups: list[Any]) -> list[str]:
+    lines = ["", "Lineup overlap (shared players)"]
+    shown_names = [
+        [player_name(player) for player in lineup_players(lp) if player_name(player)]
+        for lp in shown_lineups
+    ]
+    for i, j in combinations(range(len(shown_names)), 2):
+        shared = set(shown_names[i]).intersection(shown_names[j])
+        lines.append(f"  lineups {i+1} & {j+1}: {len(shared)} shared")
+    return lines
+
+
+def _player_exposure_section(pool: list[Any]) -> list[str]:
+    lines = ["", "Player exposure"]
+    for name, count, share in player_exposure_rows(pool)[:25]:
+        lines.append(f"  {share:5.0%}  {count:3d}  {name}")
+    return lines
+
+
+def _questionable_section(pool: list[Any]) -> list[str]:
+    q_rows = questionable_exposure_rows(pool)
+    if not q_rows:
+        return ["", "Questionable in book: none", ""]
+    lines = ["", "Questionable in book"]
+    for name, count in q_rows:
+        lines.append(f"  {count:3d}  {name}")
+    lines.append("")
+    return lines
+
+
 def format_lineup_report(
     lineups: Iterable[Any],
     *,
@@ -213,34 +321,18 @@ def format_lineup_report(
         f"Locks: {', '.join(locks) if locks else '(none)'}",
         f"Excludes: {', '.join(excludes) if excludes else '(none)'}",
     ]
-    build_flags: list[str] = []
-    if no_offense_vs_dst:
-        build_flags.append("no-offense-vs-dst")
-    if one_rb_per_team:
-        build_flags.append("one-rb-per-team")
-    if projection_floor is not None:
-        build_flags.append(f"projection-floor={projection_floor}")
-    if uniques is not None:
-        build_flags.append(f"uniques={uniques}")
-    if max_team_exposure is not None:
-        build_flags.append(f"max-team-exposure={max_team_exposure}")
-    if keep_team_dart:
-        build_flags.append(f"keep-team-dart={keep_team_dart:g}")
-    if soft_fade:
-        applied = ", ".join(f"{team}={weight:g}" for team, weight in sorted(soft_fade.items()))
-        build_flags.append(f"soft-fade={applied}")
+    build_flags = _build_flags(
+        no_offense_vs_dst=no_offense_vs_dst,
+        one_rb_per_team=one_rb_per_team,
+        projection_floor=projection_floor,
+        uniques=uniques,
+        max_team_exposure=max_team_exposure,
+        keep_team_dart=keep_team_dart,
+        soft_fade=soft_fade,
+    )
     if build_flags:
         lines.append(f"Build: {', '.join(build_flags)}")
-    if keep_team_dart:
-        lines.extend(["", "Team dart rule (candidate pool only; the optimizer still chooses)"])
-        if team_dart_log:
-            for record in team_dart_log:
-                lines.append(
-                    f"  {record['team']}: kept {record['player']} (${record['salary']})"
-                    " — the normal path removed the whole team"
-                )
-        else:
-            lines.append("  (no team needed the rule; the normal path kept every slate team)")
+    lines.extend(_team_dart_section(keep_team_dart, team_dart_log))
     shown = len(pool) if len(pool) <= 20 else min(preview, len(pool))
     heading = f"All {shown} lineups" if len(pool) <= 20 else f"First {shown} lineups"
     lines.extend(
@@ -251,56 +343,14 @@ def format_lineup_report(
     )
     shown_lineups = pool[:shown]
     for index, lineup in enumerate(shown_lineups, start=1):
-        badges = lineup_stack_badges(lineup)
-        names = ", ".join(
-            player_label(player) for player in lineup_players(lineup) if player_name(player)
-        )
-        salary = getattr(lineup, "salary_costs", None)
-        proj = getattr(lineup, "fantasy_points_projection", None)
-        extra = []
-        if salary is not None:
-            extra.append(f"${int(salary)}")
-        if proj is not None:
-            extra.append(f"{float(proj):.1f} proj")
-            if float(proj) >= 120.0:
-                extra.append(
-                    "Sunday Million min-cash was 113.78 in Week 2 and 130.3 in Week 3"
-                )
-        meta = f" ({', '.join(extra)})" if extra else ""
-        badge_text = " | ".join(badges) if badges else "no stack"
-        lines.append(f"{index}. {badge_text}{meta}")
-        lines.append(f"   {names}")
+        lines.extend(_format_lineup_entry(index, lineup))
 
-    lines.extend(["", "Lineup overlap (shared players)"])
-    shown_names = [
-        [player_name(player) for player in lineup_players(lp) if player_name(player)]
-        for lp in shown_lineups
-    ]
-    for i, j in combinations(range(len(shown_names)), 2):
-        shared = set(shown_names[i]).intersection(shown_names[j])
-        lines.append(f"  lineups {i+1} & {j+1}: {len(shared)} shared")
+    lines.extend(_overlap_section(shown_lineups))
+    lines.extend(_player_exposure_section(pool))
 
-    lines.extend(["", "Player exposure"])
-    for name, count, share in player_exposure_rows(pool)[:25]:
-        lines.append(f"  {share:5.0%}  {count:3d}  {name}")
+    lines.extend(_team_exposure_section(pool, max_team_exposure))
 
-    lines.extend(["", "Team exposure (lineups that used the team)"])
-    threshold = DEFAULT_TEAM_EXPOSURE_WARN if max_team_exposure is None else max_team_exposure
-    for team, count, share in team_exposure_rows(pool):
-        lines.append(f"  {share:5.0%}  {count:3d}  {team}")
-        if share > threshold:
-            lines.append(
-                f"WARNING: {team} in {share:.0%} of lineups (above {threshold:.0%})"
-            )
-
-    q_rows = questionable_exposure_rows(pool)
-    if not q_rows:
-        lines.extend(["", "Questionable in book: none", ""])
-    else:
-        lines.extend(["", "Questionable in book"])
-        for name, count in q_rows:
-            lines.append(f"  {count:3d}  {name}")
-        lines.append("")
+    lines.extend(_questionable_section(pool))
     return "\n".join(lines)
 
 

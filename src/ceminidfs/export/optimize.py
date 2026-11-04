@@ -1010,6 +1010,225 @@ def _apply_fppg_overrides(optimizer: Any, overrides: Mapping[str, float] | None)
                 break
 
 
+def _build_optimizer(
+    csv_file: Path,
+    site_key: str,
+    *,
+    fppg_overrides: Mapping[str, float] | None,
+    open_qb_teams: Iterable[str] | None,
+    qb_starters: Mapping[str, str] | str | Path | None,
+) -> Any:
+    Site, Sport, get_optimizer, _ = _load_pydfs()
+    optimizer = get_optimizer(_site_enum(site_key, Site), Sport.FOOTBALL)
+    if site_key == "fanduel_showdown":
+        # FanDuel 2026 single game: 1 MVP + 5 FLEX at $60k, max 5 per team —
+        # same 6-man structure as DK captain mode but with the FD budget/team cap.
+        optimizer.settings.budget = 60000
+        optimizer.settings.max_from_one_team = 5
+    optimizer.load_players_from_csv(str(csv_file))
+    _apply_fppg_overrides(optimizer, fppg_overrides)
+    attach_csv_original_positions(optimizer, csv_file)
+    _relax_tiny_slate_limits(optimizer, site_key)
+    keep_injury_tagged_players(optimizer, csv_file)
+    apply_open_qb_gate(
+        optimizer,
+        set(open_qb_teams or ()) | open_qb_teams_from_csv(csv_file),
+    )
+    starter_map = qb_starters_for_csv(csv_file, qb_starters)
+    if starter_map:
+        apply_qb_starter_gate(optimizer, starter_map)
+    return optimizer
+
+
+def _apply_pool_rules(
+    optimizer: Any,
+    site_key: str,
+    gates: Mapping[str, Any] | None,
+    *,
+    locks: list[str] | None,
+    excludes: list[str] | None,
+    no_offense_vs_dst: bool,
+    one_rb_per_team: bool,
+    projection_floor: float | None,
+    soft_fade: dict[str, float] | None,
+    player_soft_fade: Mapping[str, float] | Iterable[str] | None,
+    min_skill_pool: int | None,
+    keep_team_dart: float,
+    stacks: list[str] | None,
+    friday_trend_keys: Iterable[str] | None,
+) -> tuple[list[Any], list[Any], list[Any]]:
+    resolved_locks, resolved_excludes = apply_locks_and_excludes(
+        optimizer,
+        locks=locks,
+        excludes=excludes,
+    )
+    assert_locked_players_eligible(optimizer)
+    low_ceiling = _gate_section(gates, "low_ceiling")
+    apply_pool_constraints(
+        optimizer,
+        no_offense_vs_dst=no_offense_vs_dst,
+        one_rb_per_team=one_rb_per_team,
+        projection_floor=projection_floor,
+        low_ceiling_floor=(
+            float(low_ceiling["projection_floor"]) if low_ceiling.get("enabled") else None
+        ),
+        low_ceiling_max=int(low_ceiling.get("max_per_lineup", 1)),
+    )
+    apply_soft_fade(optimizer, soft_fade, player_soft_fade=player_soft_fade)
+    apply_skill_pool_floor(optimizer, min_skill_pool, site_key=site_key)
+    TEAM_DART_LOG.clear()
+    dart_log = apply_team_dart_guard(optimizer, keep_team_dart)
+    apply_stack_specs(optimizer, parse_stack_rules(stacks))
+    apply_friday_trend_exposure(optimizer, friday_trend_keys or ())
+    return resolved_locks, resolved_excludes, dart_log
+
+
+def _apply_repeating_limits(
+    optimizer: Any,
+    site_key: str,
+    *,
+    max_repeating_players: int | None,
+    uniques: int | None,
+) -> None:
+    repeating = resolve_repeating_players(
+        slate_size=len(LINEUP_HEADERS[site_key]),
+        max_repeating_players=max_repeating_players,
+        uniques=uniques,
+    )
+    if uniques is None and _is_tiny_slate(optimizer) and repeating == 7:
+        repeating = None
+    if repeating is not None:
+        optimizer.set_max_repeating_players(repeating)
+
+
+def _install_core_rule(optimizer: Any, site_key: str, gates: Mapping[str, Any] | None) -> None:
+    core = _gate_section(gates, "core")
+    if core.get("enabled") and site_key in {"fanduel", "draftkings"}:
+        install_five_core_rule(
+            optimizer,
+            size=int(core.get("size", FIVE_CORE_SIZE)),
+            cap=int(core.get("max_count", 0)),
+        )
+
+
+def _configure_solver(
+    optimizer: Any,
+    site_key: str,
+    gates: Mapping[str, Any] | None,
+    *,
+    count: int,
+    min_salary: int | None,
+    max_exposure: float | None,
+    max_repeating_players: int | None,
+    uniques: int | None,
+    require_count: bool,
+) -> tuple[int, float | None, Any, bool]:
+    _apply_repeating_limits(
+        optimizer,
+        site_key,
+        max_repeating_players=max_repeating_players,
+        uniques=uniques,
+    )
+
+    salary_floor = DEFAULT_MIN_SALARY[site_key] if min_salary is None else min_salary
+    if salary_floor:
+        optimizer.set_min_salary_cap(salary_floor)
+
+    if _is_tiny_slate(optimizer) and max_exposure == 0.35:
+        max_exposure = None
+
+    pair_guard = site_key in {"fanduel", "draftkings"}
+    # The solver bans a repeated tight-end and defense pair. Ask for the book
+    # size. A larger request with the book cap is infeasible on a full slate.
+    if pair_guard and require_count:
+        _install_unique_te_def_rule(optimizer, site_key)
+
+    _install_core_rule(optimizer, site_key, gates)
+
+    overrides = exposure_hatch_overrides(_optimizer_pool(optimizer), gates, max_exposure)
+    request_count = count
+    _apply_solver_exposure_hatch(
+        optimizer,
+        overrides,
+        book_count=count,
+        request_n=request_count,
+    )
+    return request_count, max_exposure, overrides, pair_guard
+
+
+def _enforce_pair_guard(lineups: list[Any], count: int, site_key: str) -> list[Any]:
+    lineups, repeated_pair = filter_te_def_pairs(lineups, count, site_key)
+    if len(lineups) < count:
+        raise ValueError(_te_def_pair_message(repeated_pair, len(lineups), count))
+    return lineups
+
+
+def _apply_exposure_caps(
+    lineups: list[Any],
+    count: int,
+    max_exposure: float | None,
+    max_team_exposure: float | None,
+    overrides: Any,
+) -> list[Any]:
+    if max_exposure is None and max_team_exposure is None and not overrides:
+        return lineups
+    return select_with_exposure_caps(
+        lineups,
+        count,
+        max_exposure=max_exposure,
+        max_team_exposure=max_team_exposure,
+        exposure_overrides=overrides,
+    )
+
+
+def _request_and_validate(
+    optimizer: Any,
+    csv_file: Path,
+    site_key: str,
+    *,
+    count: int,
+    request_count: int,
+    max_exposure: float | None,
+    max_team_exposure: float | None,
+    overrides: Any,
+    pair_guard: bool,
+    require_count: bool,
+    dart_log: list[Any],
+    resolved_locks: list[Any],
+    resolved_excludes: list[Any],
+    gates: Mapping[str, Any] | None,
+) -> list[Any]:
+    lineups = _request_lineups(
+        optimizer,
+        request_count=request_count,
+        count=count,
+        max_exposure=max_exposure or None,
+        allow_short=not require_count,
+    )
+    if not lineups:
+        raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
+    lineups = _apply_exposure_caps(
+        lineups, count, max_exposure, max_team_exposure, overrides
+    )
+    TEAM_DART_LOG.extend(dart_log)
+    if require_count and len(lineups) < count:
+        raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
+    if pair_guard and require_count:
+        lineups = _enforce_pair_guard(lineups, count, site_key)
+    if require_count and len(lineups) != count:
+        raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
+    _assert_locks_and_excludes_hold(lineups, resolved_locks, resolved_excludes)
+    assert_gates_from_csv(
+        lineups,
+        csv_file,
+        gates=gates,
+        max_exposure=max_exposure,
+        exposure_overrides=overrides,
+        book_count=count,
+    )
+    return lineups
+
+
 def generate_lineups(
     csv_path: str | Path,
     site: str = "fanduel",
@@ -1051,129 +1270,58 @@ def generate_lineups(
         file=sys.stderr,
     )
 
-    Site, Sport, get_optimizer, _team_stack = _load_pydfs()
-    optimizer = get_optimizer(_site_enum(site_key, Site), Sport.FOOTBALL)
-    if site_key == "fanduel_showdown":
-        # FanDuel 2026 single game: 1 MVP + 5 FLEX at $60k, max 5 per team —
-        # same 6-man structure as DK captain mode but with the FD budget/team cap.
-        optimizer.settings.budget = 60000
-        optimizer.settings.max_from_one_team = 5
-    optimizer.load_players_from_csv(str(csv_file))
-    _apply_fppg_overrides(optimizer, fppg_overrides)
-    attach_csv_original_positions(optimizer, csv_file)
-    _relax_tiny_slate_limits(optimizer, site_key)
-    keep_injury_tagged_players(optimizer, csv_file)
-    apply_open_qb_gate(
-        optimizer,
-        set(open_qb_teams or ()) | open_qb_teams_from_csv(csv_file),
+    optimizer = _build_optimizer(
+        csv_file,
+        site_key,
+        fppg_overrides=fppg_overrides,
+        open_qb_teams=open_qb_teams,
+        qb_starters=qb_starters,
     )
-    starter_map = qb_starters_for_csv(csv_file, qb_starters)
-    if starter_map:
-        apply_qb_starter_gate(optimizer, starter_map)
-    resolved_locks, resolved_excludes = apply_locks_and_excludes(
+    resolved_locks, resolved_excludes, dart_log = _apply_pool_rules(
         optimizer,
+        site_key,
+        gates,
         locks=locks,
         excludes=excludes,
-    )
-    assert_locked_players_eligible(optimizer)
-    low_ceiling = _gate_section(gates, "low_ceiling")
-    apply_pool_constraints(
-        optimizer,
         no_offense_vs_dst=no_offense_vs_dst,
         one_rb_per_team=one_rb_per_team,
         projection_floor=projection_floor,
-        low_ceiling_floor=(
-            float(low_ceiling["projection_floor"]) if low_ceiling.get("enabled") else None
-        ),
-        low_ceiling_max=int(low_ceiling.get("max_per_lineup", 1)),
+        soft_fade=soft_fade,
+        player_soft_fade=player_soft_fade,
+        min_skill_pool=min_skill_pool,
+        keep_team_dart=keep_team_dart,
+        stacks=stacks,
+        friday_trend_keys=friday_trend_keys,
     )
-    apply_soft_fade(optimizer, soft_fade, player_soft_fade=player_soft_fade)
-    apply_skill_pool_floor(optimizer, min_skill_pool, site_key=site_key)
-    TEAM_DART_LOG.clear()
-    dart_log = apply_team_dart_guard(optimizer, keep_team_dart)
-    apply_stack_specs(optimizer, parse_stack_rules(stacks))
-    apply_friday_trend_exposure(optimizer, friday_trend_keys or ())
 
-    repeating = resolve_repeating_players(
-        slate_size=len(LINEUP_HEADERS[site_key]),
+    request_count, max_exposure, overrides, pair_guard = _configure_solver(
+        optimizer,
+        site_key,
+        gates,
+        count=count,
+        min_salary=min_salary,
+        max_exposure=max_exposure,
         max_repeating_players=max_repeating_players,
         uniques=uniques,
+        require_count=require_count,
     )
-    if uniques is None and _is_tiny_slate(optimizer) and repeating == 7:
-        repeating = None
 
-    if repeating is not None:
-        optimizer.set_max_repeating_players(repeating)
-
-    salary_floor = DEFAULT_MIN_SALARY[site_key] if min_salary is None else min_salary
-    if salary_floor:
-        optimizer.set_min_salary_cap(salary_floor)
-
-    if _is_tiny_slate(optimizer) and max_exposure == 0.35:
-        max_exposure = None
-
-    pair_guard = site_key in {"fanduel", "draftkings"}
-    # The solver bans a repeated tight-end and defense pair. Ask for the book
-    # size. A larger request with the book cap is infeasible on a full slate.
-    if pair_guard and require_count:
-        _install_unique_te_def_rule(optimizer, site_key)
-
-    core = _gate_section(gates, "core")
-    if core.get("enabled") and site_key in {"fanduel", "draftkings"}:
-        install_five_core_rule(
-            optimizer,
-            size=int(core.get("size", FIVE_CORE_SIZE)),
-            cap=int(core.get("max_count", 0)),
-        )
-
-    overrides = exposure_hatch_overrides(_optimizer_pool(optimizer), gates, max_exposure)
-    request_count = count
-    _apply_solver_exposure_hatch(
+    return _request_and_validate(
         optimizer,
-        overrides,
-        book_count=count,
-        request_n=request_count,
-    )
-    lineups = _request_lineups(
-        optimizer,
-        request_count=request_count,
-        count=count,
-        max_exposure=max_exposure or None,
-        allow_short=not require_count,
-    )
-    if not lineups:
-        raise ValueError("optimizer returned 0 lineups; check CSV columns and salaries")
-    if (
-        max_exposure is not None
-        or max_team_exposure is not None
-        or overrides
-    ):
-        lineups = select_with_exposure_caps(
-            lineups,
-            count,
-            max_exposure=max_exposure,
-            max_team_exposure=max_team_exposure,
-            exposure_overrides=overrides,
-        )
-    TEAM_DART_LOG.extend(dart_log)
-    if require_count and len(lineups) < count:
-        raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
-    if pair_guard and require_count:
-        lineups, repeated_pair = filter_te_def_pairs(lineups, count, site_key)
-        if len(lineups) < count:
-            raise ValueError(_te_def_pair_message(repeated_pair, len(lineups), count))
-    if require_count and len(lineups) != count:
-        raise ValueError(f"optimizer wrote {len(lineups)} lineups; requested {count}")
-    _assert_locks_and_excludes_hold(lineups, resolved_locks, resolved_excludes)
-    assert_gates_from_csv(
-        lineups,
         csv_file,
-        gates=gates,
+        site_key,
+        count=count,
+        request_count=request_count,
         max_exposure=max_exposure,
-        exposure_overrides=overrides,
-        book_count=count,
+        max_team_exposure=max_team_exposure,
+        overrides=overrides,
+        pair_guard=pair_guard,
+        require_count=require_count,
+        dart_log=dart_log,
+        resolved_locks=resolved_locks,
+        resolved_excludes=resolved_excludes,
+        gates=gates,
     )
-    return lineups
 
 
 def lineup_to_row(lineup: Any, site: str = "fanduel") -> list[str]:
