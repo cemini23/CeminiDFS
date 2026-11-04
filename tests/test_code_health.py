@@ -81,6 +81,21 @@ def test_complexity_counts_branch_nodes():
     assert ch.complexity(fn) == 5
 
 
+def test_complexity_ignores_nested_function_bodies():
+    tree = ast.parse(
+        "def outer(x):\n"
+        "    def inner(y):\n"
+        "        if y:\n"
+        "            return 1\n"
+        "        return 2\n"
+        "    if x:\n"
+        "        return inner(x)\n"
+        "    return 0\n"
+    )
+    # outer: base 1 + if(x); inner has its own finding.
+    assert ch.complexity(tree.body[0]) == 2
+
+
 def test_normalized_dump_ignores_identifier_names():
     a = ast.parse("def f(x):\n    return x + 1\n").body[0]
     b = ast.parse("def g(y):\n    return y + 2\n").body[0]

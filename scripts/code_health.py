@@ -228,6 +228,17 @@ def imported_modules(path: Path) -> set[str]:
 # ---------------------------------------------------------------- shape
 
 
+def walk_shallow(node: ast.AST):
+    """Walk a node without entering nested defs; they get their own finding."""
+    stack = list(ast.iter_child_nodes(node))
+    while stack:
+        current = stack.pop()
+        yield current
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+
+
 def body_nodes(fn: ast.AST) -> list[ast.AST]:
     body = list(getattr(fn, "body", []))
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
@@ -239,7 +250,7 @@ def body_nodes(fn: ast.AST) -> list[ast.AST]:
 def shape(fn: ast.AST) -> list[str]:
     out: list[str] = []
     for stmt in body_nodes(fn):
-        for node in ast.walk(stmt):
+        for node in walk_shallow(stmt):
             if isinstance(node, (ast.expr_context, ast.operator, ast.unaryop, ast.cmpop, ast.boolop)):
                 continue
             out.append(type(node).__name__)
@@ -287,7 +298,7 @@ def normalized_dump(fn: ast.AST) -> str:
 
 def complexity(fn: ast.AST) -> int:
     score = 1
-    for node in ast.walk(fn):
+    for node in walk_shallow(fn):
         if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
                              ast.With, ast.AsyncWith, ast.IfExp, ast.Assert,
                              ast.match_case)):
