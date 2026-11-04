@@ -19,6 +19,65 @@ SALARY_CAPS = {
 CAPTAIN_HEADERS = frozenset({"MVP", "CPT"})
 
 
+def _read_lineup_rows(csv_path: Path, expected_header: list[str]) -> list[list[str]]:
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        try:
+            header = next(reader)
+        except StopIteration as exc:
+            raise ValueError(f"Lineups CSV is empty: {csv_path}") from exc
+        rows = list(reader)
+    if header != expected_header:
+        raise ValueError(f"Lineups CSV header mismatch: expected {expected_header}, got {header}")
+    return rows
+
+
+def _check_lineup_count(lineup_count: int, expected_count: int) -> None:
+    if lineup_count == 0:
+        raise ValueError("Expected at least 1 lineup, found 0")
+    if lineup_count > expected_count:
+        raise ValueError(f"Expected at most {expected_count} lineups, found {lineup_count}")
+    if lineup_count < expected_count:
+        print(
+            f"WARNING: wrote {lineup_count} lineups; requested {expected_count} "
+            "(exposure cap or an infeasible stack can shorten the file)",
+            file=sys.stderr,
+        )
+
+
+def _row_totals(
+    row: list[str],
+    header: list[str],
+    projection_lookup: dict[str, float],
+    salary_lookup: dict[str, Any],
+    salary_cap: int | None,
+    site_key: str,
+) -> tuple[int, int, int, int, float]:
+    empty = sum(1 for cell in row if not cell.strip())
+    names = [cell.strip() for cell in row if cell.strip()]
+    duplicates = int(len(names) != len(set(_normalize_name(name) for name in names)))
+
+    matched = 0
+    points = 0.0
+    for name in names:
+        value = projection_lookup.get(_normalize_name(name))
+        if value is not None:
+            matched += 1
+            points += value
+
+    violations = 0
+    if salary_lookup and salary_cap is not None:
+        if site_key in SHOWDOWN_SITES:
+            total = sum(
+                _showdown_slot_cost(salary_lookup, slot, name)
+                for slot, name in zip(header, names)
+            )
+        else:
+            total = sum(salary_lookup.get(_normalize_name(name), 0) for name in names)
+        violations = int(total > salary_cap)
+    return empty, duplicates, violations, matched, points
+
+
 def validate_lineups_csv(
     path: str | Path,
     site: str = "fanduel",
@@ -34,28 +93,9 @@ def validate_lineups_csv(
     if not csv_path.is_file():
         raise FileNotFoundError(f"Lineups CSV not found: {csv_path}")
 
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        try:
-            header = next(reader)
-        except StopIteration as exc:
-            raise ValueError(f"Lineups CSV is empty: {csv_path}") from exc
-        rows = list(reader)
-
-    if header != expected_header:
-        raise ValueError(f"Lineups CSV header mismatch: expected {expected_header}, got {header}")
-
+    rows = _read_lineup_rows(csv_path, expected_header)
     lineup_count = len(rows)
-    if lineup_count == 0:
-        raise ValueError("Expected at least 1 lineup, found 0")
-    if lineup_count > expected_count:
-        raise ValueError(f"Expected at most {expected_count} lineups, found {lineup_count}")
-    if lineup_count < expected_count:
-        print(
-            f"WARNING: wrote {lineup_count} lineups; requested {expected_count} "
-            "(exposure cap or an infeasible stack can shorten the file)",
-            file=sys.stderr,
-        )
+    _check_lineup_count(lineup_count, expected_count)
 
     salary_lookup = _salary_lookup(players_csv, site_key) if players_csv else {}
     projection_lookup = _projection_lookup(players_csv) if players_csv else {}
@@ -72,30 +112,19 @@ def validate_lineups_csv(
             raise ValueError(
                 f"Lineup row {row_idx} has {len(row)} cells; expected {len(expected_header)}"
             )
-        empty_slots += sum(1 for cell in row if not cell.strip())
-
-        names = [cell.strip() for cell in row if cell.strip()]
-        if len(names) != len(set(_normalize_name(name) for name in names)):
-            duplicate_players += 1
-
-        if projection_lookup:
-            for name in names:
-                points = projection_lookup.get(_normalize_name(name))
-                if points is None:
-                    continue
-                matched_projection_players += 1
-                total_projected_points += points
-
-        if salary_lookup and salary_cap is not None:
-            if site_key in SHOWDOWN_SITES:
-                total = sum(
-                    _showdown_slot_cost(salary_lookup, slot, name)
-                    for slot, name in zip(header, names)
-                )
-            else:
-                total = sum(salary_lookup.get(_normalize_name(name), 0) for name in names)
-            if total > salary_cap:
-                salary_violations += 1
+        empty, duplicates, violations, matched, points = _row_totals(
+            row,
+            expected_header,
+            projection_lookup,
+            salary_lookup,
+            salary_cap,
+            site_key,
+        )
+        empty_slots += empty
+        duplicate_players += duplicates
+        salary_violations += violations
+        matched_projection_players += matched
+        total_projected_points += points
 
     if empty_slots:
         raise ValueError(f"Lineups CSV contains {empty_slots} empty required slot(s)")
