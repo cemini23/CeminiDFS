@@ -202,3 +202,77 @@ def test_get_player_by_id_roundtrip(bbm_db: Path) -> None:
     assert puka is not None
     assert puka["name"] == "Puka Nacua"
     assert get_player_by_id("bbm:missing", db_path=bbm_db) is None
+
+
+def _stub_practice_deps(monkeypatch: pytest.MonkeyPatch, inputs: list[str]) -> dict[str, list]:
+    """Replace every ledger call so the interactive loop runs with no DB."""
+    import ceminidfs.bbm.practice as practice
+
+    calls: dict[str, list] = {"picks": [], "taken": [], "complete": 0}
+    pool = [
+        {"player_id": f"bbm:p{i}", "name": f"P{i}", "position": "WR", "team": "KC", "adp": i}
+        for i in range(1, 40)
+    ]
+    fake_player = {"player_id": "bbm:p1", "name": "P1", "position": "WR", "team": "KC"}
+
+    monkeypatch.setattr(practice, "archetype_header", lambda _a: "ARCH")
+    monkeypatch.setattr(practice, "create_draft", lambda *a, **k: None)
+    monkeypatch.setattr(practice, "get_draft_state", lambda _d: None)
+    monkeypatch.setattr(practice, "get_taken_player_ids", lambda _d: set())
+    monkeypatch.setattr(practice, "count_room_taken", lambda _d: 0)
+    monkeypatch.setattr(practice, "get_recommendations", lambda *a, **k: [])
+    monkeypatch.setattr(practice, "list_available_players", lambda **k: list(pool))
+    monkeypatch.setattr(practice, "resolve_player_query", lambda _q: dict(fake_player))
+    monkeypatch.setattr(practice, "get_last_ambiguous_matches", lambda: [])
+    monkeypatch.setattr(
+        practice, "ensure_player_stub",
+        lambda q: {"player_id": f"stub:{q.lower()}", "name": q, "position": "WR", "team": "FA"},
+    )
+    monkeypatch.setattr(practice, "record_pick", lambda *a, **k: calls["picks"].append(a))
+    monkeypatch.setattr(practice, "record_taken", lambda *a, **k: calls["taken"].append(a))
+    monkeypatch.setattr(
+        practice, "complete_draft",
+        lambda *a, **k: calls.__setitem__("complete", calls["complete"] + 1),
+    )
+    queue = iter(inputs)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(queue))
+    return calls
+
+
+def test_run_practice_draft_picks_then_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ceminidfs.bbm.practice as practice
+
+    calls = _stub_practice_deps(monkeypatch, ["p P1"])
+
+    draft_id = practice.run_practice_draft(slot=1, archetype="A", rounds=1)
+
+    assert draft_id.startswith("practice-")
+    assert len(calls["picks"]) == 1
+    assert calls["picks"][0][3] == "bbm:p1"
+    assert len(calls["taken"]) == 11  # opponents fill picks 2-12
+    assert calls["complete"] == 1
+
+
+def test_run_practice_draft_taken_unknown_creates_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ceminidfs.bbm.practice as practice
+
+    calls = _stub_practice_deps(monkeypatch, ["t Ghost"])
+    monkeypatch.setattr(practice, "resolve_player_query", lambda _q: None)
+
+    practice.run_practice_draft(slot=1, archetype="A", rounds=1)
+
+    assert calls["taken"][0][3] == "stub:ghost"
+    assert len(calls["taken"]) == 12
+
+
+def test_run_practice_draft_quit_stops_before_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ceminidfs.bbm.practice as practice
+
+    calls = _stub_practice_deps(monkeypatch, ["quit"])
+
+    draft_id = practice.run_practice_draft(slot=1, archetype="A", rounds=1)
+
+    assert draft_id.startswith("practice-")
+    assert calls["picks"] == []
+    assert calls["taken"] == []
+    assert calls["complete"] == 0

@@ -44,3 +44,6 @@ data/cache/
 # Local reports output (calibration, backtest, benchmarks)
 # Note: docs/benchmarks/ is tracked for committed benchmarks
 reports/
+
+# Code-health queue (local work state, not shared)
+.code-health/
