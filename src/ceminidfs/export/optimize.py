@@ -316,6 +316,91 @@ def _apply_signature_delta(
         counts[name] = counts.get(name, 0) + 1
 
 
+def _candidate_pool(
+    selected: list[Any],
+    candidates: list[Any],
+    in_book: set[tuple[str, ...]],
+) -> list[tuple[Any, tuple[str, ...]]]:
+    pool: list[tuple[Any, tuple[str, ...]]] = []
+    pool_seen = set(in_book)
+    for lineup in list(selected) + list(candidates):
+        sig = _lineup_signature(lineup)
+        if sig in pool_seen:
+            continue
+        pool.append((lineup, sig))
+        pool_seen.add(sig)
+    return pool
+
+
+def _try_append(
+    lineup: Any,
+    sig: tuple[str, ...],
+    book: list[Any],
+    book_sigs: list[tuple[str, ...]],
+    in_book: set[tuple[str, ...]],
+    counts: Any,
+    cap: Any,
+    *,
+    final_count: int,
+) -> bool:
+    if len(book) >= final_count or not _swap_respects_cap(counts, (), sig, cap):
+        return False
+    book.append(lineup)
+    book_sigs.append(sig)
+    in_book.add(sig)
+    _apply_signature_delta(counts, (), sig)
+    return True
+
+
+def _try_swap(
+    lineup: Any,
+    sig: tuple[str, ...],
+    key: str,
+    book: list[Any],
+    book_sigs: list[tuple[str, ...]],
+    in_book: set[tuple[str, ...]],
+    counts: Any,
+    cap: Any,
+) -> bool:
+    for index in range(len(book) - 1, -1, -1):
+        if key in book_sigs[index]:
+            continue
+        old_sig = book_sigs[index]
+        if not _swap_respects_cap(counts, old_sig, sig, cap):
+            continue
+        book[index] = lineup
+        book_sigs[index] = sig
+        in_book.discard(old_sig)
+        in_book.add(sig)
+        _apply_signature_delta(counts, old_sig, sig)
+        return True
+    return False
+
+
+def _place_named(
+    key: str,
+    need: int,
+    book: list[Any],
+    book_sigs: list[tuple[str, ...]],
+    in_book: set[tuple[str, ...]],
+    pool: list[tuple[Any, tuple[str, ...]]],
+    counts: Any,
+    cap: Any,
+    *,
+    final_count: int,
+) -> bool:
+    while sum(1 for sig in book_sigs if key in sig) < need:
+        for lineup, sig in pool:
+            if sig in in_book or key not in sig:
+                continue
+            if _try_append(
+                lineup, sig, book, book_sigs, in_book, counts, cap, final_count=final_count
+            ) or _try_swap(lineup, sig, key, book, book_sigs, in_book, counts, cap):
+                return True
+        return False
+    return True
+
+
 def enforce_named_min_counts(
     selected: list[Any],
     candidates: list[Any],
@@ -339,55 +424,32 @@ def enforce_named_min_counts(
     need = max(1, int(round(float(exposure) * final_count)))
     cap = _exposure_cap(max_exposure, final_count) if max_exposure is not None else None
     in_book = set(book_sigs)
-    pool: list[tuple[Any, tuple[str, ...]]] = []
-    pool_seen = set(in_book)
-    for lineup in list(selected) + list(candidates):
-        sig = _lineup_signature(lineup)
-        if sig in pool_seen:
-            continue
-        pool.append((lineup, sig))
-        pool_seen.add(sig)
+    pool = _candidate_pool(selected, candidates, in_book)
     counts = _exposure_counts(book)
 
     for raw_name in names:
         key = _exposure_name_key(str(raw_name))
         if not key:
             continue
-        while sum(1 for sig in book_sigs if key in sig) < need:
-            placed = False
-            for lineup, sig in pool:
-                if sig in in_book or key not in sig:
-                    continue
-                if len(book) < final_count and _swap_respects_cap(counts, (), sig, cap):
-                    book.append(lineup)
-                    book_sigs.append(sig)
-                    in_book.add(sig)
-                    _apply_signature_delta(counts, (), sig)
-                    placed = True
-                    break
-                for index in range(len(book) - 1, -1, -1):
-                    if key in book_sigs[index]:
-                        continue
-                    old_sig = book_sigs[index]
-                    if not _swap_respects_cap(counts, old_sig, sig, cap):
-                        continue
-                    book[index] = lineup
-                    book_sigs[index] = sig
-                    in_book.discard(old_sig)
-                    in_book.add(sig)
-                    _apply_signature_delta(counts, old_sig, sig)
-                    placed = True
-                    break
-                if placed:
-                    break
-            if not placed:
-                have = sum(1 for sig in book_sigs if key in sig)
-                print(
-                    f"trend include: {raw_name} is in {have} of {len(book)} lineups; "
-                    f"wanted {need}",
-                    file=sys.stderr,
-                )
-                break
+        if _place_named(
+            key,
+            need,
+            book,
+            book_sigs,
+            in_book,
+            pool,
+            counts,
+            cap,
+            final_count=final_count,
+        ):
+            continue
+        have = sum(1 for sig in book_sigs if key in sig)
+        print(
+            f"trend include: {raw_name} is in {have} of {len(book)} lineups; "
+            f"wanted {need}",
+            file=sys.stderr,
+        )
+        break
     return book
 
 
@@ -496,6 +558,31 @@ def _row_core_keys(row: Iterable[str], size: int) -> list[tuple[str, ...]]:
     return list(itertools.combinations(keys, size))
 
 
+def _lowered_row(raw: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        str(key).strip().lower(): str(value or "").strip()
+        for key, value in raw.items()
+        if key
+    }
+
+
+def _row_player_id(lowered: Mapping[str, str]) -> str:
+    return (
+        lowered.get("id")
+        or lowered.get("player id")
+        or lowered.get("player_id")
+        or ""
+    )
+
+
+def _row_name_labels(lowered: Mapping[str, str]) -> list[str]:
+    first = lowered.get("first name") or lowered.get("firstname") or ""
+    last = lowered.get("last name") or lowered.get("lastname") or ""
+    full = " ".join(part for part in (first, last) if part).strip()
+    nickname = lowered.get("nickname") or lowered.get("name") or ""
+    return [full, nickname]
+
+
 def _player_ids_by_name(players_csv: str | Path) -> dict[str, str]:
     """Map a normalized player name to its FanDuel id."""
 
@@ -506,24 +593,11 @@ def _player_ids_by_name(players_csv: str | Path) -> dict[str, str]:
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         for raw in reader:
-            lowered = {
-                str(key).strip().lower(): str(value or "").strip()
-                for key, value in raw.items()
-                if key
-            }
-            player_id = (
-                lowered.get("id")
-                or lowered.get("player id")
-                or lowered.get("player_id")
-                or ""
-            )
+            lowered = _lowered_row(raw)
+            player_id = _row_player_id(lowered)
             if not player_id:
                 continue
-            first = lowered.get("first name") or lowered.get("firstname") or ""
-            last = lowered.get("last name") or lowered.get("lastname") or ""
-            full = " ".join(part for part in (first, last) if part).strip()
-            nickname = lowered.get("nickname") or lowered.get("name") or ""
-            for label in (full, nickname):
+            for label in _row_name_labels(lowered):
                 key = _exposure_name_key(label)
                 if key:
                     mapping[key] = player_id
