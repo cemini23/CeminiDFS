@@ -15,7 +15,7 @@ import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 
@@ -243,17 +243,55 @@ def skill_excluded(
     allowed = {fold_key(item) for item in (whitelist or ())}
     if fold_key(name) in allowed:
         return False
-    if roster_excluded(
+    if _roster_removed(roster_status, snaps, starter_note, roster_fresh):
+        return True
+    if _opportunity_removed(
+        pos,
+        targets,
+        carries,
+        salary,
+        fppg,
+        team_target_share,
+        route_share,
+        snap_share,
+    ):
+        return True
+    return cheap_season_blocked(pos, salary, played, fppg)
+
+
+def _roster_removed(
+    roster_status: object,
+    snaps: int | None,
+    starter_note: bool,
+    roster_fresh: bool,
+) -> bool:
+    if not roster_excluded(
         status=roster_status,
         snaps=0 if snaps is None else snaps,
-        starter_note=starter_note or fold_key(name) in allowed,
+        starter_note=starter_note,
         roster_fresh=roster_fresh,
-    ) and (roster_fresh or snaps is not None):
-        if roster_fresh and inactive_roster_status(roster_status):
-            return True
-        if snaps is not None and snaps <= 0 and not starter_note:
-            return True
-    if targets is not None and carries is not None and opportunity_blocked(
+    ):
+        return False
+    if not (roster_fresh or snaps is not None):
+        return False
+    if roster_fresh and inactive_roster_status(roster_status):
+        return True
+    return snaps is not None and snaps <= 0 and not starter_note
+
+
+def _opportunity_removed(
+    pos: str,
+    targets: int | None,
+    carries: int | None,
+    salary: int,
+    fppg: float,
+    team_target_share: float | None,
+    route_share: float | None,
+    snap_share: float | None,
+) -> bool:
+    if targets is None or carries is None:
+        return False
+    return opportunity_blocked(
         pos,
         targets,
         carries,
@@ -262,9 +300,7 @@ def skill_excluded(
         team_target_share=team_target_share,
         route_share=route_share,
         snap_share=snap_share,
-    ):
-        return True
-    return cheap_season_blocked(pos, salary, played, fppg)
+    )
 
 
 def is_backup_quarterback(
@@ -321,27 +357,55 @@ def write_qb_starters_csv(path: str | Path, starters: Mapping[str, str]) -> Path
     return destination
 
 
+_BLOCKED_QB_STATUSES = frozenset(
+    {"O", "OUT", "IR", "D", "DOUBTFUL", "PUP", "NFI", "SUS", "SUSPENDED"}
+)
+
+
+def _record_status(record: Mapping[str, Any]) -> str:
+    return str(
+        record.get("Injury Indicator") or record.get("injury_indicator") or ""
+    ).strip().upper()
+
+
+def _record_salary(record: Mapping[str, Any]) -> int:
+    try:
+        return int(float(record.get("Salary") or record.get("salary") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _record_team_name(record: Mapping[str, Any]) -> tuple[str, str] | None:
+    team = normalize_team_abbr(str(record.get("Team") or record.get("team") or ""))
+    name = str(record.get("Nickname") or record.get("nickname") or "").strip()
+    if not team or not name:
+        return None
+    return team, name
+
+
+def _qb_salary_record(record: Mapping[str, Any]) -> tuple[str, str, int] | None:
+    if canon_position(record.get("Position") or record.get("position")) != "QB":
+        return None
+    if _record_status(record) in _BLOCKED_QB_STATUSES:
+        return None
+    team_name = _record_team_name(record)
+    if team_name is None:
+        return None
+    team, name = team_name
+    return team, name, _record_salary(record)
+
+
 def highest_salary_starters(frame: pd.DataFrame) -> dict[str, str]:
     """Pick the highest-salary active quarterback on each team."""
 
     if frame.empty:
         return {}
-    blocked = {"O", "OUT", "IR", "D", "DOUBTFUL", "PUP", "NFI", "SUS", "SUSPENDED"}
     best: dict[str, tuple[int, str]] = {}
     for record in frame.to_dict(orient="records"):
-        if canon_position(record.get("Position") or record.get("position")) != "QB":
+        found = _qb_salary_record(record)
+        if found is None:
             continue
-        status = str(record.get("Injury Indicator") or record.get("injury_indicator") or "").strip().upper()
-        if status in blocked:
-            continue
-        team = normalize_team_abbr(str(record.get("Team") or record.get("team") or ""))
-        name = str(record.get("Nickname") or record.get("nickname") or "").strip()
-        if not team or not name:
-            continue
-        try:
-            salary = int(float(record.get("Salary") or record.get("salary") or 0))
-        except (TypeError, ValueError):
-            salary = 0
+        team, name, salary = found
         current = best.get(team)
         if current is None or salary > current[0]:
             best[team] = (salary, name)
@@ -576,6 +640,15 @@ def _filter_play_frame(
     return frame, active
 
 
+def _record_name_keys(record: Mapping[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for column in ("full_name", "football_name"):
+        keys |= name_keys(record.get(column))
+    full = f"{record.get('first_name') or ''} {record.get('last_name') or ''}".strip()
+    keys |= name_keys(full)
+    return keys
+
+
 def _roster_names(rosters: pd.DataFrame | None) -> dict[str, set[str]]:
     names: dict[str, set[str]] = defaultdict(set)
     if rosters is None or rosters.empty or "gsis_id" not in rosters.columns:
@@ -584,10 +657,7 @@ def _roster_names(rosters: pd.DataFrame | None) -> dict[str, set[str]]:
         gsis = str(record.get("gsis_id") or "")
         if not gsis:
             continue
-        for column in ("full_name", "football_name"):
-            names[gsis] |= name_keys(record.get(column))
-        full = f"{record.get('first_name') or ''} {record.get('last_name') or ''}".strip()
-        names[gsis] |= name_keys(full)
+        names[gsis] |= _record_name_keys(record)
     return names
 
 
@@ -752,6 +822,46 @@ def _mean_share(
     return sum(values) / len(values)
 
 
+def _first_present(columns: Iterable[str], candidates: tuple[str, ...]) -> str | None:
+    for name in candidates:
+        if name in columns:
+            return name
+    return None
+
+
+def _participation_columns(
+    frame: pd.DataFrame,
+) -> tuple[str, str | None, str | None, str | None] | None:
+    id_column = _first_present(frame.columns, ("gsis_id", "player_id"))
+    if id_column is None or "week" not in frame.columns:
+        return None
+    team_column = _first_present(frame.columns, ("team", "posteam", "recent_team"))
+    route_column = _first_present(
+        frame.columns, ("route_participation", "route_pct", "route_share")
+    )
+    snap_column = _first_present(frame.columns, ("offense_pct", "snap_share", "snap_pct"))
+    if route_column is None and snap_column is None:
+        return None
+    return id_column, team_column, route_column, snap_column
+
+
+def _participation_entry(
+    record: Mapping[str, Any],
+    id_column: str,
+    team_column: str | None,
+    route_column: str | None,
+    snap_column: str | None,
+) -> tuple[tuple[str, str, int], tuple[float | None, float | None]] | None:
+    gsis = str(record.get(id_column) or "")
+    week = record.get("week")
+    if not gsis or pd.isna(week):
+        return None
+    team = _club(record.get(team_column)) if team_column else ""
+    route = _as_share(record.get(route_column)) if route_column else None
+    snap = _as_share(record.get(snap_column)) if snap_column else None
+    return (team, gsis, int(week)), (route, snap)
+
+
 def _participation_index(
     frame: pd.DataFrame | None,
 ) -> dict[tuple[str, str, int], tuple[float | None, float | None]]:
@@ -759,34 +869,19 @@ def _participation_index(
 
     if frame is None or frame.empty:
         return {}
-    id_column = next((name for name in ("gsis_id", "player_id") if name in frame.columns), None)
-    if id_column is None or "week" not in frame.columns:
+    columns = _participation_columns(frame)
+    if columns is None:
         return {}
-    team_column = next((name for name in ("team", "posteam", "recent_team") if name in frame.columns), None)
-    route_column = next(
-        (
-            name
-            for name in ("route_participation", "route_pct", "route_share")
-            if name in frame.columns
-        ),
-        None,
-    )
-    snap_column = next(
-        (name for name in ("offense_pct", "snap_share", "snap_pct") if name in frame.columns),
-        None,
-    )
-    if route_column is None and snap_column is None:
-        return {}
+    id_column, team_column, route_column, snap_column = columns
     found: dict[tuple[str, str, int], tuple[float | None, float | None]] = {}
     for record in frame.to_dict(orient="records"):
-        gsis = str(record.get(id_column) or "")
-        week = record.get("week")
-        if not gsis or pd.isna(week):
+        entry = _participation_entry(
+            record, id_column, team_column, route_column, snap_column
+        )
+        if entry is None:
             continue
-        team = _club(record.get(team_column)) if team_column else ""
-        route = _as_share(record.get(route_column)) if route_column else None
-        snap = _as_share(record.get(snap_column)) if snap_column else None
-        found[(team, gsis, int(week))] = (route, snap)
+        key, value = entry
+        found[key] = value
     return found
 
 
