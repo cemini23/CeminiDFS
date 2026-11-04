@@ -80,6 +80,74 @@ class DraftReplayResult:
     warnings_generated: int = 0
 
 
+_COLUMN_ALIASES = {
+    "draftid": "draft_id",
+    "draft_id": "draft_id",
+    "draft": "draft_id",
+    "round": "round",
+    "rd": "round",
+    "picknum": "pick_num",
+    "pick_num": "pick_num",
+    "pick": "pick_num",
+    "picknumber": "pick_num",
+    "slot": "slot",
+    "draftslot": "slot",
+    "draft_slot": "slot",
+    "playername": "player_name",
+    "player_name": "player_name",
+    "name": "player_name",
+    "player": "player_name",
+    "pos": "position",
+    "position": "position",
+    "team": "team",
+    "nflteam": "team",
+    "adp": "adp",
+    "averageadp": "adp",
+    "avgadp": "adp",
+}
+
+
+def _normalize_field(field: str) -> str:
+    return field.lower().replace("_", "").replace(" ", "")
+
+
+def _field_map(fieldnames: List[str]) -> Dict[str, str]:
+    field_map: Dict[str, str] = {}
+    for column in fieldnames:
+        mapped = _COLUMN_ALIASES.get(_normalize_field(column))
+        if mapped is not None:
+            field_map[column] = mapped
+    return field_map
+
+
+def _normalized_row(row: Dict[str, Any], field_map: Dict[str, str]) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {}
+    for key, value in row.items():
+        if key is None:
+            continue
+        normalized[field_map.get(key, _normalize_field(key))] = value
+    return normalized
+
+
+def _pick_from_row(normalized: Dict[str, Any]) -> Dict[str, Any] | None:
+    try:
+        pick = {
+            "draft_id": str(normalized.get("draft_id", "")),
+            "round": int(normalized.get("round", 0)),
+            "pick_num": int(normalized.get("pick_num", 0)),
+            "slot": int(normalized.get("slot", 0)),
+            "player_name": str(normalized.get("player_name", "")).strip(),
+            "position": str(normalized.get("position", "")).upper().strip(),
+            "team": str(normalized.get("team", "")).upper().strip(),
+            "adp": float(normalized.get("adp", 999)),
+        }
+    except (ValueError, TypeError):
+        return None
+    if pick["draft_id"] and pick["player_name"]:
+        return pick
+    return None
+
+
 def load_pick_csv(path: Path | str) -> List[Dict[str, Any]]:
     """Load picks from CSV with tolerant parser.
 
@@ -100,54 +168,13 @@ def load_pick_csv(path: Path | str) -> List[Dict[str, Any]]:
 
     with open(path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-
-        # Normalize column names
-        field_map: Dict[str, str] = {}
-        if reader.fieldnames:
-            for field in reader.fieldnames:
-                normalized = field.lower().replace("_", "").replace(" ", "")
-                if normalized in ["draftid", "draft_id", "draft"]:
-                    field_map[field] = "draft_id"
-                elif normalized in ["round", "rd"]:
-                    field_map[field] = "round"
-                elif normalized in ["picknum", "pick_num", "pick", "picknumber"]:
-                    field_map[field] = "pick_num"
-                elif normalized in ["slot", "draftslot", "draft_slot"]:
-                    field_map[field] = "slot"
-                elif normalized in ["playername", "player_name", "name", "player"]:
-                    field_map[field] = "player_name"
-                elif normalized in ["pos", "position"]:
-                    field_map[field] = "position"
-                elif normalized in ["team", "nflteam"]:
-                    field_map[field] = "team"
-                elif normalized in ["adp", "averageadp", "avgadp"]:
-                    field_map[field] = "adp"
-
-            for row in reader:
-                normalized: Dict[str, Any] = {}
-                for key, value in row.items():
-                    if key is None:
-                        continue
-                    safe_key = key or ""
-                    mapped_key = field_map.get(key, safe_key.lower().replace("_", "").replace(" ", ""))
-                    normalized[mapped_key] = value
-
-                # Parse numeric fields
-                try:
-                    pick = {
-                        "draft_id": str(normalized.get("draft_id", "")),
-                        "round": int(normalized.get("round", 0)),
-                        "pick_num": int(normalized.get("pick_num", 0)),
-                        "slot": int(normalized.get("slot", 0)),
-                        "player_name": str(normalized.get("player_name", "")).strip(),
-                        "position": str(normalized.get("position", "")).upper().strip(),
-                        "team": str(normalized.get("team", "")).upper().strip(),
-                        "adp": float(normalized.get("adp", 999)),
-                    }
-                    if pick["draft_id"] and pick["player_name"]:
-                        picks.append(pick)
-                except (ValueError, TypeError):
-                    continue
+        if not reader.fieldnames:
+            return picks
+        field_map = _field_map(reader.fieldnames)
+        for row in reader:
+            pick = _pick_from_row(_normalized_row(row, field_map))
+            if pick is not None:
+                picks.append(pick)
 
     return picks
 
