@@ -75,6 +75,62 @@ def opponent_team(player: Any) -> str:
     return ""
 
 
+def _pass_mates(qb: Any, players: list[Any]) -> list[Any]:
+    qb_team = player_team(qb)
+    return [
+        player
+        for player in players
+        if player is not qb
+        and player_team(player) == qb_team
+        and player_positions(player).intersection({"WR", "TE", "RB"})
+    ]
+
+
+def _bring_backs(players: list[Any], opp: str) -> list[Any]:
+    return [
+        player
+        for player in players
+        if player_team(player) == opp and not player_positions(player).issubset(DST_POSITIONS)
+    ]
+
+
+def _same_team_wrs(qb: Any, players: list[Any]) -> list[Any]:
+    qb_team = player_team(qb)
+    return [
+        player
+        for player in players
+        if player is not qb
+        and player_team(player) == qb_team
+        and "WR" in player_positions(player)
+    ]
+
+
+def _qb_badges(qb: Any, players: list[Any], team_counts: Counter[str]) -> list[str]:
+    badges: list[str] = []
+    qb_team = player_team(qb)
+    mates = _pass_mates(qb, players)
+    if mates:
+        badges.append(f"QB+{len(mates)} {qb_team}")
+    opp = opponent_team(qb)
+    if opp:
+        bring_backs = _bring_backs(players, opp)
+        if bring_backs:
+            badges.append(f"BRING-BACK {opp} x{len(bring_backs)}")
+        if qb_team:
+            badges.append(
+                f"GAME {qb_team}-{opp} {team_counts.get(qb_team, 0)}-{team_counts.get(opp, 0)}"
+            )
+    if len(_same_team_wrs(qb, players)) >= 2:
+        badges.append("CHALK-QB-WR-WR")
+    return badges
+
+
+def _add_team_badges(badges: list[str], team_counts: Counter[str]) -> None:
+    for team, count in team_counts.most_common():
+        if count >= 2 and all(team not in badge for badge in badges):
+            badges.append(f"{team} x{count}")
+
+
 def lineup_stack_badges(lineup: Any) -> list[str]:
     """Return short badges such as ``QB+2 CIN`` and ``BRING-BACK TB x1``."""
 
@@ -84,48 +140,8 @@ def lineup_stack_badges(lineup: Any) -> list[str]:
 
     team_counts = Counter(player_team(player) for player in players if player_team(player))
     qb = next((player for player in players if "QB" in player_positions(player)), None)
-    badges: list[str] = []
-
-    if qb is not None:
-        qb_team = player_team(qb)
-        pass_mates = [
-            player
-            for player in players
-            if player is not qb
-            and player_team(player) == qb_team
-            and player_positions(player).intersection({"WR", "TE", "RB"})
-        ]
-        if pass_mates:
-            badges.append(f"QB+{len(pass_mates)} {qb_team}")
-        opp = opponent_team(qb)
-        if opp:
-            bring_backs = [
-                player
-                for player in players
-                if player_team(player) == opp and not player_positions(player).issubset(DST_POSITIONS)
-            ]
-            if bring_backs:
-                badges.append(f"BRING-BACK {opp} x{len(bring_backs)}")
-            home = qb_team
-            away = opp
-            if home and away:
-                left = team_counts.get(home, 0)
-                right = team_counts.get(away, 0)
-                badges.append(f"GAME {home}-{away} {left}-{right}")
-        same_team_wrs = [
-            player
-            for player in players
-            if player is not qb
-            and player_team(player) == qb_team
-            and "WR" in player_positions(player)
-        ]
-        if len(same_team_wrs) >= 2:
-            badges.append("CHALK-QB-WR-WR")
-
-    for team, count in team_counts.most_common():
-        if count >= 2 and all(team not in badge for badge in badges):
-            badges.append(f"{team} x{count}")
-
+    badges = _qb_badges(qb, players, team_counts) if qb is not None else []
+    _add_team_badges(badges, team_counts)
     return badges
 
 
