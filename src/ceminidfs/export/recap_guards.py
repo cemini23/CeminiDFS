@@ -546,6 +546,112 @@ def _club(value: object) -> str:
     return normalize_team_abbr(text)
 
 
+class _Bucket:
+    def __init__(self) -> None:
+        self.targets = 0
+        self.carries = 0
+        self.snaps = 0
+        self.team_targets = 0
+        self.route_share: float | None = None
+        self.snap_share: float | None = None
+
+
+def _filter_play_frame(
+    pbp: pd.DataFrame,
+    season: int,
+    before_week: int,
+) -> tuple[pd.DataFrame | None, frozenset[str]]:
+    frame = pbp.copy()
+    if "season" in frame.columns:
+        frame = frame.loc[pd.to_numeric(frame["season"], errors="coerce").eq(int(season))].copy()
+    frame["week"] = pd.to_numeric(frame.get("week"), errors="coerce")
+    frame = frame.loc[frame["week"].lt(int(before_week)) & frame["week"].notna()].copy()
+    if frame.empty or "posteam" not in frame.columns:
+        return None, frozenset()
+    frame["team"] = frame["posteam"].map(_club)
+    frame = frame.loc[frame["team"].ne("")].copy()
+    active = frozenset(frame["team"].dropna().astype(str))
+    if frame.empty:
+        return None, active
+    return frame, active
+
+
+def _roster_names(rosters: pd.DataFrame | None) -> dict[str, set[str]]:
+    names: dict[str, set[str]] = defaultdict(set)
+    if rosters is None or rosters.empty or "gsis_id" not in rosters.columns:
+        return names
+    for record in rosters.to_dict(orient="records"):
+        gsis = str(record.get("gsis_id") or "")
+        if not gsis:
+            continue
+        for column in ("full_name", "football_name"):
+            names[gsis] |= name_keys(record.get(column))
+        full = f"{record.get('first_name') or ''} {record.get('last_name') or ''}".strip()
+        names[gsis] |= name_keys(full)
+    return names
+
+
+def _player_opportunity(
+    rows: list[tuple[int, int, int, int]],
+    team: str,
+    gsis: str,
+    team_week_targets: Mapping[tuple[str, int], int],
+    snap_window: Mapping[str, set[int]],
+    shares: Mapping[tuple[str, str, int], tuple[float | None, float | None]],
+    active_games: int,
+) -> tuple[int, int, int, int, float | None, float | None]:
+    rows.sort()
+    active_rows = [row for row in rows if row[1] + row[2] > 0]
+    chosen = active_rows[-int(active_games) :]
+    targets = sum(row[1] for row in chosen)
+    carries = sum(row[2] for row in chosen)
+    chosen_weeks = [row[0] for row in chosen]
+    team_targets = sum(team_week_targets.get((team, week_no), 0) for week_no in chosen_weeks)
+    window = snap_window.get(team, set())
+    snaps = sum(row[3] for row in rows if row[0] in window)
+    route_share = _mean_share(shares, team, gsis, chosen_weeks, 0)
+    snap_share = _mean_share(shares, team, gsis, chosen_weeks, 1)
+    return targets, carries, snaps, team_targets, route_share, snap_share
+
+
+def _fill_buckets(
+    by_player: dict[tuple[str, str], list[tuple[int, int, int, int]]],
+    team_week_targets: Mapping[tuple[str, int], int],
+    snap_window: Mapping[str, set[int]],
+    shares: Mapping[tuple[str, str, int], tuple[float | None, float | None]],
+    names: Mapping[str, set[str]],
+    active_games: int,
+) -> dict[tuple[str, str], _Bucket]:
+    by_name: dict[tuple[str, str], _Bucket] = defaultdict(_Bucket)
+    for (team, gsis), rows in by_player.items():
+        targets, carries, snaps, team_targets, route_share, snap_share = _player_opportunity(
+            rows, team, gsis, team_week_targets, snap_window, shares, active_games
+        )
+        for key in names.get(gsis, set()):
+            bucket = by_name[(team, key)]
+            bucket.targets += int(targets)
+            bucket.carries += int(carries)
+            bucket.snaps += int(snaps)
+            bucket.team_targets = max(bucket.team_targets, int(team_targets))
+            bucket.route_share = _max_share(bucket.route_share, route_share)
+            bucket.snap_share = _max_share(bucket.snap_share, snap_share)
+    return by_name
+
+
+def _pack_opportunities(by_name: Mapping[tuple[str, str], _Bucket]) -> dict[tuple[str, str], Opportunity]:
+    return {
+        key: Opportunity(
+            targets=bucket.targets,
+            carries=bucket.carries,
+            snaps=bucket.snaps,
+            team_targets=bucket.team_targets,
+            route_share=bucket.route_share,
+            snap_share=bucket.snap_share,
+        )
+        for key, bucket in by_name.items()
+    }
+
+
 def build_opportunity_index(
     pbp: pd.DataFrame,
     rosters: pd.DataFrame | None = None,
@@ -564,29 +670,11 @@ def build_opportunity_index(
 
     if pbp is None or pbp.empty:
         return OpportunityIndex(by_name={}, active_teams=frozenset())
-    frame = pbp.copy()
-    if "season" in frame.columns:
-        frame = frame.loc[pd.to_numeric(frame["season"], errors="coerce").eq(int(season))].copy()
-    frame["week"] = pd.to_numeric(frame.get("week"), errors="coerce")
-    frame = frame.loc[frame["week"].lt(int(before_week)) & frame["week"].notna()].copy()
-    if frame.empty or "posteam" not in frame.columns:
-        return OpportunityIndex(by_name={}, active_teams=frozenset())
-    frame["team"] = frame["posteam"].map(_club)
-    frame = frame.loc[frame["team"].ne("")].copy()
-    active = frozenset(frame["team"].dropna().astype(str))
-    if frame.empty:
+    frame, active = _filter_play_frame(pbp, season, before_week)
+    if frame is None:
         return OpportunityIndex(by_name={}, active_teams=active)
 
-    names: dict[str, set[str]] = defaultdict(set)
-    if rosters is not None and not rosters.empty and "gsis_id" in rosters.columns:
-        for record in rosters.to_dict(orient="records"):
-            gsis = str(record.get("gsis_id") or "")
-            if not gsis:
-                continue
-            for column in ("full_name", "football_name"):
-                names[gsis] |= name_keys(record.get(column))
-            full = f"{record.get('first_name') or ''} {record.get('last_name') or ''}".strip()
-            names[gsis] |= name_keys(full)
+    names = _roster_names(rosters)
 
     # (team, gsis, week) -> [targets, carries, snaps]
     cells: dict[tuple[str, str, int], list[int]] = defaultdict(lambda: [0, 0, 0])
@@ -632,48 +720,10 @@ def build_opportunity_index(
     }
     shares = _participation_index(participation)
 
-    class _Bucket:
-        def __init__(self) -> None:
-            self.targets = 0
-            self.carries = 0
-            self.snaps = 0
-            self.team_targets = 0
-            self.route_share: float | None = None
-            self.snap_share: float | None = None
-
-    by_name: dict[tuple[str, str], _Bucket] = defaultdict(_Bucket)
-    for (team, gsis), rows in by_player.items():
-        rows.sort()
-        active_rows = [row for row in rows if row[1] + row[2] > 0]
-        chosen = active_rows[-int(active_games) :]
-        targets = sum(row[1] for row in chosen)
-        carries = sum(row[2] for row in chosen)
-        chosen_weeks = [row[0] for row in chosen]
-        team_targets = sum(team_week_targets.get((team, week_no), 0) for week_no in chosen_weeks)
-        window = snap_window.get(team, set())
-        snaps = sum(row[3] for row in rows if row[0] in window)
-        route_share = _mean_share(shares, team, gsis, chosen_weeks, 0)
-        snap_share = _mean_share(shares, team, gsis, chosen_weeks, 1)
-        for key in names.get(gsis, set()):
-            bucket = by_name[(team, key)]
-            bucket.targets += int(targets)
-            bucket.carries += int(carries)
-            bucket.snaps += int(snaps)
-            bucket.team_targets = max(bucket.team_targets, int(team_targets))
-            bucket.route_share = _max_share(bucket.route_share, route_share)
-            bucket.snap_share = _max_share(bucket.snap_share, snap_share)
-    packed = {
-        key: Opportunity(
-            targets=bucket.targets,
-            carries=bucket.carries,
-            snaps=bucket.snaps,
-            team_targets=bucket.team_targets,
-            route_share=bucket.route_share,
-            snap_share=bucket.snap_share,
-        )
-        for key, bucket in by_name.items()
-    }
-    return OpportunityIndex(by_name=packed, active_teams=active)
+    by_name = _fill_buckets(
+        by_player, team_week_targets, snap_window, shares, names, active_games
+    )
+    return OpportunityIndex(by_name=_pack_opportunities(by_name), active_teams=active)
 
 
 def _max_share(left: float | None, right: float | None) -> float | None:
