@@ -1337,6 +1337,154 @@ def set_nicknames(players: Sequence[PoolPlayer]) -> None:
         _NICKNAMES[player.player_id] = player.nickname
 
 
+def _max_shared(keys: Sequence[frozenset[str]]) -> int:
+    best = 0
+    for index, left in enumerate(keys):
+        for right in keys[index + 1 :]:
+            best = max(best, len(left & right))
+    return best
+
+
+def _verify_item_shape(item: Candidate) -> None:
+    assert len(item.ids) == 9
+    assert item.salary <= MAX_SALARY
+    assert item.catchers >= 1
+    assert not item.dst_conflict
+
+
+def _count_item(
+    item: Candidate,
+    meta: Mapping[str, PoolPlayer],
+    prefix: str | None,
+    banned: set[str],
+    banned_clubs: frozenset[str],
+    counts: Counter[str],
+    games: Counter[str],
+    pair_counts: Counter[tuple[str, str]],
+) -> None:
+    games[item.game] += 1
+    pair_counts.update(rb_pairs(item))
+    for pid in item.ids:
+        if prefix:
+            assert pid.startswith(prefix), pid
+        assert pid not in banned, pid
+        assert meta[pid].team not in banned_clubs
+        counts[pid] += 1
+
+
+def _verify_exposure(
+    counts: Mapping[str, int],
+    meta: Mapping[str, PoolPlayer],
+    limits: Mapping[str, int],
+    person_caps: Mapping[str, int],
+) -> None:
+    for pid, used in counts.items():
+        cap = limits[meta[pid].position]
+        if pid in person_caps:
+            cap = min(cap, person_caps[pid])
+        assert used <= cap, f"{meta[pid].nickname} {used} > {cap}"
+
+
+def _verify_pairs(
+    pair_counts: Mapping[tuple[str, str], int],
+    pair_cap: int | None,
+) -> None:
+    if pair_cap is None:
+        return
+    for pair, used in pair_counts.items():
+        assert used <= pair_cap, f"rb pair {pair} {used} > {pair_cap}"
+
+
+def _rb_te_stats(
+    book: Sequence[Candidate],
+    teams: Mapping[str, str],
+) -> tuple[Counter[tuple[str, str]], int]:
+    rb_te_counts: Counter[tuple[str, str]] = Counter()
+    unstacked = 0
+    for item in book:
+        for pair, stacked in same_team_rb_te(item, teams):
+            if stacked:
+                rb_te_counts[pair] += 1
+            else:
+                unstacked += 1
+    return rb_te_counts, unstacked
+
+
+def _verify_rb_te(
+    rb_te_counts: Mapping[tuple[str, str], int],
+    unstacked: int,
+    rb_te_cap: int | None,
+) -> None:
+    if rb_te_cap is None:
+        return
+    assert unstacked == 0, f"unstacked rb+te {unstacked}"
+    for pair, used in rb_te_counts.items():
+        assert used <= rb_te_cap, f"rb+te {pair} {used} > {rb_te_cap}"
+
+
+def _resolve_options(
+    caps: Mapping[str, int] | None,
+    banned_teams: frozenset[str] | None,
+    contest_prefix: str | None,
+    player_caps: Mapping[str, int] | None,
+    count: int | None,
+) -> tuple[dict[str, int], frozenset[str], str, dict[str, int], int]:
+    limits = dict(EXPOSURE_CAPS if caps is None else caps)
+    banned_clubs = BANNED_TEAMS if banned_teams is None else banned_teams
+    prefix = CONTEST_PREFIX if contest_prefix is None else contest_prefix
+    person_caps = dict(player_caps or {})
+    target = BOOK_SIZE if count is None else count
+    return limits, banned_clubs, prefix, person_caps, target
+
+
+def _meta_maps(
+    players: Sequence[PoolPlayer],
+) -> tuple[dict[str, PoolPlayer], set[str]]:
+    meta = {player.player_id: player for player in players}
+    banned = {player.player_id for player in players if player.never_enter}
+    return meta, banned
+
+
+def _book_keys(book: Sequence[Candidate], target: int) -> list[frozenset[str]]:
+    assert len(book) == target, f"lineups {len(book)}"
+    keys = [item.key for item in book]
+    assert len(set(keys)) == target, "duplicate lineups"
+    return keys
+
+
+def _book_totals(
+    book: Sequence[Candidate],
+    meta: Mapping[str, PoolPlayer],
+    prefix: str | None,
+    banned: set[str],
+    banned_clubs: frozenset[str],
+) -> tuple[Counter[str], Counter[str], Counter[tuple[str, str]], int, int, int]:
+    counts: Counter[str] = Counter()
+    games: Counter[str] = Counter()
+    pair_counts: Counter[tuple[str, str]] = Counter()
+    bring = 0
+    secondary = 0
+    under_floor = 0
+    for item in book:
+        _verify_item_shape(item)
+        if item.salary < MIN_SALARY:
+            under_floor += 1
+        bring += int(item.bringback)
+        secondary += int(item.secondary)
+        _count_item(item, meta, prefix, banned, banned_clubs, counts, games, pair_counts)
+    return counts, games, pair_counts, bring, secondary, under_floor
+
+
+def _verify_totals(under_floor: int, bring: int, secondary: int) -> None:
+    assert under_floor <= CHEAP_LIMIT
+    assert bring >= BRINGBACK_MIN, f"bring-back {bring}"
+    assert secondary >= SECONDARY_MIN, f"secondary {secondary}"
+
+
+def _paid_count(book: Sequence[Candidate]) -> int:
+    return sum(1 for item in book if item.salary >= MIN_SALARY)
+
+
 def verify_book(
     book: Sequence[Candidate],
     players: Sequence[PoolPlayer],
@@ -1351,70 +1499,23 @@ def verify_book(
 ) -> dict[str, Any]:
     """Raise AssertionError when the book breaks a portfolio rule."""
 
-    limits = dict(EXPOSURE_CAPS if caps is None else caps)
-    banned_clubs = BANNED_TEAMS if banned_teams is None else banned_teams
-    prefix = CONTEST_PREFIX if contest_prefix is None else contest_prefix
-    person_caps = dict(player_caps or {})
-    target = BOOK_SIZE if count is None else count
-    meta = {player.player_id: player for player in players}
-    banned = {player.player_id for player in players if player.never_enter}
-    assert len(book) == target, f"lineups {len(book)}"
-    keys = [item.key for item in book]
-    assert len(set(keys)) == target, "duplicate lineups"
-    max_share = 0
-    for index, left in enumerate(keys):
-        for right in keys[index + 1 :]:
-            max_share = max(max_share, len(left & right))
+    limits, banned_clubs, prefix, person_caps, target = _resolve_options(
+        caps, banned_teams, contest_prefix, player_caps, count
+    )
+    meta, banned = _meta_maps(players)
+    keys = _book_keys(book, target)
+    max_share = _max_shared(keys)
     assert max_share <= MAX_SHARED, f"max share {max_share}"
-    counts: Counter[str] = Counter()
-    games: Counter[str] = Counter()
-    pair_counts: Counter[tuple[str, str]] = Counter()
-    bring = 0
-    secondary = 0
-    under_floor = 0
-    for item in book:
-        assert len(item.ids) == 9
-        assert item.salary <= MAX_SALARY
-        assert item.catchers >= 1
-        assert not item.dst_conflict
-        if item.salary < MIN_SALARY:
-            under_floor += 1
-        bring += int(item.bringback)
-        secondary += int(item.secondary)
-        games[item.game] += 1
-        pair_counts.update(rb_pairs(item))
-        for pid in item.ids:
-            if prefix:
-                assert pid.startswith(prefix), pid
-            assert pid not in banned, pid
-            player = meta[pid]
-            assert player.team not in banned_clubs
-            counts[pid] += 1
-    assert under_floor <= CHEAP_LIMIT
-    assert bring >= BRINGBACK_MIN, f"bring-back {bring}"
-    assert secondary >= SECONDARY_MIN, f"secondary {secondary}"
-    for pid, used in counts.items():
-        cap = limits[meta[pid].position]
-        if pid in person_caps:
-            cap = min(cap, person_caps[pid])
-        assert used <= cap, f"{meta[pid].nickname} {used} > {cap}"
-    if pair_cap is not None:
-        for pair, used in pair_counts.items():
-            assert used <= pair_cap, f"rb pair {pair} {used} > {pair_cap}"
+    counts, games, pair_counts, bring, secondary, under_floor = _book_totals(
+        book, meta, prefix, banned, banned_clubs
+    )
+    _verify_totals(under_floor, bring, secondary)
+    _verify_exposure(counts, meta, limits, person_caps)
+    _verify_pairs(pair_counts, pair_cap)
     teams = {pid: player.team for pid, player in meta.items()}
-    rb_te_counts: Counter[tuple[str, str]] = Counter()
-    unstacked_rb_te = 0
-    for item in book:
-        for pair, stacked in same_team_rb_te(item, teams):
-            if stacked:
-                rb_te_counts[pair] += 1
-            else:
-                unstacked_rb_te += 1
-    if rb_te_cap is not None:
-        assert unstacked_rb_te == 0, f"unstacked rb+te {unstacked_rb_te}"
-        for pair, used in rb_te_counts.items():
-            assert used <= rb_te_cap, f"rb+te {pair} {used} > {rb_te_cap}"
-    paid = sum(1 for item in book if item.salary >= MIN_SALARY)
+    rb_te_counts, unstacked_rb_te = _rb_te_stats(book, teams)
+    _verify_rb_te(rb_te_counts, unstacked_rb_te, rb_te_cap)
+    paid = _paid_count(book)
     assert paid >= math.ceil(0.90 * target)
     return {
         "lineups": len(book),
