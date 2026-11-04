@@ -173,13 +173,27 @@ def opportunity_blocked(
         return False
     if int(targets) < RECEIVER_TARGET_FLOOR:
         return True
-    known = [team_target_share, route_share, snap_share]
-    if all(value is None for value in known):
+    return _receiver_share_blocked(team_target_share, route_share, snap_share)
+
+
+def _share_clears_floor(share: float | None, floor: float) -> bool:
+    return share is not None and float(share) >= floor
+
+
+def _receiver_share_blocked(
+    team_target_share: float | None,
+    route_share: float | None,
+    snap_share: float | None,
+) -> bool:
+    if all(value is None for value in (team_target_share, route_share, snap_share)):
         return False
-    team_ok = team_target_share is not None and float(team_target_share) >= TARGET_SHARE_FLOOR
-    route_ok = route_share is not None and float(route_share) >= ROUTE_SHARE_FLOOR
-    snap_ok = snap_share is not None and float(snap_share) >= ROUTE_SHARE_FLOOR
-    return not (team_ok or route_ok or snap_ok)
+    if _share_clears_floor(team_target_share, TARGET_SHARE_FLOOR):
+        return False
+    if _share_clears_floor(route_share, ROUTE_SHARE_FLOOR):
+        return False
+    if _share_clears_floor(snap_share, ROUTE_SHARE_FLOOR):
+        return False
+    return True
 
 
 def cheap_season_blocked(position: object, salary: int, played: int, fppg: float) -> bool:
@@ -412,34 +426,29 @@ def highest_salary_starters(frame: pd.DataFrame) -> dict[str, str]:
     return {team: name for team, (_salary, name) in best.items()}
 
 
-def environment_scale(roof: object, wind_mph: object, position: object) -> float:
-    """Scale a tail for open-air wind. A dome or a closed roof stays at 1."""
+_WIND_SCALES_STRONG = {"QB": 0.90, "WR": 0.90, "RB": 1.08, "TE": 1.04}
+_WIND_SCALES_MEDIUM = {"WR": 0.97, "RB": 1.05, "TE": 1.05, "QB": 0.99}
 
-    roof_key = str(roof or "").strip().lower()
-    if roof_key != "open":
-        return 1.0
+
+def _wind_speed(wind_mph: object) -> float:
     try:
         wind = float(wind_mph)
     except (TypeError, ValueError):
-        wind = 0.0
-    if not math.isfinite(wind):
-        wind = 0.0
+        return 0.0
+    return wind if math.isfinite(wind) else 0.0
+
+
+def environment_scale(roof: object, wind_mph: object, position: object) -> float:
+    """Scale a tail for open-air wind. A dome or a closed roof stays at 1."""
+
+    if str(roof or "").strip().lower() != "open":
+        return 1.0
+    wind = _wind_speed(wind_mph)
     pos = canon_position(position)
     if wind >= 15:
-        if pos in {"QB", "WR"}:
-            return 0.90
-        if pos == "RB":
-            return 1.08
-        if pos == "TE":
-            return 1.04
-        return 1.0
+        return _WIND_SCALES_STRONG.get(pos, 1.0)
     if wind >= 10:
-        if pos == "WR":
-            return 0.97
-        if pos in {"RB", "TE"}:
-            return 1.05
-        if pos == "QB":
-            return 0.99
+        return _WIND_SCALES_MEDIUM.get(pos, 1.0)
     return 1.0
 
 
