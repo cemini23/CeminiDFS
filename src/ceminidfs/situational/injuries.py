@@ -1,8 +1,8 @@
 """Pre-game injury flags and vacated-opportunity redistribution.
 
 Week injury rows are report labels. They are not play-by-play results.
-Out and IR players are zeroed. Their targets and red-zone touches move
-to active teammates on the salary-file team.
+Out, IR, and Doubtful players are zeroed. Their targets, carries, and
+red-zone touches move to active teammates on the salary-file team.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from ceminidfs.data.fetch import week_cache_dir
 
 OUT_TOKENS = {"O", "OUT", "IR"}
 DOUBT_TOKENS = {"D", "DOUBTFUL"}
+# Out, IR, and Doubtful rows donate usage. A Doubtful player is not a receiver.
+VACUUM_DONOR_TOKENS = OUT_TOKENS | DOUBT_TOKENS
 REPORT_OUT = {"OUT", "IR"}
 REPORT_DOUBT = {"DOUBTFUL"}
 # A non-rotation mate does not inherit vacated targets or carries.
@@ -52,7 +54,7 @@ def apply_injury_vacuum(frame: pd.DataFrame, injuries: pd.DataFrame | None) -> p
     if out.empty or ("team" not in out.columns and "salary_team" not in out.columns):
         return out
     status = out["injury_status"].astype(str).str.upper()
-    donors = status.isin(OUT_TOKENS)
+    donors = status.isin(VACUUM_DONOR_TOKENS)
     if bool(donors.any()):
         out = _redistribute(out, donors)
     out.loc[donors, "lagged_fd"] = 0.0

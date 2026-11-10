@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import csv
 import math
+import re
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from ceminidfs.export.mme_portfolio import Candidate, PoolPlayer
 
 import pandas as pd
 
@@ -545,23 +549,45 @@ def _archive_labels(
     return date, contest
 
 
+def _place_copy(src: Path, dest: Path) -> Path:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.resolve() != src.resolve():
+        shutil.copyfile(src, dest)
+    if not dest.is_file() or dest.stat().st_size != src.stat().st_size:
+        raise OSError(f"salary copy failed: {dest}")
+    return dest
+
+
 def _recap_copy(
     src: Path,
     date: str,
     contest: str,
     root: Path,
-) -> tuple[Path | None, str]:
-    if not root.is_dir():
-        return None, "skipped: dfs-recap root is absent"
+    slate_root: Path,
+) -> tuple[list[Path], str]:
+    """Copy the salary file to the recap gate path and the players path.
+
+    The gate file is ``{root}/{date}/_src_fd_sun.csv``. The players file is
+    ``{root}/{date}/in/fd_players_{contest}.csv``. A slate root that exists
+    also receives ``{date}/_src_fd_sun.csv``.
+    """
+
+    written: list[Path] = []
+    notes: list[str] = []
     if not date:
-        return None, "skipped: slate date is absent"
-    target = root / date / "in" / f"fd_players_{contest}.csv"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.resolve() != src.resolve():
-        shutil.copyfile(src, target)
-    if not target.is_file() or target.stat().st_size != src.stat().st_size:
-        raise OSError(f"salary copy failed: {target}")
-    return target, str(target)
+        return written, "skipped: slate date is absent"
+    if root.is_dir():
+        gate = _place_copy(src, root / date / "_src_fd_sun.csv")
+        players = _place_copy(src, root / date / "in" / f"fd_players_{contest}.csv")
+        written.extend((gate, players))
+        notes.append(str(players))
+    else:
+        notes.append("skipped: dfs-recap root is absent")
+    if slate_root.is_dir():
+        slate_copy = _place_copy(src, slate_root / date / "_src_fd_sun.csv")
+        written.append(slate_copy)
+        notes.append(str(slate_copy))
+    return written, "; ".join(notes)
 
 
 def _count_rows(src: Path) -> int:
@@ -572,6 +598,26 @@ def _count_rows(src: Path) -> int:
     return max(rows, 0)
 
 
+def _write_text(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    if not path.is_file():
+        raise OSError(f"fade audit failed: {path}")
+    return path
+
+
+def _desk_audit_dir(audit_dir: str | Path | None) -> Path:
+    if audit_dir is not None:
+        return Path(audit_dir)
+    from ceminidfs.pipeline.fade_coverage import WEEK_REPORT_DIR
+
+    return WEEK_REPORT_DIR
+
+
+def _fade_name(week: int) -> str:
+    return f"fade-coverage-w{int(week)}.md"
+
+
 def _write_fade_audit(
     run_dir: Path,
     season: int,
@@ -580,8 +626,12 @@ def _write_fade_audit(
     run_copy: Path,
     recap_note: str,
     rows: int,
-) -> Path:
-    audit = run_dir / f"fade-coverage-w{int(week)}.md"
+    *,
+    recap_root: Path | None = None,
+    slate_date: str = "",
+    audit_dir: Path | None = None,
+) -> list[Path]:
+    audit = run_dir / _fade_name(week)
     lines = [
         f"# Fade coverage audit — {int(season)} week {int(week)}",
         "",
@@ -592,11 +642,19 @@ def _write_fade_audit(
         f"- recap copy: {recap_note}",
         f"- rows: {rows}",
         "",
+        "Team exposure is written after the book is selected.",
+        "",
     ]
-    audit.write_text("\n".join(lines), encoding="utf-8")
-    if not audit.is_file():
-        raise OSError(f"fade audit failed: {audit}")
-    return audit
+    text = "\n".join(lines)
+    written = [_write_text(audit, text)]
+    # Keep an existing post-game report. Create the desk file when it is missing.
+    desk = _desk_audit_dir(audit_dir) / _fade_name(week)
+    if not desk.is_file():
+        written.append(_write_text(desk, text))
+    if recap_root is not None and recap_root.is_dir() and slate_date:
+        recap_audit = recap_root / slate_date / _fade_name(week)
+        written.append(_write_text(recap_audit, text))
+    return written
 
 
 def prelock_salary_archive(
@@ -608,12 +666,15 @@ def prelock_salary_archive(
     slate_date: str | None = None,
     fixture_id: str | None = None,
     recap_root: str | Path = "/workspace/dfs-recap",
+    slate_root: str | Path = "/workspace/dfs-slate",
+    audit_dir: str | Path | None = None,
 ) -> list[Path]:
     """Copy the salary file before a solve. Fail when the run copy fails.
 
     Writes ``runs/.../_src_fd_sun.csv`` and ``fade-coverage-w{week}.md``.
-    When ``recap_root`` exists, also writes
-    ``{slate_date}/in/fd_players_{fixture_id}.csv``.
+    When ``recap_root`` exists, also writes ``{date}/_src_fd_sun.csv`` and
+    ``{date}/in/fd_players_{fixture_id}.csv``. When ``slate_root`` exists,
+    also writes ``{date}/_src_fd_sun.csv`` there.
     """
 
     src = Path(source)
@@ -627,13 +688,29 @@ def prelock_salary_archive(
         raise OSError(f"salary copy failed: {run_copy}")
 
     date, contest = _archive_labels(src, slate_date, fixture_id)
-    recap_copy, recap_note = _recap_copy(src, date, contest, Path(recap_root))
-    if recap_copy is not None:
-        written.append(recap_copy)
+    recap_copies, recap_note = _recap_copy(
+        src,
+        date,
+        contest,
+        Path(recap_root),
+        Path(slate_root),
+    )
+    written.extend(recap_copies)
 
     rows = _count_rows(src)
-    audit = _write_fade_audit(run_dir, season, week, src, run_copy, recap_note, rows)
-    written.append(audit)
+    audits = _write_fade_audit(
+        run_dir,
+        season,
+        week,
+        src,
+        run_copy,
+        recap_note,
+        rows,
+        recap_root=Path(recap_root),
+        slate_date=date,
+        audit_dir=None if audit_dir is None else Path(audit_dir),
+    )
+    written.extend(audits)
     return written
 
 
@@ -963,3 +1040,336 @@ def lookup_opportunity(
     if not hits:
         return Opportunity(0, 0, 0)
     return max(hits, key=lambda item: (item.targets + item.carries, item.snaps))
+
+
+_UNDER_FADE = re.compile(r"\b(?:rush_yds|rec_yds|pass_yds)\b\s+UNDER\b", re.IGNORECASE)
+_MARKET_RE = re.compile(r"\b(?:rush_yds|rec_yds|pass_yds)\b", re.IGNORECASE)
+_POS_TAIL = frozenset({"QB", "RB", "WR", "TE", "DST", "FLEX"})
+_CONFIRM_TRUE = frozenset({"1", "true", "yes", "y", "active"})
+_NAME_FIELDS = ("player", "player name", "name", "nickname")
+_MARKET_FIELDS = ("market", "stat", "prop", "market name")
+_SIDE_FIELDS = ("side", "direction", "pick", "lean")
+_FRAGILE_RB_SALARY = 6500
+_FRAGILE_TOUCHES = 15
+_PROVENANCE_FIELDS = (
+    "player_id",
+    "nickname",
+    "team",
+    "position",
+    "salary",
+    "source_file",
+    "fixture_id",
+    "retrieved_et",
+)
+
+
+def scaled_book_caps(
+    count: int,
+    max_exposure: float = 0.22,
+    qb_exposure: float = 0.24,
+    dst_exposure: float = 0.22,
+) -> dict[str, int]:
+    """Scale position caps with ``floor(exposure * count)``."""
+
+    size = max(int(count), 0)
+    skill = math.floor(float(max_exposure) * size)
+    return {
+        "QB": math.floor(float(qb_exposure) * size),
+        "RB": skill,
+        "WR": skill,
+        "TE": skill,
+        "DST": math.floor(float(dst_exposure) * size),
+    }
+
+
+def _record_key(key: object) -> str:
+    text = str(key or "").strip().casefold().replace("_", " ")
+    return " ".join(text.split())
+
+
+def _lowered_record(record: Mapping[str, Any]) -> dict[str, str]:
+    lowered: dict[str, str] = {}
+    for key, value in record.items():
+        if key is None:
+            continue
+        lowered[_record_key(key)] = str(value or "").strip()
+    return lowered
+
+
+def _first_cell(lowered: Mapping[str, str], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = lowered.get(key)
+        if value:
+            return value
+    return ""
+
+
+def _name_before_market(text: str) -> str:
+    match = _MARKET_RE.search(text)
+    if match is None:
+        return ""
+    name = text[: match.start()].strip(" \t|:-—*")
+    tokens = name.split()
+    if tokens and tokens[-1].upper() in _POS_TAIL:
+        tokens = tokens[:-1]
+    return " ".join(tokens)
+
+
+def _text_veto_names(text: str) -> list[str]:
+    names: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or _UNDER_FADE.search(line) is None:
+            continue
+        cells = [cell.strip(" |-*") for cell in line.split("|")]
+        cells = [cell for cell in cells if cell]
+        name = ""
+        for cell in cells:
+            if _MARKET_RE.search(cell) or cell.upper() in _POS_TAIL:
+                continue
+            name = cell
+            break
+        if not name:
+            name = _name_before_market(" ".join(cells) if cells else line)
+        if name:
+            names.append(name)
+    return names
+
+
+def _csv_veto_names(path: Path) -> list[str]:
+    names: list[str] = []
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle, skipinitialspace=True)
+        if not reader.fieldnames:
+            return _text_veto_names(path.read_text(encoding="utf-8"))
+        for row in reader:
+            lowered = _lowered_record(row)
+            name = _first_cell(lowered, _NAME_FIELDS)
+            market = _first_cell(lowered, _MARKET_FIELDS)
+            side = _first_cell(lowered, _SIDE_FIELDS)
+            if market and side:
+                if _UNDER_FADE.search(f"{market} {side}") and name:
+                    names.append(name)
+                continue
+            blob = " ".join(value for value in lowered.values() if value)
+            if _UNDER_FADE.search(blob):
+                names.append(name or _name_before_market(blob))
+    return names
+
+
+def load_scheme_vetoes(
+    path: Path | None,
+    count: int = BOOK_SIZE,
+    max_veto_share: float = 0.08,
+) -> dict[str, int]:
+    """Cap players named on an under fade in a scheme file.
+
+    The file is ``scheme_vetoes_{date}.csv`` or ``scheme.md``. A row matches
+    when it contains ``rush_yds UNDER``, ``rec_yds UNDER``, or ``pass_yds UNDER``.
+    The cap is ``max(1, floor(max_veto_share * count))``. Keys are folded names.
+    """
+
+    cap = max(1, math.floor(float(max_veto_share) * int(count)))
+    if path is None:
+        return {}
+    file_path = Path(path)
+    if not file_path.is_file():
+        return {}
+    if file_path.suffix.casefold() == ".csv":
+        found = _csv_veto_names(file_path)
+    else:
+        found = _text_veto_names(file_path.read_text(encoding="utf-8"))
+    return {fold_key(name): cap for name in found if fold_key(name)}
+
+
+def _salary_lookup(
+    frame: pd.DataFrame,
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    by_id: dict[str, dict[str, str]] = {}
+    by_name: dict[str, dict[str, str]] = {}
+    for record in frame.to_dict(orient="records"):
+        lowered = _lowered_record(record)
+        pid = lowered.get("id") or lowered.get("player id") or ""
+        name = fold_key(lowered.get("nickname") or lowered.get("name") or "")
+        if pid:
+            by_id[pid] = lowered
+        if name:
+            by_name[name] = lowered
+    return by_id, by_name
+
+
+def _is_questionable(record: Mapping[str, str]) -> bool:
+    status = (
+        record.get("injury indicator")
+        or record.get("injury")
+        or record.get("injury status")
+        or ""
+    )
+    return status.strip().upper() == "Q"
+
+
+def _confirmed_active(record: Mapping[str, str]) -> bool:
+    for key in ("confirmed active", "confirmed", "whitelist"):
+        if record.get(key, "").casefold() in _CONFIRM_TRUE:
+            return True
+    for key in ("injury details", "note", "notes", "status note"):
+        if "confirmed active" in record.get(key, "").casefold():
+            return True
+    return False
+
+
+def questionable_exposure_caps(
+    players: Sequence[PoolPlayer],
+    salary_df: pd.DataFrame,
+    count: int = BOOK_SIZE,
+    q_cap_share: float = 0.12,
+) -> dict[str, int]:
+    """Cap a Questionable player unless the salary row says he is confirmed active.
+
+    The cap is ``max(1, floor(q_cap_share * count))``. Keys are player ids.
+    """
+
+    cap = max(1, math.floor(float(q_cap_share) * int(count)))
+    if salary_df is None or salary_df.empty:
+        return {}
+    by_id, by_name = _salary_lookup(salary_df)
+    caps: dict[str, int] = {}
+    for player in players:
+        record = by_id.get(player.player_id) or by_name.get(fold_key(player.nickname))
+        if record is None or not _is_questionable(record) or _confirmed_active(record):
+            continue
+        caps[player.player_id] = cap
+    return caps
+
+
+def _trailing_touches(index: OpportunityIndex, player: PoolPlayer) -> int | None:
+    found = lookup_opportunity(index, player.team, player.nickname, player.last_name)
+    if found is None:
+        return None
+    return int(found.targets) + int(found.carries)
+
+
+def fragile_rb_caps(
+    players: Sequence[PoolPlayer],
+    index: OpportunityIndex,
+    count: int = BOOK_SIZE,
+    fragile_share: float = 0.15,
+) -> dict[str, int]:
+    """Cap a running back at or under $6,500 with fewer than 15 recent touches.
+
+    The cap is ``floor(fragile_share * count)``. A team with no prior plays
+    stays off this cap. Keys are player ids.
+    """
+
+    cap = math.floor(float(fragile_share) * int(count))
+    caps: dict[str, int] = {}
+    for player in players:
+        if canon_position(player.position) != "RB":
+            continue
+        if int(player.salary) > _FRAGILE_RB_SALARY:
+            continue
+        touches = _trailing_touches(index, player)
+        if touches is None or touches >= _FRAGILE_TOUCHES:
+            continue
+        caps[player.player_id] = cap
+    return caps
+
+
+def write_lineups_resolved_csv(
+    path: Path,
+    book: Sequence[Candidate],
+    players: Sequence[PoolPlayer],
+    *,
+    source_file: str,
+    fixture_id: str,
+    retrieved_et: str,
+) -> Path:
+    """Write one row per unique rostered player with salary-file provenance."""
+
+    meta = {player.player_id: player for player in players}
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in book:
+        for pid in item.ids:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            ordered.append(str(pid))
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(_PROVENANCE_FIELDS))
+        writer.writeheader()
+        for pid in ordered:
+            player = meta[pid]
+            writer.writerow(
+                {
+                    "player_id": player.player_id,
+                    "nickname": player.nickname,
+                    "team": player.team,
+                    "position": player.position,
+                    "salary": player.salary,
+                    "source_file": source_file,
+                    "fixture_id": fixture_id,
+                    "retrieved_et": retrieved_et,
+                }
+            )
+    return destination
+
+
+def _team_exposure_text(
+    book: Sequence[Candidate],
+    players: Sequence[PoolPlayer],
+    season: int,
+    week: int,
+) -> str:
+    meta = {player.player_id: player for player in players}
+    seats: dict[str, int] = defaultdict(int)
+    lineups: dict[str, int] = defaultdict(int)
+    teams = {player.team for player in players if player.team}
+    for item in book:
+        present: set[str] = set()
+        for pid in item.ids:
+            player = meta.get(pid)
+            if player is None or not player.team:
+                continue
+            seats[player.team] += 1
+            present.add(player.team)
+            teams.add(player.team)
+        for team in present:
+            lineups[team] += 1
+    total = max(len(book), 1)
+    lines = [
+        f"# Fade coverage — {int(season)} week {int(week)}",
+        "",
+        "Team exposure counts seats and lineups that roster the team.",
+        "A team with zero lineups is a full fade.",
+        "",
+        "| Team | Seats | Lineups | Lineup share |",
+        "|------|-------|---------|--------------|",
+    ]
+    for team in sorted(teams):
+        used = lineups.get(team, 0)
+        lines.append(f"| {team} | {seats.get(team, 0)} | {used} | {used / total:.1%} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_team_exposure_fade(
+    book: Sequence[Candidate],
+    players: Sequence[PoolPlayer],
+    *,
+    season: int,
+    week: int,
+    audit_dir: str | Path | None = None,
+    recap_root: str | Path | None = None,
+    slate_date: str = "",
+) -> list[Path]:
+    """Write ``reports/audit/fade-coverage-w{week}.md`` and the recap copy."""
+
+    text = _team_exposure_text(book, players, season, week)
+    written = [_write_text(_desk_audit_dir(audit_dir) / _fade_name(week), text)]
+    root = None if recap_root is None else Path(recap_root)
+    if root is not None and root.is_dir() and slate_date:
+        written.append(_write_text(root / slate_date / _fade_name(week), text))
+    return written

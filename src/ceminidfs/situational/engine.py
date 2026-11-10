@@ -374,7 +374,7 @@ def _score_row(row: dict[str, Any], calibration: dict[str, Any]) -> dict[str, An
     position = str(row.get("position") or "")
     lagged_fd = _num(row.get("lagged_fd"))
     injury = str(row.get("injury_status") or "")
-    unavailable = injury in {"OUT", "IR"}
+    unavailable = injury in {"OUT", "IR", "DOUBTFUL"}
     rec_model = targets.get("rec_100") or {}
     rush_model = targets.get("rush_100") or {}
     pass_model = targets.get("pass_300") or {}

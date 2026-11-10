@@ -29,6 +29,9 @@ from ceminidfs.export.stack_rules import apply_stack_specs, attach_csv_original_
 from ceminidfs.situational.quantiles import DST_CAP, SKILL_CAP, apply_ceiling
 
 BOOK_SIZE = 150
+# Floors below scale from this size. A later assignment to BOOK_SIZE must not
+# change the 150-lineup constants.
+_CANON_BOOK_SIZE = 150
 MIN_SALARY = 59200
 MAX_SALARY = 60000
 BRINGBACK_MIN = 113
@@ -734,12 +737,28 @@ def _shares_within_limit(
     return all(shares_ok(item.key, prev, max_shared) for prev in keys)
 
 
+def _count_floors(target: int) -> tuple[int, int, int]:
+    """Return the bring-back min, the secondary min, and the cheap limit.
+
+    A 150-lineup book keeps 113, 75, and 15. Any other size uses
+    ``ceil(target * baseline / 150)``.
+    """
+
+    size = int(target)
+    if size == _CANON_BOOK_SIZE:
+        return BRINGBACK_MIN, SECONDARY_MIN, CHEAP_LIMIT
+    bring = math.ceil(size * 113 / _CANON_BOOK_SIZE)
+    secondary = math.ceil(size * 75 / _CANON_BOOK_SIZE)
+    cheap = math.ceil(size * 15 / _CANON_BOOK_SIZE)
+    return bring, secondary, cheap
+
+
 def select_book(
     candidates: Sequence[Candidate],
     *,
     count: int = BOOK_SIZE,
-    bringback_min: int = BRINGBACK_MIN,
-    secondary_min: int = SECONDARY_MIN,
+    bringback_min: int | None = None,
+    secondary_min: int | None = None,
     min_salary: int = MIN_SALARY,
     max_salary: int = MAX_SALARY,
     caps: Mapping[str, int] | None = None,
@@ -755,9 +774,17 @@ def select_book(
     ``pair_cap`` limits how often the same two running backs share a lineup.
     ``player_caps`` is a tighter per-player limit. It does not raise the
     position cap. ``rb_te_cap`` blocks an unstacked same-team running back
-    and tight end, and caps a stacked pair.
+    and tight end, and caps a stacked pair. A book size other than 150 scales
+    the bring-back min, the secondary min, and a cheap limit of 15.
     """
 
+    bring_floor, secondary_floor, cheap_floor = _count_floors(count)
+    if bringback_min is None:
+        bringback_min = bring_floor
+    if secondary_min is None:
+        secondary_min = secondary_floor
+    if int(count) != _CANON_BOOK_SIZE and allow_cheap == CHEAP_LIMIT:
+        allow_cheap = cheap_floor
     limits = dict(EXPOSURE_CAPS if caps is None else caps)
     person_caps = dict(player_caps or {})
     team_of = dict(player_teams or {})
@@ -1308,6 +1335,13 @@ def write_book_files(
     book: Sequence[Candidate],
     upload_path: Path,
     ids_path: Path,
+    *,
+    season: int | None = None,
+    week: int | None = None,
+    players: Sequence[PoolPlayer] | None = None,
+    slate_date: str | None = None,
+    audit_dir: str | Path | None = None,
+    recap_root: str | Path | None = None,
 ) -> None:
     header = LINEUP_HEADERS["fanduel"]
     upload_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1322,6 +1356,19 @@ def write_book_files(
         writer.writerow(header)
         for item in book:
             writer.writerow([pid for _slot, pid in item.seats])
+    if week is None or players is None:
+        return
+    from ceminidfs.export.recap_guards import write_team_exposure_fade
+
+    write_team_exposure_fade(
+        book,
+        players,
+        season=0 if season is None else int(season),
+        week=int(week),
+        audit_dir=audit_dir,
+        recap_root=recap_root,
+        slate_date=slate_date or "",
+    )
 
 
 _NICKNAMES: dict[str, str] = {}
@@ -1475,10 +1522,16 @@ def _book_totals(
     return counts, games, pair_counts, bring, secondary, under_floor
 
 
-def _verify_totals(under_floor: int, bring: int, secondary: int) -> None:
-    assert under_floor <= CHEAP_LIMIT
-    assert bring >= BRINGBACK_MIN, f"bring-back {bring}"
-    assert secondary >= SECONDARY_MIN, f"secondary {secondary}"
+def _verify_totals(
+    under_floor: int,
+    bring: int,
+    secondary: int,
+    target: int = BOOK_SIZE,
+) -> None:
+    bring_min, secondary_min, cheap_limit = _count_floors(target)
+    assert under_floor <= cheap_limit
+    assert bring >= bring_min, f"bring-back {bring}"
+    assert secondary >= secondary_min, f"secondary {secondary}"
 
 
 def _paid_count(book: Sequence[Candidate]) -> int:
@@ -1509,7 +1562,7 @@ def verify_book(
     counts, games, pair_counts, bring, secondary, under_floor = _book_totals(
         book, meta, prefix, banned, banned_clubs
     )
-    _verify_totals(under_floor, bring, secondary)
+    _verify_totals(under_floor, bring, secondary, target)
     _verify_exposure(counts, meta, limits, person_caps)
     _verify_pairs(pair_counts, pair_cap)
     teams = {pid: player.team for pid, player in meta.items()}
