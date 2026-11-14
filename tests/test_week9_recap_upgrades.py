@@ -214,12 +214,12 @@ def test_lineup_provenance_and_team_exposure(tmp_path: Path):
     )
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
-    assert [row["player_id"] for row in rows].count(shared) == 1
+    assert [row["fd_id"] for row in rows].count(shared) == 1
     assert set(rows[0]) == {
-        "player_id",
-        "nickname",
+        "fd_id",
+        "player_name",
         "team",
-        "position",
+        "pos",
         "salary",
         "source_file",
         "fixture_id",

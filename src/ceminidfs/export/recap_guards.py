@@ -1052,10 +1052,10 @@ _SIDE_FIELDS = ("side", "direction", "pick", "lean")
 _FRAGILE_RB_SALARY = 6500
 _FRAGILE_TOUCHES = 15
 _PROVENANCE_FIELDS = (
-    "player_id",
-    "nickname",
+    "fd_id",
+    "player_name",
     "team",
-    "position",
+    "pos",
     "salary",
     "source_file",
     "fixture_id",
@@ -1304,10 +1304,10 @@ def write_lineups_resolved_csv(
             player = meta[pid]
             writer.writerow(
                 {
-                    "player_id": player.player_id,
-                    "nickname": player.nickname,
+                    "fd_id": player.player_id,
+                    "player_name": player.nickname,
                     "team": player.team,
-                    "position": player.position,
+                    "pos": player.position,
                     "salary": player.salary,
                     "source_file": source_file,
                     "fixture_id": fixture_id,
@@ -1364,11 +1364,18 @@ def write_team_exposure_fade(
     audit_dir: str | Path | None = None,
     recap_root: str | Path | None = None,
     slate_date: str = "",
+    run_dir: str | Path | None = None,
 ) -> list[Path]:
-    """Write ``reports/audit/fade-coverage-w{week}.md`` and the recap copy."""
+    """Write the post-solve team table to the audit file and the run file.
+
+    The audit path is ``reports/audit/fade-coverage-w{week}.md``. ``run_dir``
+    receives the same file. A recap root that exists also receives a copy.
+    """
 
     text = _team_exposure_text(book, players, season, week)
     written = [_write_text(_desk_audit_dir(audit_dir) / _fade_name(week), text)]
+    if run_dir is not None:
+        written.append(_write_text(Path(run_dir) / _fade_name(week), text))
     root = None if recap_root is None else Path(recap_root)
     if root is not None and root.is_dir() and slate_date:
         written.append(_write_text(root / slate_date / _fade_name(week), text))

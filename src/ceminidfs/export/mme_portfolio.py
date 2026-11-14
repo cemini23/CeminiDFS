@@ -1342,6 +1342,7 @@ def write_book_files(
     slate_date: str | None = None,
     audit_dir: str | Path | None = None,
     recap_root: str | Path | None = None,
+    run_dir: str | Path | None = None,
 ) -> None:
     header = LINEUP_HEADERS["fanduel"]
     upload_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1368,6 +1369,7 @@ def write_book_files(
         audit_dir=audit_dir,
         recap_root=recap_root,
         slate_date=slate_date or "",
+        run_dir=run_dir,
     )
 
 

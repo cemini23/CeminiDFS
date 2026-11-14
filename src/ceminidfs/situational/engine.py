@@ -37,6 +37,7 @@ SALARY_BY_SLATE = {
     (2026, 6): Path("data/slates/2026-10-18_fd_sun.csv"),
     (2026, 7): Path("data/slates/2026-10-25_fd_sun.csv"),
     (2026, 8): Path("data/slates/2026-11-01_fd_sun.csv"),
+    (2026, 10): Path("data/slates/2026-11-15_fd_sun.csv"),
 }
 
 _PBP_COLUMNS = (
