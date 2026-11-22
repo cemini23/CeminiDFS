@@ -33,6 +33,8 @@ def run_pipeline(
     cfg = dict(config or {})
     # A test may inject a play-by-play frame. It is not a manifest field.
     participation_pbp = cfg.pop("participation_pbp", None)
+    if not cfg.get("salary_path"):
+        cfg["salary_path"] = str(Path(salary_path))
     selected_stages = _parse_stages(stages)
     work_dir = Path(cfg.get("work_dir", Path("runs") / f"{season}_week_{week}"))
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -336,50 +338,77 @@ def _friday_trend_force_names(input_path: Path, config: Mapping[str, Any]) -> li
 
 
 def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mapping[str, Any]) -> Path:
+    from ceminidfs.data.availability import (
+        assert_lineups_clean,
+        build_prelock_gate,
+        finish_lineup_outputs,
+        format_questionable_warning,
+        using_solver_csv,
+    )
     from ceminidfs.export.optimize import optimize_lineups
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    build_kwargs = _optimize_build_kwargs(config)
-    trend_names = _friday_trend_force_names(input_path, config)
-    if trend_names:
-        build_kwargs["friday_trend_keys"] = trend_names
-    if _sim_rerank_enabled(config):
-        from ceminidfs.export.sim_rerank import optimize_with_sim_rerank
-
-        rerank_cfg = _sim_rerank_config(config)
-        sim_matrix, player_index = _load_or_build_sim_rerank_inputs(input_path, config)
-        mode = str(rerank_cfg.get("mode", "ceiling") or "ceiling")
-        ownership_lookup = None
-        ownership_penalty = float(rerank_cfg.get("ownership_penalty", 0.0) or 0.0)
-        if ownership_penalty > 0 or mode == "leverage":
-            from ceminidfs.export.sim_rerank import build_ownership_lookup
-
-            ownership_lookup = build_ownership_lookup(input_path)
-        optimize_with_sim_rerank(
-            csv_path=input_path,
-            out_path=output_path,
-            sim_matrix=sim_matrix,
-            player_index=player_index,
-            candidates=int(rerank_cfg.get("candidates", config.get("candidates", 2000))),
-            final=int(rerank_cfg.get("final_count", config.get("final_count", count))),
-            site=str(config.get("site", "fanduel")),
-            quantile=float(rerank_cfg.get("quantile", 0.85)),
-            mode=mode,
-            ownership_lookup=ownership_lookup,
-            ownership_penalty=ownership_penalty,
-            **build_kwargs,
-            **_review_report_kwargs(config),
-        )
-        return output_path
-
-    optimize_lineups(
-        csv_path=input_path,
-        out_path=output_path,
-        site=str(config.get("site", "fanduel")),
-        count=count,
-        **build_kwargs,
-        **_review_report_kwargs(config),
+    salary_path = Path(str(config.get("salary_path") or input_path))
+    gate = build_prelock_gate(
+        salary_path,
+        scratch_csv=config.get("scratch_csv"),
+        qb_starters_csv=config.get("qb_starters_csv"),
+        exclude_players=config.get("exclude_players"),
+        questionable_policy=str(config.get("include_questionable_policy") or "keep"),
+        slate_date=config.get("slate_date"),
+        lineup_path=output_path,
     )
+    print(format_questionable_warning(gate))
+    with using_solver_csv(input_path, gate) as solver_path:
+        build_kwargs = _optimize_build_kwargs(config)
+        trend_names = _friday_trend_force_names(solver_path, config)
+        if trend_names:
+            build_kwargs["friday_trend_keys"] = trend_names
+        if _sim_rerank_enabled(config):
+            from ceminidfs.export.sim_rerank import optimize_with_sim_rerank
+
+            rerank_cfg = _sim_rerank_config(config)
+            sim_matrix, player_index = _load_or_build_sim_rerank_inputs(input_path, config)
+            mode = str(rerank_cfg.get("mode", "ceiling") or "ceiling")
+            ownership_lookup = None
+            ownership_penalty = float(rerank_cfg.get("ownership_penalty", 0.0) or 0.0)
+            if ownership_penalty > 0 or mode == "leverage":
+                from ceminidfs.export.sim_rerank import build_ownership_lookup
+
+                ownership_lookup = build_ownership_lookup(input_path)
+            optimize_with_sim_rerank(
+                csv_path=solver_path,
+                out_path=output_path,
+                sim_matrix=sim_matrix,
+                player_index=player_index,
+                candidates=int(rerank_cfg.get("candidates", config.get("candidates", 2000))),
+                final=int(rerank_cfg.get("final_count", config.get("final_count", count))),
+                site=str(config.get("site", "fanduel")),
+                quantile=float(rerank_cfg.get("quantile", 0.85)),
+                mode=mode,
+                ownership_lookup=ownership_lookup,
+                ownership_penalty=ownership_penalty,
+                **build_kwargs,
+                **_review_report_kwargs(config),
+            )
+        else:
+            optimize_lineups(
+                csv_path=solver_path,
+                out_path=output_path,
+                site=str(config.get("site", "fanduel")),
+                count=count,
+                **build_kwargs,
+                **_review_report_kwargs(config),
+            )
+    _projections, _report, summary = finish_lineup_outputs(
+        gate,
+        salary_csv=salary_path,
+        lineups_csv=output_path,
+        output_dir=output_path.parent,
+        archive_dir=config.get("archive_dir"),
+    )
+    print(summary)
+    assert_lineups_clean(output_path, gate)
     return output_path
 
 

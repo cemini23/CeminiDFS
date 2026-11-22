@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ceminidfs.config import runtime_config
+from ceminidfs.data.availability import PrelockExcludeError
 
 try:
     from ceminidfs.export.pool_guards import DEFAULT_MIN_SKILL_POOL
@@ -286,6 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--final-count", type=int, default=150, help="Final lineups after rerank")
     _add_rerank_mode_argument(optimize)
     _add_optimizer_build_arguments(optimize)
+    _add_prelock_gate_arguments(optimize)
     _add_fade_guard_arguments(optimize)
     _add_review_report_arguments(optimize, default_on=True)
     _add_environment_argument(optimize)
@@ -496,6 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_premium_mode_arguments(run)
     _add_optimizer_build_arguments(run)
+    _add_prelock_gate_arguments(run)
     _add_fade_guard_arguments(run)
     _add_review_report_arguments(run, default_on=True)
     _add_environment_argument(run)
@@ -927,9 +930,15 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
         **_review_report_overrides(args),
     )
     _apply_telemetry_cli(config, args)
+    config.update(_prelock_config(args))
+    config["salary_path"] = str(args.csv_path)
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
-    output = _run_optimize(args.csv_path, args.output_path, count, config)
+    try:
+        output = _run_optimize(args.csv_path, args.output_path, count, config)
+    except PrelockExcludeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     print(output)
     return 0
 
@@ -1311,15 +1320,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
         **_optimizer_build_overrides(args),
         **_review_report_overrides(args),
     )
+    config.update(_prelock_config(args))
+    config["salary_path"] = str(args.salary)
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
-    manifest = run_pipeline(
-        season=args.season,
-        week=args.week,
-        salary_path=args.salary,
-        stages=args.stages,
-        config=config,
-    )
+    try:
+        manifest = run_pipeline(
+            season=args.season,
+            week=args.week,
+            salary_path=args.salary,
+            stages=args.stages,
+            config=config,
+        )
+    except PrelockExcludeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     print(manifest)
     return 0
 
@@ -1971,6 +1986,75 @@ def _add_jev_arguments(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Skip the Choice step over late_swap_alert_report.csv rows",
     )
+
+
+def _add_prelock_gate_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--scratch-csv",
+        type=Path,
+        default=None,
+        help="Desk scratch CSV. A hard status in this file removes the player.",
+    )
+    parser.add_argument(
+        "--qb-starters-csv",
+        type=Path,
+        default=None,
+        help="QB starter CSV. backups_hard_exclude names are removed.",
+    )
+    parser.add_argument(
+        "--exclude-players",
+        action="append",
+        default=None,
+        help="Extra players to hard-exclude. Repeat the flag or separate names with commas.",
+    )
+    parser.add_argument(
+        "--include-questionable-policy",
+        choices=("keep", "exclude"),
+        default="keep",
+        help="keep leaves Q players in the pool. exclude removes every Q player.",
+    )
+    parser.add_argument(
+        "--archive-dir",
+        type=Path,
+        default=None,
+        help="Copy _src_fd_sun.csv, projections, and _src_lineups.csv into this directory.",
+    )
+    parser.add_argument(
+        "--slate-date",
+        default=None,
+        help="Slate date YYYY-MM-DD used in the projections and exposure file names.",
+    )
+
+
+def _prelock_config(args: argparse.Namespace) -> dict[str, Any]:
+    """Return the pre-lock gate settings from the lineup command."""
+
+    config: dict[str, Any] = {
+        "include_questionable_policy": getattr(args, "include_questionable_policy", None) or "keep",
+    }
+    for source, key in (
+        ("scratch_csv", "scratch_csv"),
+        ("qb_starters_csv", "qb_starters_csv"),
+        ("archive_dir", "archive_dir"),
+        ("slate_date", "slate_date"),
+    ):
+        value = getattr(args, source, None)
+        if value:
+            config[key] = str(value)
+    names = _split_exclude_players(getattr(args, "exclude_players", None))
+    if names:
+        config["exclude_players"] = names
+    return config
+
+
+def _split_exclude_players(values: list[str] | None) -> list[str]:
+    names: list[str] = []
+    for raw in values or []:
+        for part in str(raw).split(","):
+            token = part.strip()
+            if token:
+                names.append(token)
+    return names
 
 
 def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
