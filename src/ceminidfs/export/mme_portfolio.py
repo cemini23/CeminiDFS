@@ -768,6 +768,8 @@ def select_book(
     player_caps: Mapping[str, int] | None = None,
     rb_te_cap: int | None = None,
     player_teams: Mapping[str, str] | None = None,
+    team_lineup_cap: int | None = None,
+    locked: Sequence[Candidate] | None = None,
 ) -> list[Candidate]:
     """Greedy book. Bring-backs fill first. The position caps own exposure.
 
@@ -788,13 +790,23 @@ def select_book(
     limits = dict(EXPOSURE_CAPS if caps is None else caps)
     person_caps = dict(player_caps or {})
     team_of = dict(player_teams or {})
+    team_cap = None if team_lineup_cap is None else int(team_lineup_cap)
     ordered = sorted(candidates, key=lambda item: (-item.blend, -item.salary, item.ids))
     book: list[Candidate] = []
     counts: dict[str, int] = {}
     pair_counts: Counter[tuple[str, str]] = Counter()
     rb_te_counts: Counter[tuple[str, str]] = Counter()
+    team_hits: Counter[str] = Counter()
     keys: list[frozenset[str]] = []
     cheap = 0
+
+    def lineup_teams(item: Candidate) -> set[str]:
+        found: set[str] = set()
+        for pid, _pos in item.positions:
+            club = team_of.get(pid, "")
+            if club:
+                found.add(club)
+        return found
 
     def player_limit(pid: str, pos: str) -> int:
         position_cap = limits.get(pos, 10**9)
@@ -817,6 +829,10 @@ def select_book(
             return False
         if not _rb_te_within_limit(item, rb_te_counts, rb_te_cap, team_of):
             return False
+        if team_cap is not None:
+            for club in lineup_teams(item):
+                if team_hits[club] + 1 > team_cap:
+                    return False
         return _shares_within_limit(item, keys, max_shared)
 
     def add(item: Candidate) -> None:
@@ -833,6 +849,9 @@ def select_book(
             for pair, stacked in same_team_rb_te(item, team_of):
                 if stacked:
                     rb_te_counts[pair] += 1
+        if team_cap is not None:
+            for club in lineup_teams(item):
+                team_hits[club] += 1
 
     def take(pred, stop) -> None:
         for item in ordered:
@@ -842,6 +861,14 @@ def select_book(
                 continue
             if pred(item) and legal(item):
                 add(item)
+
+    for item in locked or ():
+        if len(book) >= count:
+            break
+        if item.key in keys:
+            continue
+        if legal(item):
+            add(item)
 
     take(
         lambda item: item.bringback,
@@ -1198,6 +1225,35 @@ def _stamp_player_caps(
     return remaining
 
 
+def _zero_full_teams(
+    remaining: dict[str, int],
+    book: Sequence[Candidate],
+    players: Sequence[PoolPlayer],
+    team_of: Mapping[str, str],
+    team_lineup_cap: int | None,
+) -> dict[str, int]:
+    """Set exposure to 0 for every player on a team that is at the lineup cap."""
+
+    if team_lineup_cap is None:
+        return remaining
+    hits: Counter[str] = Counter()
+    for item in book:
+        clubs: set[str] = set()
+        for pid, _pos in item.positions:
+            club = team_of.get(pid, "")
+            if club:
+                clubs.add(club)
+        for club in clubs:
+            hits[club] += 1
+    blocked = {club for club, used in hits.items() if used >= int(team_lineup_cap)}
+    if not blocked:
+        return remaining
+    for player in players:
+        if player.team in blocked:
+            remaining[player.player_id] = 0
+    return remaining
+
+
 def build_candidate_pool(
     csv_path: Path,
     players: Sequence[PoolPlayer],
@@ -1210,6 +1266,11 @@ def build_candidate_pool(
     pair_cap: int | None = None,
     player_caps: Mapping[str, int] | None = None,
     rb_te_cap: int | None = None,
+    min_waves: int = 0,
+    book_count: int | None = None,
+    team_lineup_cap: int | None = None,
+    max_shared: int = MAX_SHARED,
+    require_floors: bool = True,
 ) -> list[Candidate]:
     """Build a diverse candidate pool. Each wave uses one noise draw."""
 
@@ -1218,6 +1279,7 @@ def build_candidate_pool(
     limits = dict(EXPOSURE_CAPS if caps is None else caps)
     meta = {player.player_id: player for player in players}
     team_of = {player.player_id: player.team for player in players}
+    target = BOOK_SIZE if book_count is None else int(book_count)
     rng = np.random.default_rng(seed)
     qbs = [player for player in players if player.position == "QB"]
     found: dict[frozenset[str], Candidate] = {}
@@ -1227,7 +1289,8 @@ def build_candidate_pool(
         remaining = _remaining_caps(current, limits)
         for player in players:
             remaining.setdefault(player.player_id, limits.get(player.position, BOOK_SIZE))
-        return _stamp_player_caps(remaining, current, player_caps)
+        stamped = _stamp_player_caps(remaining, current, player_caps)
+        return _zero_full_teams(stamped, current, players, team_of, team_lineup_cap)
 
     def absorb(lineups: Sequence[Any]) -> int:
         added = 0
@@ -1240,7 +1303,8 @@ def build_candidate_pool(
         return added
 
     for index in range(max_waves):
-        if _book_ready(book):
+        ready = _pool_ready(book, target) if require_floors else len(book) >= target
+        if index >= int(min_waves) and ready:
             break
         boost = qbs[index % len(qbs)].player_id if qbs else ""
         overrides = _noise_map(
@@ -1282,18 +1346,21 @@ def build_candidate_pool(
         added = absorb(lineups)
         book = select_book(
             list(found.values()),
+            count=target,
             caps=limits,
             pair_cap=pair_cap,
             player_caps=player_caps,
             rb_te_cap=rb_te_cap,
             player_teams=team_of,
+            team_lineup_cap=team_lineup_cap,
+            max_shared=max_shared,
         )
         print(
             f"wave {index + 1} added {added}; pool {len(found)}; "
             f"book {len(book)}; bring-back {sum(item.bringback for item in book)}; "
             f"secondary {sum(item.secondary for item in book)}"
         )
-    if not _book_ready(book):
+    if not _pool_ready(book, target):
         print("salary floor retry")
         for index in range(2):
             overrides = _noise_map(players, rng, scale=1.8)
@@ -1314,11 +1381,16 @@ def build_candidate_pool(
 
 
 def _book_ready(book: Sequence[Candidate]) -> bool:
-    if len(book) < BOOK_SIZE:
+    return _pool_ready(book, BOOK_SIZE)
+
+
+def _pool_ready(book: Sequence[Candidate], target: int) -> bool:
+    if len(book) < int(target):
         return False
+    bring_min, secondary_min, _cheap = _count_floors(int(target))
     bring = sum(item.bringback for item in book)
     secondary = sum(item.secondary for item in book)
-    return bring >= BRINGBACK_MIN and secondary >= SECONDARY_MIN
+    return bring >= bring_min and secondary >= secondary_min
 
 
 def choose_book(candidates: Sequence[Candidate]) -> list[Candidate]:
