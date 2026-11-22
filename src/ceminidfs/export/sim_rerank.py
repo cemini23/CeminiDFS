@@ -9,6 +9,12 @@ from typing import Any
 
 import numpy as np
 
+from ._sim_kernel import (
+    leverage_scores as _kernel_leverage_scores,
+    lineup_totals as _kernel_lineup_totals,
+    quantile_linear as _kernel_quantile_linear,
+    use_sim_kernel,
+)
 from .lineup_report import format_lineup_report, write_lineup_report
 from .optimize import (
     TEAM_DART_LOG,
@@ -143,8 +149,12 @@ def score_lineup(
         raise ValueError("quantile must be between 0 and 1")
 
     indexes = _lineup_indexes(player_names, player_index, player_ids, matrix)
-    lineup_totals = matrix[indexes, :].sum(axis=0)
-    score = float(np.quantile(lineup_totals, quantile))
+    if use_sim_kernel():
+        flat, _lengths = _kernel_lineup_totals(matrix, [indexes])
+        score = float(_kernel_quantile_linear(flat, quantile))
+    else:
+        lineup_totals = matrix[indexes, :].sum(axis=0)
+        score = float(np.quantile(lineup_totals, quantile))
 
     if ownership_lookup and ownership_penalty > 0:
         ownership_values = []
@@ -184,6 +194,28 @@ def leverage_lineup_scores(
         raise ValueError("sim_matrix must be a 2D array")
     if not 0.0 < top_fraction < 1.0:
         raise ValueError("top_fraction must be between 0 and 1")
+
+    if use_sim_kernel():
+        groups: list[list[int]] = []
+        fractions: list[float] = []
+        for lineup in lineups:
+            groups.append(
+                _lineup_indexes(
+                    lineup_player_names(lineup),
+                    player_index,
+                    lineup_player_ids(lineup),
+                    matrix,
+                )
+            )
+            fractions.append(_lineup_ownership_fraction(lineup, ownership_lookup))
+        scores, threshold = _kernel_leverage_scores(
+            matrix,
+            groups,
+            fractions,
+            top_fraction,
+            exponent,
+        )
+        return scores, float(threshold)
 
     totals_by_lineup: list[np.ndarray] = []
     for lineup in lineups:

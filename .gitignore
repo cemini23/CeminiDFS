@@ -47,3 +47,7 @@ reports/
 
 # Code-health queue (local work state, not shared)
 .code-health/
+
+# Rust scoring kernel (built locally; source stays tracked)
+rust/sim_kernel/target/
+src/ceminidfs/_sim_kernel_rust*.so
