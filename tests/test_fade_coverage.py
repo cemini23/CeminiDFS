@@ -18,6 +18,7 @@ from ceminidfs.export.pool_guards import (
 )
 from ceminidfs.pipeline.fade_coverage import (
     DEFAULT_PRODUCED_THRESHOLD,
+    normalize_team_abbr,
     season_rollup,
     team_coverage,
 )
@@ -316,3 +317,49 @@ def test_soft_fade_discounts_a_team_and_never_removes_it() -> None:
 def test_normalize_soft_fade_weights_keeps_team_abbreviations_and_clamps() -> None:
     weights = normalize_soft_fade_weights({"cin": 0.4, "JAC": 0.0, "WAS": 2.0})
     assert weights == {"CIN": 0.4, "JAX": 0.65, "WAS": 1.0}
+
+
+def test_fanduel_team_codes_map_to_the_espn_codes() -> None:
+    assert normalize_team_abbr("JAC") == "JAX"
+    assert normalize_team_abbr("WAS") == "WSH"
+    assert normalize_team_abbr("LA") == "LAR"
+    assert normalize_team_abbr("LAR") == "LAR"
+    assert normalize_team_abbr("jax") == "JAX"
+
+
+def test_fanduel_slate_reconciles_with_espn_box_teams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    salary = _write_salary(
+        tmp_path / "salary.csv",
+        [
+            ("Jag One", "JAC", "JAC@WAS", 5000),
+            ("Comm One", "WAS", "JAC@WAS", 5000),
+            ("Rams One", "LAR", "LAR@ARI", 5000),
+            ("Card One", "ARI", "LAR@ARI", 5000),
+        ],
+    )
+    lineups = _write_lineups(tmp_path / "lineups.csv", ["Jag One", "Comm One", "Rams One"])
+
+    def fake_points(frame: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
+        return frame
+
+    monkeypatch.setattr(
+        "ceminidfs.pipeline.fade_coverage.actual_week_fantasy_points", fake_points
+    )
+    pbp = _pbp_frame(
+        [
+            ("Jag One", "JAX", 25.0),
+            ("Comm One", "WSH", 22.0),
+            ("Rams One", "LAR", 24.0),
+            ("Card One", "ARI", 10.0),
+        ]
+    )
+    coverage = team_coverage(3, salary, lineups, season=2026, pbp=pbp)
+    by_team = coverage.set_index("team")
+
+    assert set(by_team.index) == {"ARI", "JAX", "LAR", "WSH"}
+    for team, name in (("JAX", "Jag One"), ("WSH", "Comm One"), ("LAR", "Rams One")):
+        assert int(by_team.loc[team, "book_exposure"]) == 1
+        assert bool(by_team.loc[team, "zero_exposure"]) is False
+        assert by_team.loc[team, "top_scorer_name"] == name

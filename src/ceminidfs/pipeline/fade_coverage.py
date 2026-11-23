@@ -58,6 +58,26 @@ TEAM_COVERAGE_COLUMNS = [
 
 _SUFFIX = re.compile(r"\b(jr|sr|ii|iii|iv|v)\b")
 
+# FanDuel uses a few team codes that differ from ESPN and the box score.
+# Map both sides to the ESPN code before a team join. The map is idempotent.
+FANDUEL_TO_ESPN_TEAM = {
+    "JAC": "JAX",
+    "WAS": "WSH",
+    "LA": "LAR",
+    "JAX": "JAX",
+    "WSH": "WSH",
+    "LAR": "LAR",
+}
+
+
+def normalize_team_abbr(value: object) -> str:
+    """Return the ESPN team code for a FanDuel or box-score code."""
+
+    token = str(value or "").strip().upper()
+    if not token:
+        return ""
+    return FANDUEL_TO_ESPN_TEAM.get(token, token)
+
 
 def default_salary_path(season: int, week: int) -> Path:
     """Return the default salary CSV for a week, or the 2026 convention path."""
@@ -83,7 +103,7 @@ def slate_teams(salary_path: str | Path, season: int, week: int) -> list[str]:
     teams: list[str] = []
     seen: set[str] = set()
     for row in rows:
-        team = str(row.get("team") or "").strip().upper()
+        team = normalize_team_abbr(row.get("team"))
         if not team or team in seen:
             continue
         seen.add(team)
@@ -130,7 +150,7 @@ def book_exposure_by_team(
     rostered = lineup_player_names(lineups_path)
     exposure: dict[str, int] = {}
     for row in rows:
-        team = str(row.get("team") or "").strip().upper()
+        team = normalize_team_abbr(row.get("team"))
         if not team:
             continue
         exposure.setdefault(team, 0)
@@ -153,7 +173,7 @@ def top_scorer_by_team(pbp: pd.DataFrame, season: int, week: int) -> dict[str, t
         return {}
     best: dict[str, tuple[str, float]] = {}
     for _, row in actuals.iterrows():
-        team = str(row.get("team") or "").strip().upper()
+        team = normalize_team_abbr(row.get("team"))
         if not team:
             continue
         name = str(row.get("player_name") or "").strip()
