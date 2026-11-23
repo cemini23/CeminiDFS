@@ -640,6 +640,7 @@ def project_player_usage(
     pos = str(position or player_shares.get("position", "") or "").upper()
     if player_shares.get("is_qb_starter") and pos != "QB":
         pos = "QB"
+    weights = cfg.weights_for(pos)
     carry_share = (
         float(player_shares["carry_share_override"])
         if "carry_share_override" in player_shares
@@ -647,7 +648,7 @@ def project_player_usage(
             _mapping_float(player_shares, "l3_carry_share", "carry_share"),
             _mapping_float(player_shares, "season_carry_share", "carry_share"),
             LEAGUE_CARRY_SHARE.get(pos, 0.0),
-            weights=cfg.share_weights,
+            weights=weights,
         )
     )
     if "target_share_override" in player_shares:
@@ -658,13 +659,13 @@ def project_player_usage(
             _mapping_float(player_shares, "l3_target_share", "target_share"),
             _mapping_float(player_shares, "season_target_share", "target_share"),
             LEAGUE_TARGET_SHARE.get(pos, 0.0),
-            weights=cfg.share_weights,
+            weights=weights,
         )
         air_yards_share = weighted_blend(
             _mapping_float(player_shares, "l3_air_yards_share", "air_yards_share"),
             _mapping_float(player_shares, "season_air_yards_share", "air_yards_share"),
             LEAGUE_TARGET_SHARE.get(pos, 0.0),
-            weights=cfg.share_weights,
+            weights=weights,
         )
     pass_attempts = float(volume_row.get("pass_attempts", 0.0) or 0.0)
     rush_attempts = float(volume_row.get("rush_attempts", 0.0) or 0.0)
@@ -683,7 +684,7 @@ def project_player_usage(
             _mapping_float(player_shares, "l3_carry_share", "carry_share"),
             _mapping_float(player_shares, "season_carry_share", "carry_share"),
             cfg.qb_carry_share,
-            weights=cfg.share_weights,
+            weights=weights,
         )
         dropback_est = projected_pass_attempts / max(
             1.0 - DEFAULT_SACK_RATE - DEFAULT_SCRAMBLE_RATE, 0.5

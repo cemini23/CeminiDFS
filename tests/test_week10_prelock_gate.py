@@ -235,7 +235,8 @@ def test_lineup_generation_writes_projections_and_exposure(
     assert report.stat().st_size > 0
     header = projections.read_text(encoding="utf-8").splitlines()[0]
     assert header == (
-        "player_id,name,team,pos,salary,proj_fd_pts,ownership_proj,injury_status"
+        "player_id,name,team,pos,salary,proj_fd_pts,ownership_proj,injury_status,"
+        "exposure_cap_applied,role_flags"
     )
     rows = list(csv.DictReader(projections.open(encoding="utf-8")))
     etienne = next(row for row in rows if row["player_id"] == "136490-100")

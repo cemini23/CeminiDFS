@@ -291,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_fade_guard_arguments(optimize)
     _add_review_report_arguments(optimize, default_on=True)
     _add_environment_argument(optimize)
+    _add_recap_bundle_arguments(optimize)
     _add_profile_argument(optimize)
     optimize.add_argument(
         "--telemetry",
@@ -502,6 +503,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_fade_guard_arguments(run)
     _add_review_report_arguments(run, default_on=True)
     _add_environment_argument(run)
+    _add_recap_bundle_arguments(run)
     _add_profile_argument(run)
     run.set_defaults(handler=_cmd_run)
 
@@ -932,6 +934,7 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
     _apply_telemetry_cli(config, args)
     config.update(_prelock_config(args))
     config["salary_path"] = str(args.csv_path)
+    _recap_config(config, args)
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
     try:
@@ -1322,6 +1325,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
     config.update(_prelock_config(args))
     config["salary_path"] = str(args.salary)
+    _recap_config(config, args)
+    config["fetch_vegas_spreads"] = True
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
     try:
@@ -2124,6 +2129,36 @@ def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
             "slate. 0 disables the floor. Showdown and tiny slates skip it"
         ),
     )
+    parser.add_argument(
+        "--exposure-override",
+        action="append",
+        default=[],
+        metavar="NAME=CAP",
+        help=(
+            "Explicit per-player exposure cap 0-1. Repeatable. Wins over a tier "
+            "cap or a role-cliff cap, and may raise or lower it"
+        ),
+    )
+
+
+def _add_recap_bundle_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--recap-bundle-dir",
+        dest="recap_bundle_dir",
+        type=Path,
+        default=None,
+        help=(
+            "Write the four recap artifacts into this folder. Default: "
+            "outputs/recap_bundle_<slate_date>"
+        ),
+    )
+    parser.add_argument(
+        "--environment-odds",
+        dest="environment_odds",
+        type=Path,
+        default=None,
+        help="environment_odds_*.csv with home/away/spread columns for the RB game-script cap",
+    )
 
 
 def _add_fade_guard_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2190,6 +2225,33 @@ def _sim_rerank_cli_override(args: argparse.Namespace) -> dict[str, Any]:
     return override
 
 
+def _recap_config(config: dict[str, Any], args: argparse.Namespace) -> None:
+    """Copy the recap bundle and odds paths into the runtime config."""
+
+    bundle = getattr(args, "recap_bundle_dir", None)
+    if bundle is not None:
+        config["recap_bundle_dir"] = str(bundle)
+    else:
+        config["recap_bundle_default"] = True
+    odds = getattr(args, "environment_odds", None)
+    if odds is not None:
+        config["environment_odds"] = str(odds)
+
+
+def _parse_exposure_overrides(values: list[str] | None) -> dict[str, float]:
+    """Parse ``--exposure-override NAME=CAP`` values into a name -> cap map."""
+
+    caps: dict[str, float] = {}
+    for raw in values or []:
+        token = str(raw or "").strip()
+        name, sep, cap_text = token.partition("=")
+        name = name.strip()
+        if not sep or not name:
+            raise ValueError(f"exposure override needs NAME=CAP: {raw!r}")
+        caps[name] = float(cap_text)
+    return caps
+
+
 def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if getattr(args, "stack", None):
@@ -2216,6 +2278,9 @@ def _optimizer_build_overrides(args: argparse.Namespace) -> dict[str, Any]:
         overrides["min_salary"] = args.min_salary
     if getattr(args, "min_skill_pool", None) is not None:
         overrides["min_skill_pool"] = int(args.min_skill_pool)
+    exposure_overrides = _parse_exposure_overrides(getattr(args, "exposure_override", None))
+    if exposure_overrides:
+        overrides["exposure_tiers"] = {"player_overrides": exposure_overrides}
     keep_team_dart = getattr(args, "keep_team_dart", 0.0)
     if keep_team_dart:
         overrides["keep_team_dart"] = float(keep_team_dart)

@@ -60,6 +60,7 @@ OPTIONAL_PASS_THROUGH_FIELDS = [
     "adot",
     "p15",
     "p85",
+    "role_flags",
 ]
 
 

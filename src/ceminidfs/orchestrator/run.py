@@ -62,6 +62,24 @@ def run_pipeline(
     stage_config = {**cfg, "work_dir": work_dir, "season": season, "week": week}
     if participation_pbp is not None:
         stage_config["participation_pbp"] = participation_pbp
+    if "optimize" in selected_stages and not stage_config.get("team_spreads"):
+        # An odds failure must not stop the solve. The RB cap then stays off.
+        try:
+            from ceminidfs.data.vegas import (
+                build_week_vegas,
+                load_team_spreads,
+                team_spreads_from_frame,
+            )
+
+            odds_path = stage_config.get("environment_odds")
+            if odds_path:
+                stage_config["team_spreads"] = load_team_spreads(odds_path)
+            elif stage_config.get("fetch_vegas_spreads"):
+                stage_config["team_spreads"] = team_spreads_from_frame(
+                    build_week_vegas(season, week)
+                )
+        except Exception:
+            stage_config["team_spreads"] = {}
 
     # Copy the salary file before normalize or the solve. A failed copy stops the run.
     if "optimize" in selected_stages:
@@ -400,16 +418,121 @@ def _run_optimize(input_path: Path, output_path: Path, count: int, config: Mappi
                 **build_kwargs,
                 **_review_report_kwargs(config),
             )
+    legacy_archive = config.get("archive_dir")
+    archive_dir = _recap_bundle_dir(config, gate) or (
+        Path(str(legacy_archive)) if legacy_archive else None
+    )
+    exposure_caps: dict[str, str] = {}
+    role_flag_cells: dict[str, str] = {}
+    tier_rows: list[dict[str, str]] = []
+    role_cliff_rows: list[dict[str, str]] = []
+    if archive_dir is not None:
+        exposure_caps, role_flag_cells, tier_rows, role_cliff_rows = _recap_maps(
+            gate, config, input_path
+        )
     _projections, _report, summary = finish_lineup_outputs(
         gate,
         salary_csv=salary_path,
         lineups_csv=output_path,
         output_dir=output_path.parent,
-        archive_dir=config.get("archive_dir"),
+        archive_dir=archive_dir,
+        archive_lineups_csv=_upload_lineups_path(output_path),
+        exposure_caps=exposure_caps,
+        role_flags=role_flag_cells,
+        tier_rows=tier_rows,
+        role_cliff_rows=role_cliff_rows,
     )
+    if archive_dir is not None:
+        _assert_recap_bundle(archive_dir, gate.slate_date)
     print(summary)
     assert_lineups_clean(output_path, gate)
     return output_path
+
+
+def _recap_bundle_dir(config: Mapping[str, Any], gate: Any) -> Path | None:
+    explicit = config.get("recap_bundle_dir")
+    if explicit:
+        return Path(str(explicit))
+    if config.get("recap_bundle_default"):
+        return Path("outputs") / f"recap_bundle_{gate.slate_date}"
+    return None
+
+
+def _upload_lineups_path(lineups_csv: Path) -> Path:
+    from ceminidfs.export.optimize import fanduel_artifact_paths
+
+    upload, _ids = fanduel_artifact_paths(lineups_csv)
+    return upload if upload.is_file() else lineups_csv
+
+
+def _recap_maps(
+    gate: Any,
+    config: Mapping[str, Any],
+    input_path: Path,
+) -> tuple[dict[str, str], dict[str, str], list[dict[str, str]], list[dict[str, str]]]:
+    """Return projection cells and report rows for the recap bundle."""
+
+    from ceminidfs.data.availability import is_questionable_status
+    from ceminidfs.export.build_gates import name_key
+    from ceminidfs.export.exposure_tiers import exposure_cap_map, exposure_tier_config
+    from ceminidfs.export.optimize import role_flags_from_csv
+
+    flags_by_name = role_flags_from_csv(input_path)
+    caps: dict[str, float] = {}
+    reasons: dict[str, str] = {}
+    if exposure_tier_config(config) is not None:
+        caps, reasons = exposure_cap_map(
+            gate.players,
+            config=config,
+            spreads=config.get("team_spreads") or {},
+            role_flags=flags_by_name,
+        )
+    id_caps: dict[str, str] = {}
+    id_flags: dict[str, str] = {}
+    tier_rows: list[dict[str, str]] = []
+    role_cliff_rows: list[dict[str, str]] = []
+    for player in gate.players:
+        key = name_key(player.name)
+        if key in caps:
+            cell = f"{caps[key]:.2f}"
+            id_caps[player.player_id] = cell
+            tier_rows.append(
+                {
+                    "name": player.name,
+                    "team": player.team,
+                    "pos": player.pos,
+                    "salary": player.salary,
+                    "cap": cell,
+                    "reason": reasons.get(key, ""),
+                }
+            )
+        flag = flags_by_name.get(key, "")
+        if flag:
+            id_flags[player.player_id] = flag
+        if flag or is_questionable_status(player.effective_status):
+            role_cliff_rows.append(
+                {
+                    "name": player.name,
+                    "team": player.team,
+                    "pos": player.pos,
+                    "salary": player.salary,
+                    "injury_status": player.effective_status,
+                    "role_flags": flag,
+                }
+            )
+    return id_caps, id_flags, tier_rows, role_cliff_rows
+
+
+def _assert_recap_bundle(bundle_dir: Path, slate_date: str) -> None:
+    required = [
+        bundle_dir / "_src_fd_sun.csv",
+        bundle_dir / "_src_lineups.csv",
+        bundle_dir / f"projections_{slate_date}.csv",
+        bundle_dir / f"exposure_report_{slate_date}.md",
+    ]
+    for path in required:
+        if not path.is_file() or path.stat().st_size == 0:
+            raise RuntimeError(f"recap bundle file missing or empty: {path}")
 
 
 def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -459,6 +582,12 @@ def _optimize_build_kwargs(config: Mapping[str, Any]) -> dict[str, Any]:
     overrides = config.get("fppg_overrides")
     if overrides:
         kwargs["fppg_overrides"] = dict(overrides)
+    exposure_tiers = config.get("exposure_tiers")
+    if isinstance(exposure_tiers, Mapping) and exposure_tiers.get("enabled"):
+        kwargs["exposure_config"] = dict(exposure_tiers)
+    spreads = config.get("team_spreads")
+    if spreads:
+        kwargs["team_spreads"] = dict(spreads)
     return kwargs
 
 

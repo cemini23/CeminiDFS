@@ -214,6 +214,8 @@ PROJECTION_COLUMNS = (
     "proj_fd_pts",
     "ownership_proj",
     "injury_status",
+    "exposure_cap_applied",
+    "role_flags",
 )
 _LINEUP_POSITIONS = frozenset(
     {
@@ -515,11 +517,23 @@ def using_solver_csv(source: str | Path, gate: PrelockGate) -> Iterator[Path]:
         temporary.cleanup()
 
 
-def write_projections_csv(gate: PrelockGate, output_dir: str | Path) -> Path:
-    """Write ``projections_<slate_date>.csv`` for the salary pool."""
+def write_projections_csv(
+    gate: PrelockGate,
+    output_dir: str | Path,
+    *,
+    exposure_caps: Mapping[str, str] | None = None,
+    role_flags: Mapping[str, str] | None = None,
+) -> Path:
+    """Write ``projections_<slate_date>.csv`` for the salary pool.
+
+    ``exposure_caps`` and ``role_flags`` are keyed by player id. A missing key
+    writes an empty cell.
+    """
 
     destination = Path(output_dir) / f"projections_{gate.slate_date}.csv"
     destination.parent.mkdir(parents=True, exist_ok=True)
+    caps = exposure_caps or {}
+    flags = role_flags or {}
     rows = sorted(
         gate.players,
         key=lambda player: (player.team, player.name.casefold(), player.player_id),
@@ -538,6 +552,8 @@ def write_projections_csv(gate: PrelockGate, output_dir: str | Path) -> Path:
                     "proj_fd_pts": player.proj_fd_pts,
                     "ownership_proj": player.ownership_proj,
                     "injury_status": player.effective_status,
+                    "exposure_cap_applied": caps.get(player.player_id, ""),
+                    "role_flags": flags.get(player.player_id, ""),
                 }
             )
     return destination
@@ -714,8 +730,19 @@ def format_exposure_summary(gate: PrelockGate, lineup_csv: str | Path) -> str:
     )
 
 
-def write_exposure_report(gate: PrelockGate, lineup_csv: str | Path, output_dir: str | Path) -> Path:
-    """Write ``exposure_report_<slate_date>.md``."""
+def write_exposure_report(
+    gate: PrelockGate,
+    lineup_csv: str | Path,
+    output_dir: str | Path,
+    *,
+    tier_rows: Sequence[Mapping[str, str]] | None = None,
+    role_cliff_rows: Sequence[Mapping[str, str]] | None = None,
+) -> Path:
+    """Write ``exposure_report_<slate_date>.md``.
+
+    ``tier_rows`` is the tiered-cap audit. ``role_cliff_rows`` names every
+    doubtful player and every player with a role-cliff flag.
+    """
 
     destination = Path(output_dir) / f"exposure_report_{gate.slate_date}.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -726,6 +753,8 @@ def write_exposure_report(gate: PrelockGate, lineup_csv: str | Path, output_dir:
         team_rows,
         player_rows,
         title=f"# Exposure report {gate.slate_date}",
+        tier_rows=tier_rows or (),
+        role_cliff_rows=role_cliff_rows or (),
     )
     destination.write_text(body + "\n", encoding="utf-8")
     return destination
@@ -758,19 +787,40 @@ def finish_lineup_outputs(
     lineups_csv: str | Path,
     output_dir: str | Path | None = None,
     archive_dir: str | Path | None = None,
+    archive_lineups_csv: str | Path | None = None,
+    exposure_caps: Mapping[str, str] | None = None,
+    role_flags: Mapping[str, str] | None = None,
+    tier_rows: Sequence[Mapping[str, str]] | None = None,
+    role_cliff_rows: Sequence[Mapping[str, str]] | None = None,
 ) -> tuple[Path, Path, str]:
-    """Write the projection file and the exposure report. Archive when asked."""
+    """Write the projection file and the exposure report. Archive when asked.
+
+    ``archive_lineups_csv`` is the upload-ready file for the bundle. It
+    defaults to ``lineups_csv``.
+    """
 
     out_dir = Path(output_dir) if output_dir is not None else Path(lineups_csv).parent
-    projections = write_projections_csv(gate, out_dir)
-    report = write_exposure_report(gate, lineups_csv, out_dir)
+    projections = write_projections_csv(
+        gate,
+        out_dir,
+        exposure_caps=exposure_caps,
+        role_flags=role_flags,
+    )
+    report = write_exposure_report(
+        gate,
+        lineups_csv,
+        out_dir,
+        tier_rows=tier_rows,
+        role_cliff_rows=role_cliff_rows,
+    )
     if archive_dir:
         archive_slate_files(
             archive_dir,
             salary_csv=salary_csv,
             projections_csv=projections,
-            lineups_csv=lineups_csv,
+            lineups_csv=archive_lineups_csv or lineups_csv,
         )
+        _copy_file(report, Path(archive_dir) / report.name)
     summary = format_exposure_summary(gate, lineups_csv)
     return projections, report, summary
 
@@ -1067,6 +1117,8 @@ def _exposure_text(
     player_rows: Sequence[Mapping[str, str]],
     *,
     title: str,
+    tier_rows: Sequence[Mapping[str, str]] = (),
+    role_cliff_rows: Sequence[Mapping[str, str]] = (),
 ) -> str:
     del slate_date
     flags = [
@@ -1117,6 +1169,56 @@ def _exposure_text(
         )
     if not player_rows:
         lines.append("|  | 0 | 0.0% |  |  |  |")
+    lines.extend(
+        [
+            "",
+            "## Tiered-cap audit",
+            "| name | team | pos | salary | cap | reason |",
+            "| --- | --- | --- | ---: | ---: | --- |",
+        ]
+    )
+    for row in tier_rows:
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    _md(row.get("name", "")),
+                    _md(row.get("team", "")),
+                    _md(row.get("pos", "")),
+                    _md(row.get("salary", "")),
+                    _md(row.get("cap", "")),
+                    _md(row.get("reason", "")),
+                )
+            )
+            + " |"
+        )
+    if not tier_rows:
+        lines.append("|  |  |  |  |  | none |")
+    lines.extend(
+        [
+            "",
+            "## Questionable / role-cliff players",
+            "| name | team | pos | salary | injury_status | role_flags |",
+            "| --- | --- | --- | ---: | --- | --- |",
+        ]
+    )
+    for row in role_cliff_rows:
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    _md(row.get("name", "")),
+                    _md(row.get("team", "")),
+                    _md(row.get("pos", "")),
+                    _md(row.get("salary", "")),
+                    _md(row.get("injury_status", "")),
+                    _md(row.get("role_flags", "")),
+                )
+            )
+            + " |"
+        )
+    if not role_cliff_rows:
+        lines.append("|  |  |  |  |  | none |")
     return "\n".join(lines)
 
 

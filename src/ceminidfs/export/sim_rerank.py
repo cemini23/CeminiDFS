@@ -19,8 +19,9 @@ from .lineup_report import format_lineup_report, write_lineup_report
 from .optimize import (
     TEAM_DART_LOG,
     enforce_named_min_counts,
-    exposure_hatch_overrides,
+    merged_exposure_overrides,
     generate_lineups,
+    role_flags_from_csv,
     select_with_exposure_caps,
     write_lineup_artifacts,
 )
@@ -411,10 +412,16 @@ def optimize_with_sim_rerank(
         **kwargs,
     )
     exposure = kwargs["max_exposure"] if "max_exposure" in kwargs else 0.35
-    exposure_overrides = exposure_hatch_overrides(
+    role_flags = kwargs.get("role_flags")
+    if role_flags is None:
+        role_flags = role_flags_from_csv(csv_path)
+    exposure_overrides, _reasons = merged_exposure_overrides(
         _csv_player_rows(csv_path),
         kwargs.get("gates"),
         exposure,
+        exposure_config=kwargs.get("exposure_config"),
+        spreads=kwargs.get("team_spreads"),
+        role_flags=role_flags,
     )
     selected = rerank_lineups(
         candidate_lineups,

@@ -19,7 +19,14 @@ from .build_gates import (
     assert_exposure_cap,
     low_ceiling_names,
     low_ceiling_violations,
+    name_key,
     position_lead_exempt,
+)
+from .exposure_tiers import (
+    ROLE_CLIFF_WARNING,
+    exposure_cap_map,
+    exposure_tier_config,
+    override_caps,
 )
 from .lineup_report import format_lineup_report, write_lineup_report
 from .normalize import SHOWDOWN_SITES, normalize_site
@@ -1209,6 +1216,137 @@ def _install_core_rule(optimizer: Any, site_key: str, gates: Mapping[str, Any] |
         )
 
 
+def role_flags_from_csv(csv_path: str | Path) -> dict[str, str]:
+    """Return ``{folded name: role_flags}`` from a normalized player CSV."""
+
+    path = Path(csv_path)
+    if not path.is_file():
+        return {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        lowered = {
+            str(name or "").strip().lower(): name
+            for name in (reader.fieldnames or [])
+            if str(name or "").strip()
+        }
+        flag_column = lowered.get("role_flags")
+        if flag_column is None:
+            return {}
+        flags: dict[str, str] = {}
+        for row in reader:
+            value = str(row.get(flag_column, "") or "").strip()
+            if not value:
+                continue
+            name = _csv_row_name(row, lowered)
+            key = name_key(name)
+            if key:
+                flags[key] = value
+    return flags
+
+
+def _csv_row_name(row: Mapping[str, Any], lowered: Mapping[str, str]) -> str:
+    for column in ("nickname", "name", "full name", "player_name", "player name"):
+        source = lowered.get(column)
+        if source is None:
+            continue
+        value = str(row.get(source, "") or "").strip()
+        if value:
+            return value
+    first = " ".join(
+        str(row.get(lowered[key], "") or "").strip()
+        for key in ("first name", "first_name")
+        if key in lowered
+    ).strip()
+    last = " ".join(
+        str(row.get(lowered[key], "") or "").strip()
+        for key in ("last name", "last_name")
+        if key in lowered
+    ).strip()
+    return " ".join(part for part in (first, last) if part).strip()
+
+
+def _player_display_name(player: Any) -> str:
+    for attribute in ("full_name", "name", "player_name"):
+        value = getattr(player, attribute, None)
+        if value not in (None, ""):
+            return str(value).strip()
+    if isinstance(player, Mapping):
+        for key in ("full_name", "name", "player_name"):
+            value = player.get(key)
+            if value not in (None, ""):
+                return str(value).strip()
+    return ""
+
+
+def merged_exposure_overrides(
+    players: Iterable[Any],
+    gates: Mapping[str, Any] | None,
+    max_exposure: float | None,
+    *,
+    exposure_config: Mapping[str, Any] | None = None,
+    spreads: Mapping[str, Any] | None = None,
+    role_flags: Mapping[str, str] | None = None,
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Return ``({folded name: cap}, {folded name: reason})``.
+
+    A salary tier or a guard sets the cap for a skill player. The exposure
+    hatch then applies only to a player the tiers do not name, such as a DST.
+    An explicit per-player override always wins.
+    """
+
+    pool = list(players)
+    hatch = exposure_hatch_overrides(pool, gates, max_exposure)
+    merged: dict[str, float] = {}
+    reasons: dict[str, str] = {}
+    if exposure_tier_config(exposure_config) is not None:
+        caps, reasons = exposure_cap_map(
+            pool,
+            config=exposure_config,
+            spreads=spreads,
+            role_flags=role_flags,
+        )
+        merged.update(caps)
+        for name, cap in hatch.items():
+            key = name_key(name)
+            if key in merged:
+                continue
+            merged[key] = float(cap)
+    else:
+        for name, cap in hatch.items():
+            merged[name_key(name)] = float(cap)
+    merged.update(override_caps(exposure_config))
+    return merged, reasons
+
+
+def _print_presolve_exposure(
+    overrides: Mapping[str, float],
+    reasons: Mapping[str, str],
+    role_flags: Mapping[str, str] | None,
+    max_exposure: float | None,
+    players: Iterable[Any],
+) -> None:
+    display: dict[str, str] = {}
+    for player in players:
+        name = _player_display_name(player)
+        if name:
+            display[name_key(name)] = name
+
+    lines: list[str] = []
+    for key, cap in sorted(overrides.items()):
+        if max_exposure is not None and cap >= float(max_exposure):
+            continue
+        name = display.get(key, key)
+        reason = reasons.get(key, "tier")
+        lines.append(f"  {name}: cap {cap:.2f} ({reason})")
+    for key in sorted(role_flags or {}):
+        name = display.get(key, key)
+        lines.append(f"  {name}: {ROLE_CLIFF_WARNING}")
+    if not lines:
+        return
+    print("exposure caps before solve:", file=sys.stderr)
+    print("\n".join(lines), file=sys.stderr)
+
+
 def _configure_solver(
     optimizer: Any,
     site_key: str,
@@ -1220,7 +1358,10 @@ def _configure_solver(
     max_repeating_players: int | None,
     uniques: int | None,
     require_count: bool,
-) -> tuple[int, float | None, Any, bool]:
+    exposure_config: Mapping[str, Any] | None = None,
+    team_spreads: Mapping[str, Any] | None = None,
+    role_flags: Mapping[str, str] | None = None,
+) -> tuple[int, float | None, dict[str, float], dict[str, str], bool]:
     _apply_repeating_limits(
         optimizer,
         site_key,
@@ -1243,7 +1384,15 @@ def _configure_solver(
 
     _install_core_rule(optimizer, site_key, gates)
 
-    overrides = exposure_hatch_overrides(_optimizer_pool(optimizer), gates, max_exposure)
+    pool = _optimizer_pool(optimizer)
+    overrides, reasons = merged_exposure_overrides(
+        pool,
+        gates,
+        max_exposure,
+        exposure_config=exposure_config,
+        spreads=team_spreads,
+        role_flags=role_flags,
+    )
     request_count = count
     _apply_solver_exposure_hatch(
         optimizer,
@@ -1251,7 +1400,7 @@ def _configure_solver(
         book_count=count,
         request_n=request_count,
     )
-    return request_count, max_exposure, overrides, pair_guard
+    return request_count, max_exposure, overrides, reasons, pair_guard
 
 
 def _enforce_pair_guard(lineups: list[Any], count: int, site_key: str) -> list[Any]:
@@ -1353,6 +1502,9 @@ def generate_lineups(
     gates: Mapping[str, Any] | None = None,
     fppg_overrides: Mapping[str, float] | None = None,
     qb_starters: Mapping[str, str] | str | Path | None = None,
+    exposure_config: Mapping[str, Any] | None = None,
+    team_spreads: Mapping[str, Any] | None = None,
+    role_flags: Mapping[str, str] | None = None,
 ) -> list[Any]:
     """Generate pydfs lineup objects without writing them."""
 
@@ -1392,7 +1544,10 @@ def generate_lineups(
         friday_trend_keys=friday_trend_keys,
     )
 
-    request_count, max_exposure, overrides, pair_guard = _configure_solver(
+    if role_flags is None:
+        role_flags = role_flags_from_csv(csv_file)
+
+    request_count, max_exposure, overrides, reasons, pair_guard = _configure_solver(
         optimizer,
         site_key,
         gates,
@@ -1402,6 +1557,16 @@ def generate_lineups(
         max_repeating_players=max_repeating_players,
         uniques=uniques,
         require_count=require_count,
+        exposure_config=exposure_config,
+        team_spreads=team_spreads,
+        role_flags=role_flags,
+    )
+    _print_presolve_exposure(
+        overrides,
+        reasons,
+        role_flags,
+        max_exposure,
+        _optimizer_pool(optimizer),
     )
 
     return _request_and_validate(
@@ -1484,6 +1649,9 @@ def optimize_lineups(
     gates: Mapping[str, Any] | None = None,
     fppg_overrides: Mapping[str, float] | None = None,
     qb_starters: Mapping[str, str] | str | Path | None = None,
+    exposure_config: Mapping[str, Any] | None = None,
+    team_spreads: Mapping[str, Any] | None = None,
+    role_flags: Mapping[str, str] | None = None,
 ) -> int:
     """Optimize lineups from a pydfs CSV and return the number written."""
 
@@ -1512,6 +1680,9 @@ def optimize_lineups(
         gates=gates,
         fppg_overrides=fppg_overrides,
         qb_starters=qb_starters,
+        exposure_config=exposure_config,
+        team_spreads=team_spreads,
+        role_flags=role_flags,
     )
     written = write_lineup_artifacts(lineups, out_path, site_key)
     from ceminidfs.export.review_reports import maybe_write_review_reports

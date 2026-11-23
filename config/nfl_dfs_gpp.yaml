@@ -27,6 +27,27 @@ buzz_signal:
 # the old 0.35 wall. The exposure hatch lifts one player to 0.30 when his
 # projection leads the next player at his position by 4.0 points.
 max_exposure: 0.20
+# Tiered exposure caps. The flat cap above still applies to a position that the
+# tiers do not name (DST and K). A skill player takes the salary tier cap.
+# The Week 11 recap showed 23%-35% exposure on cheap and mid-tier RBs and WRs.
+exposure_tiers:
+  enabled: true
+  stud:
+    min_salary: 7000
+    cap: 0.35
+  mid:
+    min_salary: 5500
+    max_salary: 7000
+    cap: 0.20
+  value:
+    max_salary: 5500
+    cap: 0.12
+  skill_positions: [QB, RB, WR, TE]
+  bad_game_script_rb:
+    spread_threshold: 10.0
+    cap: 0.10
+  role_cliff_cap: 0.10
+  player_overrides: {}
 gates:
   core:
     enabled: true

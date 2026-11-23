@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -32,6 +33,11 @@ from ceminidfs.models.dst import build_week_dst_projections
 from ceminidfs.models.ngs_elasticity import (
     NGS_SKIP_MARKER,
     apply_receiving_elasticity,
+)
+from ceminidfs.models.role_cliff import (
+    ROLE_CLIFF_WARNING,
+    detect_role_cliffs,
+    flagged_player_keys,
 )
 from ceminidfs.models.usage import build_week_usage, history_week_cutoff, player_game_stats_from_pbp
 from ceminidfs.models.volume import build_week_volume
@@ -250,7 +256,30 @@ def build_diy_projections_from_frames(
     )
     scored["opp"] = scored.get("opponent", pd.Series("", index=scored.index)).fillna("").astype(str)
     scored["game"] = scored.apply(_game_key_from_row, axis=1)
+    role_flags = _role_flags_from_pbp(historical_pbp)
+    if "player_id" in scored.columns:
+        scored["role_flags"] = (
+            scored["player_id"].astype(str).map(role_flags).fillna("")
+        )
+    else:
+        scored["role_flags"] = ""
+    flagged = sorted(key for key in role_flags)
+    if flagged:
+        print(
+            "role cliff: flagged " + ", ".join(flagged),
+            file=sys.stderr,
+        )
     return scored
+
+
+def _role_flags_from_pbp(pbp: pd.DataFrame) -> dict[str, str]:
+    """Return ``{player_id: ROLE_CLIFF_WARNING}`` for flagged players."""
+
+    if pbp is None or pbp.empty:
+        return {}
+    stats = player_game_stats_from_pbp(pbp)
+    results = detect_role_cliffs(stats)
+    return {key: ROLE_CLIFF_WARNING for key in flagged_player_keys(results)}
 
 
 def merge_projections_into_canonical(
@@ -275,6 +304,7 @@ def merge_projections_into_canonical(
         "snap_share",
         "l3_target_share",
         "adot",
+        "role_flags",
     ):
         if column in stats_df.columns:
             merge_columns.append(column)
@@ -310,7 +340,7 @@ def merge_projections_into_canonical(
                 mapped["workload_index"] = projection.get("workload_index")
             if "workload_risk_flag" in projection:
                 mapped["workload_risk_flag"] = projection.get("workload_risk_flag")
-            for field in ("is_qb_starter", "snap_share", "l3_target_share", "adot"):
+            for field in ("is_qb_starter", "snap_share", "l3_target_share", "adot", "role_flags"):
                 if field in projection and projection.get(field) not in (None, ""):
                     mapped[field] = projection.get(field)
         merged.append(mapped)

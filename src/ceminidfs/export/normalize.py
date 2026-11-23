@@ -22,6 +22,7 @@ PASS_THROUGH_FIELDS = [
     "adot",
     "p15",
     "p85",
+    "role_flags",
 ]
 
 NAME_KEYS = ("name", "player", "player name", "nickname", "full name", "player_key")

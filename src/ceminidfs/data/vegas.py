@@ -89,6 +89,65 @@ def build_week_vegas(season: int, week: int) -> pd.DataFrame:
     return enrich_schedules_with_vegas(schedules)
 
 
+def team_spreads_from_frame(frame: pd.DataFrame) -> Dict[str, float]:
+    """Return ``{team: spread}`` from a schedules or vegas frame.
+
+    The sign follows the betting convention that :func:`extract_spread_total`
+    returns: a positive number means the team is the underdog. The home team
+    reads ``spread``. The away team reads the opposite sign.
+    """
+
+    spreads: Dict[str, float] = {}
+    if frame is None or getattr(frame, "empty", True):
+        return spreads
+    for row in frame.to_dict(orient="records"):
+        spread, _total = extract_spread_total(row)
+        if spread is None:
+            continue
+        home_team = _first_value(row, HOME_TEAM_COLUMNS)
+        away_team = _first_value(row, AWAY_TEAM_COLUMNS)
+        home = str(home_team or "").strip().upper()
+        away = str(away_team or "").strip().upper()
+        if home:
+            spreads[home] = float(spread)
+        if away:
+            spreads[away] = float(-spread)
+    return spreads
+
+
+def load_team_spreads(path: str | Path) -> Dict[str, float]:
+    """Return ``{team: spread}`` from an ``environment_odds_*.csv`` file.
+
+    The file needs a home team column, an away team column, and a spread
+    column. The names match :data:`HOME_TEAM_COLUMNS`, :data:`AWAY_TEAM_COLUMNS`,
+    and :data:`SPREAD_COLUMNS`.
+    """
+
+    frame = pd.read_csv(Path(path))
+    lowered = {str(name).strip().lower(): name for name in frame.columns}
+    home = _first_present(lowered, HOME_TEAM_COLUMNS)
+    away = _first_present(lowered, AWAY_TEAM_COLUMNS)
+    if home is None or away is None or _first_present(lowered, SPREAD_COLUMNS) is None:
+        raise ValueError(
+            "odds CSV needs home_team, away_team, and spread or spread_line columns: "
+            f"{Path(path)}"
+        )
+    # Keep the spread column name. ``extract_spread_total`` flips the sign of
+    # an nflverse ``spread_line`` and nothing else.
+    renamed = frame.rename(columns={home: "home_team", away: "away_team"})
+    return team_spreads_from_frame(renamed)
+
+
+def _first_present(
+    lowered: Mapping[str, Any], columns: Tuple[str, ...]
+) -> Optional[str]:
+    for column in columns:
+        source = lowered.get(column)
+        if source is not None:
+            return str(source)
+    return None
+
+
 def write_week_vegas(season: int, week: int, out_path: Path | None = None) -> Path:
     from ceminidfs.data.fetch import week_cache_dir
 
