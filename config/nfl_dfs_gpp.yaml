@@ -66,3 +66,54 @@ gates:
 # Run `ceminidfs late-swap --prelock` before the 1:00 p.m. ET lock.
 prelock:
   q_exposure_cap: 0.08
+# The three-game short slate cannot use the ten-game caps. A CLI flag turns
+# this block on. The block replaces max_exposure, min_salary, uniques,
+# exposure_tiers, and the core gate.
+short_slate:
+  enabled: true
+  max_teams: 6
+  max_exposure: 0.65
+  min_salary: 57500
+  uniques: 2
+  exposure_tiers:
+    enabled: true
+    stud:
+      min_salary: 7000
+      cap: 0.65
+    mid:
+      min_salary: 5500
+      max_salary: 7000
+      cap: 0.35
+    value:
+      max_salary: 5500
+      cap: 0.20
+    skill_positions: [QB, RB, WR, TE]
+    bad_game_script_rb:
+      spread_threshold: 10.0
+      cap: 0.10
+    role_cliff_cap: 0.10
+    # The operator names these six as core studs. Swift costs 6700, so the
+    # salary tier alone would hold him at 35%.
+    player_overrides:
+      Jahmyr Gibbs: 0.65
+      CeeDee Lamb: 0.65
+      Amon-Ra St. Brown: 0.65
+      Emmett Johnson: 0.65
+      James Cook III: 0.65
+      D'Andre Swift: 0.65
+      Salvon Ahmed: 0.05
+  gates:
+    core:
+      enabled: false
+      size: 5
+      max_count: 12
+    low_ceiling:
+      enabled: true
+      projection_floor: 8.0
+      max_per_lineup: 1
+      skill_only: true
+    exposure_hatch:
+      enabled: false
+      lead_margin: 4.0
+      cap: 0.30
+

@@ -3,11 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ceminidfs.config import runtime_config
-from ceminidfs.data.availability import PrelockExcludeError
+from ceminidfs.data.availability import (
+    PrelockExcludeError,
+    assert_upload_ready,
+    build_prelock_gate,
+    upload_id_prefix,
+)
 
 try:
     from ceminidfs.export.pool_guards import DEFAULT_MIN_SKILL_POOL
@@ -935,10 +941,12 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
     config.update(_prelock_config(args))
     config["salary_path"] = str(args.csv_path)
     _recap_config(config, args)
+    _apply_short_slate(config, args)
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
     try:
         output = _run_optimize(args.csv_path, args.output_path, count, config)
+        _assert_bundle_upload(config, args)
     except PrelockExcludeError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -1326,6 +1334,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     config.update(_prelock_config(args))
     config["salary_path"] = str(args.salary)
     _recap_config(config, args)
+    _apply_short_slate(config, args)
     config["fetch_vegas_spreads"] = True
     count = args.final_count if _sim_rerank_enabled(config) else args.count
     config["count"] = count
@@ -1337,6 +1346,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             stages=args.stages,
             config=config,
         )
+        _assert_bundle_upload(config, args)
     except PrelockExcludeError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -2139,6 +2149,12 @@ def _add_optimizer_build_arguments(parser: argparse.ArgumentParser) -> None:
             "cap or a role-cliff cap, and may raise or lower it"
         ),
     )
+    parser.add_argument(
+        "--short-slate",
+        action="store_true",
+        default=False,
+        help="Apply the short_slate block from the config profile (three-game slates)",
+    )
 
 
 def _add_recap_bundle_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2158,6 +2174,13 @@ def _add_recap_bundle_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=None,
         help="environment_odds_*.csv with home/away/spread columns for the RB game-script cap",
+    )
+    parser.add_argument(
+        "--expected-count",
+        dest="expected_count",
+        type=int,
+        default=0,
+        help="Refuse the upload book when its lineup count differs from N (0 = off)",
     )
 
 
@@ -2223,6 +2246,63 @@ def _sim_rerank_cli_override(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "rerank_mode", None) is not None:
         override["mode"] = args.rerank_mode
     return override
+
+
+def _apply_short_slate(config: dict[str, Any], args: argparse.Namespace) -> None:
+    """Replace the ten-game caps with the short_slate block when the flag is set."""
+
+    if not bool(getattr(args, "short_slate", False)):
+        return
+    block = config.get("short_slate")
+    if not isinstance(block, Mapping):
+        raise ValueError("--short-slate needs a short_slate block in the config")
+    if not bool(block.get("enabled", False)):
+        raise ValueError("--short-slate needs short_slate.enabled: true")
+
+    config["max_exposure"] = block.get("max_exposure")
+    config["min_salary"] = block.get("min_salary")
+    config["uniques"] = block.get("uniques")
+    # An explicit CLI value wins over the block.
+    for key in ("max_exposure", "min_salary", "uniques"):
+        value = getattr(args, key, None)
+        if value is not None:
+            config[key] = value
+    tiers = deepcopy(dict(block.get("exposure_tiers") or {}))
+    existing = config.get("exposure_tiers")
+    if isinstance(existing, Mapping):
+        overrides = existing.get("player_overrides")
+        if isinstance(overrides, Mapping) and overrides:
+            merged = dict(tiers.get("player_overrides") or {})
+            merged.update(overrides)
+            tiers["player_overrides"] = merged
+    config["exposure_tiers"] = tiers
+    config["gates"] = deepcopy(dict(block.get("gates") or {}))
+
+
+def _assert_bundle_upload(config: Mapping[str, Any], args: argparse.Namespace) -> None:
+    """Validate the upload book in the recap bundle after the pipeline returns."""
+
+    bundle = config.get("recap_bundle_dir")
+    salary_path = config.get("salary_path")
+    if not bundle or not salary_path:
+        return
+    lineup_path = Path(str(bundle)) / "_src_lineups.csv"
+    gate = build_prelock_gate(
+        salary_path,
+        scratch_csv=config.get("scratch_csv"),
+        qb_starters_csv=config.get("qb_starters_csv"),
+        exclude_players=config.get("exclude_players"),
+        questionable_policy=str(config.get("include_questionable_policy") or "keep"),
+        slate_date=config.get("slate_date"),
+        lineup_path=lineup_path,
+    )
+    assert_upload_ready(
+        lineup_path,
+        gate,
+        slate_prefix=upload_id_prefix(gate),
+        expected_count=int(getattr(args, "expected_count", 0) or 0),
+        min_uniques=int(config.get("uniques") or 0),
+    )
 
 
 def _recap_config(config: dict[str, Any], args: argparse.Namespace) -> None:

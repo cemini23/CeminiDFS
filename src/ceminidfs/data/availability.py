@@ -55,6 +55,8 @@ def normalize_injury_status(value: Any) -> str:
         return ""
     if token in UNAVAILABLE_STATUSES:
         return token
+    if token.startswith("PRACTICE"):
+        return "PS"
     for prefix in ("OUT", "DOUBTFUL", "IR", "PUP", "EXEMPT", "SUSPENDED"):
         if token.startswith(prefix):
             return prefix
@@ -192,6 +194,8 @@ PRELOCK_HARD_STATUSES = frozenset(
         "NFI",
         "PUP",
         "SUSPENDED",
+        "PS",
+        "PRACTICE SQUAD",
     }
 )
 
@@ -238,6 +242,8 @@ _TRUTHY = frozenset({"1", "true", "yes", "y", "t", "x", "exclude"})
 _ID_KEYS = ("id", "player_id", "fd_id", "playerid")
 _NAME_KEYS = ("name", "player", "player_name", "full name")
 _TEAM_KEYS = ("team", "team abbrev", "teamabbrev", "club", "tm")
+_OPPONENT_KEYS = ("opponent", "opp", "opponent team")
+_GAME_KEYS = ("game", "game info")
 _POS_KEYS = ("position", "pos", "fd_position", "roster position")
 _SALARY_KEYS = ("salary", "fd_salary", "salaryflex")
 _PROJ_KEYS = (
@@ -284,6 +290,7 @@ class SlatePlayer:
     proj_fd_pts: str
     ownership_proj: str
     fd_status: str
+    opponent: str = ""
     scratch_status: str = ""
     effective_status: str = ""
     hard_excluded: bool = False
@@ -721,13 +728,18 @@ def format_exposure_summary(gate: PrelockGate, lineup_csv: str | Path) -> str:
     """Return the stdout exposure summary."""
 
     team_rows, player_rows, count = exposure_tables(gate, lineup_csv)
-    return _exposure_text(
+    lineups = read_lineup_tokens(lineup_csv)
+    text = _exposure_text(
         gate.slate_date,
         count,
         team_rows,
         player_rows,
         title=f"exposure summary {gate.slate_date}",
+        pool_players=gate.players,
+        lineups=lineups,
     )
+    resolved = _resolve_lineups(gate.players, lineups)
+    return text + "\n\n" + _top_skill_text(gate.players, resolved, count)
 
 
 def write_exposure_report(
@@ -755,6 +767,8 @@ def write_exposure_report(
         title=f"# Exposure report {gate.slate_date}",
         tier_rows=tier_rows or (),
         role_cliff_rows=role_cliff_rows or (),
+        pool_players=gate.players,
+        lineups=read_lineup_tokens(lineup_csv),
     )
     destination.write_text(body + "\n", encoding="utf-8")
     return destination
@@ -836,6 +850,135 @@ def assert_lineups_clean(lineup_csv: str | Path, gate: PrelockGate) -> None:
         raise PrelockExcludeError("hard-excluded player in " + "; ".join(hits))
 
 
+def upload_id_prefix(gate: PrelockGate) -> str:
+    """Return the most common ``Id`` prefix before the first dash."""
+
+    counts: dict[str, int] = defaultdict(int)
+    for player in gate.players:
+        ident = str(player.player_id or "").strip()
+        if "-" not in ident:
+            continue
+        prefix = ident.split("-", 1)[0].strip()
+        if prefix:
+            counts[prefix] += 1
+    if not counts:
+        return ""
+    return sorted(counts, key=lambda prefix: (-counts[prefix], prefix))[0]
+
+
+def upload_validation_issues(
+    lineup_csv: str | Path,
+    gate: PrelockGate,
+    *,
+    slate_prefix: str | None = None,
+    expected_count: int = 0,
+    salary_cap: int = 60000,
+    min_uniques: int = 0,
+) -> list[str]:
+    """Return one message per upload-book violation. An empty list is clean."""
+
+    path = Path(lineup_csv)
+    if not path.is_file():
+        return [f"lineup file missing; fail closed: {path}"]
+
+    lineups = read_lineup_tokens(path)
+    issues: list[str] = []
+    if expected_count > 0 and len(lineups) != expected_count:
+        issues.append(
+            f"lineup count {len(lineups)} does not match expected {expected_count}"
+        )
+
+    by_id = {player.player_id: player for player in gate.players if player.player_id}
+    name_counts: dict[str, int] = defaultdict(int)
+    for player in gate.players:
+        folded = fold_person(player.name)
+        if folded:
+            name_counts[folded] += 1
+    name_to_id = {
+        fold_person(player.name): player.player_id
+        for player in gate.players
+        if player.player_id and name_counts.get(fold_person(player.name)) == 1
+    }
+
+    prefix = str(slate_prefix or "").strip()
+    seen_sets: dict[frozenset[str], int] = {}
+    lineup_sets: list[frozenset[str]] = []
+    for index, tokens in enumerate(lineups, start=1):
+        ids: list[str] = []
+        salary = 0.0
+        for token in tokens:
+            name, ident = split_lineup_token(token)
+            if not ident:
+                ident = name_to_id.get(fold_person(name), "")
+            if not ident:
+                issues.append(f"lineup {index}: player token has no id: {token}")
+                ids.append(fold_person(name) or token)
+                continue
+            if prefix and not ident.startswith(f"{prefix}-"):
+                issues.append(
+                    f"lineup {index}: id {ident} does not start with {prefix}-"
+                )
+            player = by_id.get(ident)
+            if player is None:
+                issues.append(f"lineup {index}: id {ident} is not a gate player")
+                ids.append(ident)
+                continue
+            ids.append(ident)
+            amount = _salary_amount(player.salary)
+            if amount is not None:
+                salary += amount
+
+        signature = frozenset(ids)
+        if signature in seen_sets:
+            issues.append(
+                f"lineup {index} duplicates lineup {seen_sets[signature]}"
+            )
+        else:
+            seen_sets[signature] = index
+        lineup_sets.append(signature)
+        if salary > float(salary_cap):
+            issues.append(
+                f"lineup {index}: salary {salary:.0f} is above the {salary_cap} cap"
+            )
+
+    for hit in lineup_exclude_hits(path, gate):
+        issues.append(f"hard-excluded player in {hit}")
+
+    if min_uniques > 0:
+        for left in range(len(lineup_sets)):
+            for right in range(left + 1, len(lineup_sets)):
+                different = len(lineup_sets[left] - lineup_sets[right])
+                if different < min_uniques:
+                    issues.append(
+                        f"lineups {left + 1} and {right + 1} have {different} "
+                        f"different players; need at least {min_uniques}"
+                    )
+    return issues
+
+
+def assert_upload_ready(
+    lineup_csv: str | Path,
+    gate: PrelockGate,
+    *,
+    slate_prefix: str | None = None,
+    expected_count: int = 0,
+    salary_cap: int = 60000,
+    min_uniques: int = 0,
+) -> None:
+    """Raise when the upload book breaks a hard gate."""
+
+    issues = upload_validation_issues(
+        lineup_csv,
+        gate,
+        slate_prefix=slate_prefix,
+        expected_count=expected_count,
+        salary_cap=salary_cap,
+        min_uniques=min_uniques,
+    )
+    if issues:
+        raise PrelockExcludeError("upload not ready: " + "; ".join(issues))
+
+
 def _load_salary_players(path: Path) -> list[SlatePlayer]:
     players: list[SlatePlayer] = []
     with path.open(newline="", encoding="utf-8-sig") as handle:
@@ -849,17 +992,20 @@ def _load_salary_players(path: Path) -> list[SlatePlayer]:
             if not name and not player_id:
                 continue
             team_raw = _pick(row, lowered, *_TEAM_KEYS)
+            team = normalize_join_team(team_raw)
+            opponent = _row_opponent(row, lowered, team)
             status = normalize_injury_status(_pick(row, lowered, *_INJURY_KEYS))
             player = SlatePlayer(
                 player_id=player_id,
                 name=name,
                 team_raw=team_raw,
-                team=normalize_join_team(team_raw),
+                team=team,
                 pos=_pos_token(_pick(row, lowered, *_POS_KEYS)),
                 salary=_number_text(_pick(row, lowered, *_SALARY_KEYS)),
                 proj_fd_pts=_number_text(_pick(row, lowered, *_PROJ_KEYS)),
                 ownership_proj=_number_text(_pick(row, lowered, *_OWN_KEYS)),
                 fd_status=status,
+                opponent=opponent,
                 effective_status=status,
             )
             if is_prelock_hard_status(status):
@@ -1110,6 +1256,269 @@ def _row_is_banned(row: Mapping[str, str], lowered: Mapping[str, str], gate: Pre
     return bool(folded) and folded in gate.banned_names
 
 
+def _player_key(player: SlatePlayer) -> str:
+    return player.player_id or fold_person(player.name)
+
+
+def _player_lookup(
+    players: Sequence[SlatePlayer],
+) -> tuple[dict[str, SlatePlayer], dict[str, SlatePlayer]]:
+    by_id: dict[str, SlatePlayer] = {}
+    name_counts: dict[str, int] = defaultdict(int)
+    for player in players:
+        if player.player_id:
+            by_id[player.player_id] = player
+        folded = fold_person(player.name)
+        if folded:
+            name_counts[folded] += 1
+    by_name = {
+        fold_person(player.name): player
+        for player in players
+        if fold_person(player.name) and name_counts.get(fold_person(player.name)) == 1
+    }
+    return by_id, by_name
+
+
+def _resolve_lineups(
+    players: Sequence[SlatePlayer],
+    lineups: Sequence[Sequence[str]],
+) -> list[list[SlatePlayer | None]]:
+    by_id, by_name = _player_lookup(players)
+    resolved: list[list[SlatePlayer | None]] = []
+    for tokens in lineups:
+        row: list[SlatePlayer | None] = []
+        for token in tokens:
+            name, ident = split_lineup_token(token)
+            player = by_id.get(ident) if ident else None
+            if player is None:
+                player = by_name.get(fold_person(name))
+            row.append(player)
+        resolved.append(row)
+    return resolved
+
+
+def _resolved_counts(resolved: Sequence[Sequence[SlatePlayer | None]]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for lineup in resolved:
+        seen: set[str] = set()
+        for player in lineup:
+            if player is None:
+                continue
+            key = _player_key(player)
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[key] += 1
+    return counts
+
+
+def _position_section(
+    title: str,
+    position: str,
+    players: Sequence[SlatePlayer],
+    resolved: Sequence[Sequence[SlatePlayer | None]],
+    count: int,
+) -> list[str]:
+    lines = [
+        "",
+        f"## {title}",
+        "| name | team | lineups | pct | salary |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    counts = _resolved_counts(resolved)
+    rows = [
+        player
+        for player in players
+        if not player.hard_excluded and _pos_token(player.pos) == position
+    ]
+    rows.sort(
+        key=lambda player: (
+            -counts.get(_player_key(player), 0),
+            player.team,
+            player.name.casefold(),
+            _player_key(player),
+        )
+    )
+    for player in rows:
+        hits = counts.get(_player_key(player), 0)
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    _md(player.name),
+                    _md(player.team),
+                    str(hits),
+                    _pct(hits, count),
+                    _md(player.salary),
+                )
+            )
+            + " |"
+        )
+    if not rows:
+        lines.append("|  |  | 0 | 0.0% |  |")
+    return lines
+
+
+def _stacks_section(
+    players: Sequence[SlatePlayer],
+    resolved: Sequence[Sequence[SlatePlayer | None]],
+    count: int,
+) -> list[str]:
+    lines = [
+        "",
+        "## Stacks",
+        "| qb_team | stack | lineups | pct | bring_back_pct |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    team_opponent: dict[str, str] = {}
+    for player in players:
+        if player.team and player.opponent:
+            team_opponent.setdefault(player.team, player.opponent)
+
+    stats: dict[tuple[str, str], list[int]] = {}
+    for lineup in resolved:
+        quarterback = next(
+            (
+                player
+                for player in lineup
+                if player is not None and _pos_token(player.pos) == "QB"
+            ),
+            None,
+        )
+        if quarterback is None:
+            continue
+        catchers = [
+            player
+            for player in lineup
+            if player is not None
+            and player is not quarterback
+            and player.team == quarterback.team
+            and _pos_token(player.pos) in {"WR", "TE"}
+        ]
+        size = len(catchers)
+        if size < 1:
+            continue
+        band = "QB+1" if size == 1 else "QB+2" if size == 2 else "QB+3"
+        entry = stats.setdefault((quarterback.team, band), [0, 0])
+        entry[0] += 1
+        opponent = quarterback.opponent or team_opponent.get(quarterback.team, "")
+        if opponent and any(
+            player is not None and player.team == opponent for player in lineup
+        ):
+            entry[1] += 1
+
+    order = {"QB+1": 1, "QB+2": 2, "QB+3": 3}
+    ranked = sorted(
+        stats.items(),
+        key=lambda item: (-item[1][0], item[0][0], order.get(item[0][1], 9)),
+    )[:5]
+    for (team, band), (hits, bring_back) in ranked:
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    _md(team),
+                    _md(band),
+                    str(hits),
+                    _pct(hits, count),
+                    _pct(bring_back, hits),
+                )
+            )
+            + " |"
+        )
+    if not ranked:
+        lines.append("|  |  | 0 | 0.0% | 0.0% |")
+    return lines
+
+
+def _salary_left_section(
+    resolved: Sequence[Sequence[SlatePlayer | None]],
+    count: int,
+) -> list[str]:
+    lines = [
+        "",
+        "## Salary left",
+        "| bucket | lineups | pct |",
+        "| --- | ---: | ---: |",
+    ]
+    lefts: list[float] = []
+    for lineup in resolved:
+        if not lineup or any(player is None for player in lineup):
+            continue
+        amounts = [_salary_amount(player.salary) for player in lineup if player is not None]
+        if not amounts or any(amount is None for amount in amounts):
+            continue
+        lefts.append(60000.0 - sum(amount for amount in amounts if amount is not None))
+
+    buckets = (
+        ("<500", lambda value: value < 500),
+        ("500-1500", lambda value: 500 <= value < 1500),
+        ("1500-2500", lambda value: 1500 <= value < 2500),
+        (">2500", lambda value: value >= 2500),
+    )
+    for label, matches in buckets:
+        hits = sum(1 for value in lefts if matches(value))
+        lines.append(f"| {label} | {hits} | {_pct(hits, count)} |")
+
+    if lefts:
+        ordered = sorted(lefts)
+        middle = len(ordered) // 2
+        if len(ordered) % 2:
+            median = ordered[middle]
+        else:
+            median = (ordered[middle - 1] + ordered[middle]) / 2.0
+        lines.append("")
+        lines.append(f"Median salary left: ${median:.0f}")
+    else:
+        lines.append("")
+        lines.append("Median salary left: n/a")
+    return lines
+
+
+def _top_skill_text(
+    players: Sequence[SlatePlayer],
+    resolved: Sequence[Sequence[SlatePlayer | None]],
+    count: int,
+) -> str:
+    lines = [
+        "## Top 20 skill players",
+        "| name | team | pos | lineups | pct | salary |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
+    ]
+    counts = _resolved_counts(resolved)
+    rows = [
+        player
+        for player in players
+        if not player.hard_excluded and _pos_token(player.pos) in {"QB", "RB", "WR", "TE"}
+    ]
+    rows.sort(
+        key=lambda player: (
+            -counts.get(_player_key(player), 0),
+            player.name.casefold(),
+            _player_key(player),
+        )
+    )
+    for player in rows[:20]:
+        hits = counts.get(_player_key(player), 0)
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    _md(player.name),
+                    _md(player.team),
+                    _md(player.pos),
+                    str(hits),
+                    _pct(hits, count),
+                    _md(player.salary),
+                )
+            )
+            + " |"
+        )
+    if not rows:
+        lines.append("|  |  |  | 0 | 0.0% |  |")
+    return "\n".join(lines)
+
+
 def _exposure_text(
     slate_date: str,
     count: int,
@@ -1119,6 +1528,8 @@ def _exposure_text(
     title: str,
     tier_rows: Sequence[Mapping[str, str]] = (),
     role_cliff_rows: Sequence[Mapping[str, str]] = (),
+    pool_players: Sequence[SlatePlayer] = (),
+    lineups: Sequence[Sequence[str]] = (),
 ) -> str:
     del slate_date
     flags = [
@@ -1219,6 +1630,11 @@ def _exposure_text(
         )
     if not role_cliff_rows:
         lines.append("|  |  |  |  |  | none |")
+    resolved = _resolve_lineups(pool_players, lineups)
+    lines.extend(_position_section("Quarterbacks", "QB", pool_players, resolved, count))
+    lines.extend(_position_section("Defenses", "DST", pool_players, resolved, count))
+    lines.extend(_stacks_section(pool_players, resolved, count))
+    lines.extend(_salary_left_section(resolved, count))
     return "\n".join(lines)
 
 
@@ -1272,11 +1688,53 @@ def _player_name(row: Mapping[str, Any], lowered: Mapping[str, str]) -> str:
     return " ".join(part for part in (first, last) if part).strip()
 
 
+def _row_opponent(row: Mapping[str, Any], lowered: Mapping[str, str], team: str) -> str:
+    """Return the opponent team token from an Opponent or Game column."""
+
+    opponent = _pick(row, lowered, *_OPPONENT_KEYS)
+    if opponent:
+        return normalize_join_team(opponent)
+    game = _pick(row, lowered, *_GAME_KEYS)
+    return _opponent_from_game(game, team)
+
+
+def _opponent_from_game(game: str, team: str) -> str:
+    """Return the other team from a FanDuel ``Game`` cell such as ``KC@BUF``."""
+
+    text = str(game or "").strip().upper()
+    if not text:
+        return ""
+    matchup = text.split(" ", 1)[0]
+    for separator in ("@", "VS"):
+        if separator not in matchup:
+            continue
+        left, _, right = matchup.partition(separator)
+        left = normalize_join_team(left)
+        right = normalize_join_team(right)
+        if team and team == left:
+            return right
+        if team and team == right:
+            return left
+    return ""
+
+
 def _pos_token(value: str) -> str:
     token = str(value or "").split("/")[0].strip().upper()
     if token in {"D", "DEF", "DST"}:
         return "DST"
     return token
+
+
+def _salary_amount(value: Any) -> float | None:
+    """Return a salary as a float. Return ``None`` for an empty or bad cell."""
+
+    text = str(value or "").strip().replace("$", "").replace(",", "")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 def _number_text(value: str) -> str:
