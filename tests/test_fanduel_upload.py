@@ -22,7 +22,7 @@ from ceminidfs.export.optimize import (
     select_with_exposure_caps,
 )
 
-UPLOAD_CELL = re.compile(r"^.+ \(\S+\)$")
+UPLOAD_CELL = re.compile(r"^[0-9]+(?:-[0-9]+)?:.+$")
 SALARY_PATH = Path(__file__).resolve().parent / "fixtures" / "synthetic_fd_slate.csv"
 
 
@@ -86,10 +86,35 @@ def test_optimize_writes_name_upload_and_id_files(tmp_path: Path):
     for row in upload_rows:
         assert all(UPLOAD_CELL.match(cell) for cell in row)
         for cell in row:
-            player_id = cell[cell.rfind("(") + 1 : cell.rfind(")")]
+            player_id = cell.split(":", 1)[0]
             assert player_id in source_ids
     for row in id_rows:
         assert all(cell in source_ids for cell in row)
+
+
+def test_main_lineup_file_is_fanduel_id_name(tmp_path: Path):
+    players_path = tmp_path / "players.csv"
+    normalize_csv(SALARY_PATH, players_path, site="fanduel")
+    source_ids = {row["Id"] for row in csv.DictReader(SALARY_PATH.open(encoding="utf-8-sig"))}
+    out_path = tmp_path / "lineups.csv"
+    optimize_lineups(players_path, out_path, site="fanduel", count=1, max_exposure=1.0, min_salary=0)
+    rows = list(csv.reader(out_path.open(encoding="utf-8")))
+    assert rows[0] == LINEUP_HEADERS["fanduel"]
+    for row in rows[1:]:
+        assert all(UPLOAD_CELL.match(cell) for cell in row)
+        assert all(cell.split(":", 1)[0] in source_ids for cell in row)
+
+
+def test_validate_upload_rows_rejects_bare_id():
+    from ceminidfs.export.optimize import validate_upload_rows
+
+    header = LINEUP_HEADERS["fanduel"]
+    good = [[f"137125-55050:Christian McCaffrey"] * len(header)]
+    validate_upload_rows(good, header)
+    with pytest.raises(ValueError, match="ID:Name"):
+        validate_upload_rows([["137125-55050"] * len(header)], header)
+    with pytest.raises(ValueError, match="ID:Name"):
+        validate_upload_rows([["Christian McCaffrey"] * len(header)], header)
 
 
 def test_dict_reader_collapses_duplicate_rb_production_keeps_both(tmp_path: Path):
@@ -185,14 +210,16 @@ def test_late_swap_loads_name_id_and_id_only_and_writes_upload(tmp_path: Path):
     swapped = list(csv.reader(out_path.open(encoding="utf-8")))
     assert swapped[0] == header
     for row in swapped[1:]:
-        assert "Josh Allen" in row
-        assert "Buffalo Bills" in row
+        assert all(UPLOAD_CELL.match(cell) for cell in row)
+        assert any("Josh Allen" in cell for cell in row)
+        assert any("Buffalo Bills" in cell for cell in row)
 
     upload_path = tmp_path / "late_swap_fanduel_upload.csv"
     assert upload_path.is_file()
     upload_rows = list(csv.reader(upload_path.open(encoding="utf-8")))[1:]
     assert all(UPLOAD_CELL.match(cell) for row in upload_rows for cell in row)
-    assert any(cell.startswith("Josh Allen (") for row in upload_rows for cell in row)
+    assert any("Josh Allen" in cell and cell.split(":", 1)[0] == ids["Josh Allen"]
+               for row in upload_rows for cell in row)
 
 
 def test_report_lists_questionable_player_lineup_count():

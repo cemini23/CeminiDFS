@@ -6,6 +6,7 @@ import argparse
 import csv
 import itertools
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -72,7 +73,12 @@ POSITION_ALIASES = {
     "MVP": ("MVP", "CPT"),
 }
 
-CELL_FORMATS = ("name", "name_id", "id")
+CELL_FORMATS = ("name", "name_id", "id_name", "id")
+
+# FanDuel's native upload cell is ``ID:Name`` (e.g. ``137125-55050:Christian
+# McCaffrey``). A bare id or a bare name fails the upload silently, so the
+# writer validates every cell before it writes the file.
+FANDUEL_UPLOAD_CELL = re.compile(r"^[0-9]+(?:-[0-9]+)?:\S.*$")
 
 # Log of every team the dart rule kept. ``generate_lineups`` fills the list.
 # The build report reads it after the solve. The list is process-local.
@@ -114,7 +120,11 @@ def _player_id(player: Any) -> str:
 
 
 def cell_format(player: Any, fmt: str = "name") -> str:
-    """Format one lineup seat as name, ``Name (id)``, or id-only."""
+    """Format one lineup seat.
+
+    ``name`` -> name only. ``id_name`` -> FanDuel ``ID:Name``. ``name_id`` ->
+    legacy ``Name (id)``. ``id`` -> id only.
+    """
 
     if fmt not in CELL_FORMATS:
         raise ValueError(f"unsupported cell format: {fmt}")
@@ -126,7 +136,32 @@ def cell_format(player: Any, fmt: str = "name") -> str:
         raise ValueError(f"missing FanDuel id for player: {name or '?'}")
     if fmt == "id":
         return player_id
+    if fmt == "id_name":
+        return f"{player_id}:{name}"
     return f"{name} ({player_id})"
+
+
+def validate_upload_rows(rows: list[list[str]], header: list[str]) -> None:
+    """Raise ``ValueError`` unless every cell is a FanDuel ``ID:Name`` cell.
+
+    FanDuel accepts ``Player ID + Name`` or a bare id, but a bare id is fragile
+    and a bare name fails outright. This guard rejects any export that is not in
+    the ``ID:Name`` form so a wrong book never reaches the operator.
+    """
+
+    for line_no, row in enumerate(rows, start=2):
+        if len(row) != len(header):
+            raise ValueError(
+                f"upload row {line_no} has {len(row)} cells; expected {len(header)}"
+            )
+        for column, cell in zip(header, row):
+            if not cell.strip():
+                raise ValueError(f"upload row {line_no} column {column} is empty")
+            if not FANDUEL_UPLOAD_CELL.match(cell):
+                raise ValueError(
+                    f"upload row {line_no} column {column}={cell!r} is not FanDuel "
+                    "ID:Name (bare-id and bare-name exports are rejected)"
+                )
 
 
 def _lineup_row(players: list[Any], header: list[str], fmt: str = "name") -> list[str]:
@@ -157,16 +192,27 @@ def fanduel_artifact_paths(out_path: str | Path) -> tuple[Path, Path]:
 
 
 def write_lineup_artifacts(lineups: list[Any], out_path: str | Path, site: str = "fanduel") -> int:
-    """Write name-only, FanDuel upload, and id-only lineup CSVs. Return row count."""
+    """Write lineup CSVs. Return row count.
+
+    For FanDuel the main file and the upload file are both native ``ID:Name``;
+    the ``*_fanduel_ids.csv`` helper stays id-only for downstream tooling. For
+    DraftKings the main file stays name-only.
+    """
 
     site_key = normalize_site(site)
     header = LINEUP_HEADERS[site_key]
     out_file = Path(out_path)
     upload_path, ids_path = fanduel_artifact_paths(out_file)
-    name_rows = [_lineup_row(lineup.players, header, fmt="name") for lineup in lineups]
-    upload_rows = [_lineup_row(lineup.players, header, fmt="name_id") for lineup in lineups]
+    is_fanduel = site_key == "fanduel"
+    main_fmt = "id_name" if is_fanduel else "name"
+    upload_fmt = "id_name" if is_fanduel else "name_id"
+    main_rows = [_lineup_row(lineup.players, header, fmt=main_fmt) for lineup in lineups]
+    upload_rows = [_lineup_row(lineup.players, header, fmt=upload_fmt) for lineup in lineups]
     id_rows = [_lineup_row(lineup.players, header, fmt="id") for lineup in lineups]
-    write_lineup_rows(name_rows, out_file, site_key)
+    if is_fanduel:
+        validate_upload_rows(main_rows, header)
+        validate_upload_rows(upload_rows, header)
+    write_lineup_rows(main_rows, out_file, site_key)
     write_lineup_rows(upload_rows, upload_path, site_key)
     write_lineup_rows(id_rows, ids_path, site_key)
     print(f"FanDuel upload -> {upload_path}")

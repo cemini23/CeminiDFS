@@ -123,3 +123,55 @@ def test_solver_override_map_applies_the_tier_and_the_rb_guard():
     assert overrides["cheap back"] <= 0.10
     assert reasons["cheap back"] == "rb_bad_game_script"
     assert overrides["stud receiver"] == pytest.approx(0.35)
+
+
+def _slate_player(name, pos, salary, team="KC", hard=False):
+    from ceminidfs.data.availability import SlatePlayer
+
+    return SlatePlayer(
+        player_id=f"137125-{name}",
+        name=name,
+        team_raw=team,
+        team=team,
+        pos=pos,
+        salary=str(salary),
+        proj_fd_pts="10.0",
+        ownership_proj="5.0",
+        fd_status="",
+        hard_excluded=hard,
+    )
+
+
+def test_top_stud_warning_fires_when_stud_rb_is_dry():
+    from ceminidfs.data.availability import top_stud_warnings
+
+    players = [
+        _slate_player("Stud Back", "RB", 9000),
+        _slate_player("Other Back", "RB", 4000),
+        _slate_player("Stud Wideout", "WR", 9500),
+    ]
+    # Stud Back appears in only 1 of 20 lineups (5%); floor is 8% for RB1.
+    resolved = [[players[0], players[2]]] + [[players[1], players[2]]] * 19
+    warnings = top_stud_warnings(players, resolved, 20)
+    assert any("TOP_STUD_ZERO_EXPOSURE" in w and "Stud Back" in w for w in warnings)
+    assert not any("Stud Wideout" in w for w in warnings)
+
+
+def test_top_stud_warning_silent_when_studs_are_exposed():
+    from ceminidfs.data.availability import top_stud_warnings
+
+    players = [
+        _slate_player("Stud Back", "RB", 9000),
+        _slate_player("Stud Wideout", "WR", 9500),
+    ]
+    resolved = [[players[0], players[1]]] * 10
+    assert top_stud_warnings(players, resolved, 10) == []
+
+
+def test_normalize_fanduel_team_folds_to_espn_form():
+    from ceminidfs.data.availability import normalize_fanduel_team
+
+    assert normalize_fanduel_team("JAC") == "JAX"
+    assert normalize_fanduel_team("WAS") == "WSH"
+    assert normalize_fanduel_team("CIN") == "CIN"
+    assert normalize_fanduel_team("jac") == "JAX"

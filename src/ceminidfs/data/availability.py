@@ -207,6 +207,16 @@ JOIN_TEAM_ALIASES = {
     "LAR": "LA",
 }
 
+# FanDuel ships JAC and WAS. ESPN ships JAX and WSH. These aliases fold a
+# FanDuel team token into the ESPN form so every ESPN/NFL join matches.
+# The FanDuel export Id and Name stay exact; only the join key changes.
+FANDUEL_TEAM_ALIASES = {
+    "JAC": "JAX",
+    "WAS": "WSH",
+    "ARZ": "ARI",
+    "LA": "LAR",
+}
+
 QUESTIONABLE_POLICIES = frozenset({"keep", "exclude"})
 TEAM_EXPOSURE_CAP = 0.45
 PROJECTION_COLUMNS = (
@@ -364,6 +374,17 @@ def normalize_join_team(team: Any) -> str:
 
     token = str(team or "").strip().upper()
     return JOIN_TEAM_ALIASES.get(token, token)
+
+
+def normalize_fanduel_team(team: Any) -> str:
+    """Return the ESPN join key for a FanDuel team abbreviation.
+
+    FanDuel ``JAC`` becomes ``JAX`` and FanDuel ``WAS`` becomes ``WSH``. The
+    FanDuel ``Id`` and ``Name`` are not part of this map.
+    """
+
+    token = str(team or "").strip().upper()
+    return FANDUEL_TEAM_ALIASES.get(token, token)
 
 
 def fold_person(value: Any) -> str:
@@ -1519,6 +1540,64 @@ def _top_skill_text(
     return "\n".join(lines)
 
 
+TOP_STUD_ZERO_SHARE = 0.05
+TOP_STUD_FLOOR_SHARE = 0.08
+
+
+def top_stud_warnings(
+    players: Sequence[SlatePlayer],
+    resolved: Sequence[Sequence[SlatePlayer | None]],
+    count: int,
+    *,
+    zero_share: float = TOP_STUD_ZERO_SHARE,
+    floor_share: float = TOP_STUD_FLOOR_SHARE,
+) -> list[str]:
+    """Return warnings for the highest-salary healthy RB and WR.
+
+    A top-3 salary RB or WR below ``zero_share`` raises ``TOP_STUD_ZERO_EXPOSURE``.
+    The highest-salary healthy RB and WR must clear ``floor_share`` unless the
+    operator explicitly fades them.
+    """
+
+    counts = _resolved_counts(resolved)
+    if count <= 0:
+        return []
+    warnings: list[str] = []
+    skill = [
+        player
+        for player in players
+        if not player.hard_excluded and _pos_token(player.pos) in {"RB", "WR"}
+    ]
+    for pos in ("RB", "WR"):
+        ranked = [player for player in skill if _pos_token(player.pos) == pos]
+        ranked.sort(key=lambda player: (-(_salary_amount(player.salary) or 0.0), player.name))
+        for rank, player in enumerate(ranked[:3], start=1):
+            hits = counts.get(_player_key(player), 0)
+            share = hits / count
+            if rank == 1 and share < floor_share:
+                warnings.append(
+                    f"TOP_STUD_ZERO_EXPOSURE: {pos}1 {player.name} "
+                    f"({_md(player.salary)}) at {_pct(hits, count)} is under the "
+                    f"{floor_share:.0%} floor"
+                )
+            elif share < zero_share:
+                warnings.append(
+                    f"TOP_STUD_ZERO_EXPOSURE: {pos}{rank} {player.name} "
+                    f"({_md(player.salary)}) at {_pct(hits, count)} is under "
+                    f"{zero_share:.0%}"
+                )
+    return warnings
+
+
+def _top_stud_section(warnings: Sequence[str]) -> list[str]:
+    lines = ["", "## Top-stud zero-exposure check"]
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+    else:
+        lines.append("- OK: no top-3 salary RB or WR below the exposure floor.")
+    return lines
+
+
 def _exposure_text(
     slate_date: str,
     count: int,
@@ -1532,6 +1611,8 @@ def _exposure_text(
     lineups: Sequence[Sequence[str]] = (),
 ) -> str:
     del slate_date
+    resolved = _resolve_lineups(pool_players, lineups)
+    stud_warnings = top_stud_warnings(pool_players, resolved, count)
     flags = [
         f"{row['team']} {row['flag']}"
         for row in team_rows
@@ -1542,6 +1623,7 @@ def _exposure_text(
         title,
         f"Lineups: {count}",
         flag_line,
+        *_top_stud_section(stud_warnings),
         "",
         "## Teams",
         "| team | lineups | pct | flag |",
@@ -1630,7 +1712,6 @@ def _exposure_text(
         )
     if not role_cliff_rows:
         lines.append("|  |  |  |  |  | none |")
-    resolved = _resolve_lineups(pool_players, lineups)
     lines.extend(_position_section("Quarterbacks", "QB", pool_players, resolved, count))
     lines.extend(_position_section("Defenses", "DST", pool_players, resolved, count))
     lines.extend(_stacks_section(pool_players, resolved, count))

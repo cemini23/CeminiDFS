@@ -68,7 +68,7 @@ def test_late_swap_preserves_locked_team_players_from_simple_lineup_csv(tmp_path
     assert count == 1
     rows = list(csv.reader(out_path.open(encoding="utf-8")))
     assert rows[0] == header
-    swapped_names = set(rows[1])
+    swapped_names = {cell.split(":", 1)[-1].strip() for cell in rows[1]}
     assert {
         "Patrick Mahomes",
         "Isiah Pacheco",
@@ -126,7 +126,7 @@ def test_late_swap_jac_alias_locks_jax(tmp_path: Path):
     count = late_swap_lineups(lineups_path, players_path, {"JAC"}, out_path, site="fanduel", count=1)
 
     assert count == 1
-    swapped = list(csv.reader(out_path.open(encoding="utf-8")))[1]
+    swapped = {cell.split(":", 1)[-1].strip() for cell in list(csv.reader(out_path.open(encoding="utf-8")))[1]}
     assert "Patrick Mahomes" in swapped
 
 
@@ -158,7 +158,7 @@ def test_late_swap_parses_locked_player_with_zero_fppg(tmp_path: Path):
     count = late_swap_lineups(lineups_path, players_path, {"KC"}, out_path, site="fanduel", count=1)
 
     assert count == 1
-    swapped = list(csv.reader(out_path.open(encoding="utf-8")))[1]
+    swapped = {cell.split(":", 1)[-1].strip() for cell in list(csv.reader(out_path.open(encoding="utf-8")))[1]}
     assert "Patrick Mahomes" in swapped
 
 
@@ -189,7 +189,7 @@ def test_late_swap_exclude_unlocked_name(tmp_path: Path):
     )
 
     assert count == 1
-    swapped = list(csv.reader(out_path.open(encoding="utf-8")))[1]
+    swapped = {cell.split(":", 1)[-1].strip() for cell in list(csv.reader(out_path.open(encoding="utf-8")))[1]}
     assert "Stefon Diggs" not in swapped
     assert "Patrick Mahomes" in swapped
 
@@ -238,8 +238,8 @@ def test_late_swap_two_lineups_two_lock_teams_keep_locked_names(tmp_path: Path):
 
     assert count == 2
     rows = list(csv.reader(out_path.open(encoding="utf-8")))
-    assert set(rows[1]) == set(first)
-    assert set(rows[2]) == set(second)
+    assert {cell.split(":", 1)[-1].strip() for cell in rows[1]} == set(first)
+    assert {cell.split(":", 1)[-1].strip() for cell in rows[2]} == set(second)
 
 
 def test_simple_lineup_loader_uses_csv_reader_not_dict_reader(tmp_path: Path):

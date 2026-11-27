@@ -82,6 +82,7 @@ def format_prelock_swap_checklist(
     return "\n".join(lines)
 
 _CELL_ID_SUFFIX = re.compile(r"\s*\(([^)]+)\)\s*$")
+_CELL_ID_PREFIX = re.compile(r"^([0-9]+(?:-[0-9]+)?):(.+)$")
 _ID_ONLY = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
 
 Q_OR_D_STATUS = frozenset({"Q", "QUESTIONABLE", "D", "DOUBTFUL"})
@@ -537,9 +538,12 @@ def _load_simple_lineups(lineups_file: Path, players: list[Any], site_key: str) 
 
 
 def _parse_lineup_cell(cell: str) -> tuple[str, str]:
-    """Return (name, player_id) from name-only, ``Name (id)``, or id-only cells."""
+    """Return (name, player_id) from ``ID:Name``, name-only, ``Name (id)``, or id-only."""
 
     text = cell.strip()
+    prefix = _CELL_ID_PREFIX.match(text)
+    if prefix:
+        return prefix.group(2).strip(), prefix.group(1).strip()
     match = _CELL_ID_SUFFIX.search(text)
     if match:
         return text[: match.start()].strip(), match.group(1).strip()
